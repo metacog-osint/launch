@@ -342,7 +342,7 @@ def nga_warnings(doc) -> list[dict]:
         text = str(w.get("text") or "").replace("\r", "").strip()
         try:
             parsed = ngawarn.parse_body(text, issued)
-        except ValueError:  # Orbit's parser raises on a time written 2400Z: not read, counted (fix it in Orbit first)
+        except ValueError:  # a text the copied parser cannot read: not read, counted (fix it in Orbit first)
             NGA_UNREAD.append(f"{area} {w.get('msgNumber')}/{w.get('msgYear')}")
             continue
         if not parsed:
