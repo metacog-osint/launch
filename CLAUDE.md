@@ -44,7 +44,9 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   it, `chart_time` keeps the time in the charted name, `chart_labels` its other names.
 - **Joins:** a charted event and a GCAT launch within 3 h and 200 NM, or the same country when the vehicles do not
   differ (`catalog._other_vehicle()`: both read and neither name starts with the other) (pass 1; a suborbital
-  launch or missile needs the 200 NM, and a missile fired in combat joins no charted event), or within 72 h,
+  launch or missile needs the 200 NM, and a missile fired in combat joins no charted event; a charted pad at no
+  launch site, a path drawn from a point downrange, joins by the same vehicle or programme instead of place and the
+  record takes GCAT's pad and vehicle name, keeping the charted start as `chart_pad`), or within 72 h,
   200 NM and the same vehicle or programme (pass 2); a charted event holding a NOTAM that NotamForChina lists for a
   GCAT launch (pass 3). A joined record takes GCAT's launch time.
 - **Launch kinds** (16 Nov 2026: every one labelled, and each kind easy to show or hide on the map, the list and the

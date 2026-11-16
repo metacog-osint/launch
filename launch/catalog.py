@@ -943,10 +943,14 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     # (`_other_vehicle`; an ICBM charted at Wenchang joined Jiuquan's Lijian-1 before). Pass 2, for the rest: within
     # 72 hours, near in place and of the same vehicle or programme (a charted name often carries the scheduled time: a day early, or before a slip). A missile fired in combat
     # joins no charted event; any other suborbital launch joins in pass 1 only when near in place (a country's
-    # missile firings are too many for "same country" to tell them apart).
+    # missile firings are too many for "same country" to tell them apart). A charted event whose pad is at no
+    # launch site (its path drawn from a point downrange, as Starship Flight 6 of 19 Nov 2024 from 219 NM out in
+    # the Gulf) has no place to measure from: in pass 1 the same vehicle or programme stands in for "near", and the
+    # record takes GCAT's pad. A sea or air launch that joins as before keeps its charted point.
     def candidates(e, second: bool):
         e_progs = set(P.programmes(e.get("payload"), e.get("label"))[0])
         e_veh = P.vehicle(e.get("vehicle"))
+        no_site = bool(e.get("pad")) and chart_site.get(e["id"]) is None
         for g in gcat:
             gi = g_info[g["id"]]
             if gi["kind"] == P.COMBAT_LAUNCH:
@@ -961,12 +965,15 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                 tol = MATCH_HOURS if (e["time_basis"] == "time" and g.get("time")) else 30
                 country = bool(not sub and e.get("actor") and e["actor"] == g.get("country"))
                 near = (d is not None and d <= MATCH_NM) or (country and (d is None or same or not _other_vehicle(e_veh, gi["vehicle"])))
-                if h > tol or not near:
+                by_vehicle = not near and no_site and same
+                if h > tol or not (near or by_vehicle):
                     continue
             elif h > 72 or d is None or d > MATCH_NM or not same:
                 continue
-            yield h + (0 if same else 1.5) + (d or 0) / 400, g["id"], {"hours": round(h, 1), "nm": None if d is None else round(d),
-                                                                    "same": same, "pass": 2 if second else 1}
+            info = {"hours": round(h, 1), "nm": None if d is None else round(d), "same": same, "pass": 2 if second else 1}
+            if not second and by_vehicle:
+                info["pad_at_no_site"] = True
+            yield h + (0 if same else 1.5) + (d or 0) / 400, g["id"], info
 
     # Each charted event takes its best GCAT launch; several placemarks of one launch (one per notice, say)
     # all join it, and the page shows that launch once.
@@ -1254,17 +1261,23 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         status = ("launched" if g else "notice" if e["kind"] == "unknown" or not e.get("time") else
                   "upcoming" if future else "launched")
         veh = P.vehicle(e.get("vehicle"))
+        g_pad_used = bool(gi and gi["pad"] and (join.get(e["id"]) or {}).get("pad_at_no_site")
+                          and not (sites.get(g.get("site_code") or "") or {}).get("region"))
         r = {"id": e["id"], "status": status, "time": e.get("time"), "time_basis": e.get("time_basis"),
              "actor": e.get("actor") or (g or {}).get("country"), "label": e.get("label"),
-             "vehicle": veh if veh != P.NOT_KNOWN or not g else gi["vehicle"],
+             # joined by programme from a pad at no site, the charted name may be the operator's ("SpaceX"): GCAT's
+             "vehicle": gi["vehicle"] if g and (veh == P.NOT_KNOWN or (g_pad_used and same_vehicle(veh, gi["vehicle"]) is False)) else veh,
              "payload": e.get("payload") or ((g or {}).get("mission") or None),
-             "programmes": progs, "mtype": mtype, "pad": e.get("pad") or (gi["pad"] if gi else None),
+             "programmes": progs, "mtype": mtype,
+             "pad": gi["pad"] if g_pad_used else e.get("pad") or (gi["pad"] if gi else None),
              "site": (gi["site"] if gi and gi["site"] and gi["pad"] and e.get("pad") and  # GCAT names neighbouring pads
-                      notam.haversine_nm(e["pad"][1], e["pad"][0], gi["pad"][1], gi["pad"][0]) <= SITE_NM else None)
+                      (g_pad_used or notam.haversine_nm(e["pad"][1], e["pad"][0], gi["pad"][1], gi["pad"][0]) <= SITE_NM) else None)
                      or chart_site.get(e["id"]) or (gi["site"] if gi else None),
              "orbit": P.orbit_class((g or {}).get("category")), "kind": kind, "cancelled": e.get("cancelled"),
              "sources": ["chart"] + (["gcat"] if g else []), "chart": [m["id"] for m in grp],
              "areas": sum(len(m.get("areas") or []) for m in grp)}
+        if g_pad_used:
+            r["chart_pad"] = e["pad"]  # the charted start, at no launch site
         if len(grp) > 1:
             r["chart_labels"] = [m["label"] for m in grp if m is not e]
         if g:

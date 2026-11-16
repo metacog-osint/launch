@@ -340,6 +340,42 @@ class NotamForChina(unittest.TestCase):
         self.assertIsNone(catalog.same_vehicle(P.NOT_KNOWN, "LM-2C"))
 
 
+class PadAtNoSite(unittest.TestCase):
+    """A charted path drawn from a point downrange (Starship Flight 6, 19 Nov 2024: 219 NM out in the Gulf) left the
+    charted event unjoined and the launch listed twice."""
+
+    def build(self, events, launches):
+        return catalog.build_index({"events": events}, {"since": "2023-01-01", "sites": SITES, "launches": launches,
+                                                         "closures": []}, [], [], NOW)
+
+    def test_joins_by_time_and_vehicle_and_takes_gcats_pad(self):
+        sea = [-116.2, 33.5]  # about 230 NM from Vandenberg, at no launch site
+        ev = chart_event("hist:s", "2026-04-01T10:00:00Z", "Falcon 9", "Starlink 9-9", sea,
+                         paths=[[sea, [-115.0, 33.0]]], actor=None)
+        g = gcat_rec("2026-070", "2026-04-01T10:05:00Z", "Falcon 9", "Starlink 9-9", "VSFBS", country="US")
+        recs = {r["id"]: r for r in self.build([ev], [g])["records"]}
+        self.assertEqual(set(recs), {"hist:s"})  # one record, not two
+        r = recs["hist:s"]
+        self.assertEqual((r["gcat"], r["site"], r["join"]["pass"]), ("2026-070", "Vandenberg", 1))
+        self.assertEqual(r["pad"], [SITES["VSFBS"]["lon"], SITES["VSFBS"]["lat"]])
+        self.assertEqual(r["chart_pad"], sea)
+        self.assertEqual(r["path"]["kind"], "drawn")  # the charted line is still drawn as charted
+        op = chart_event("hist:v", "2026-04-01T10:00:00Z", "SpaceX", "Starlink 9-9", sea, actor=None)
+        r = [x for x in self.build([op], [g])["records"] if x["id"] == "hist:v"][0]
+        self.assertEqual((r["gcat"], r["vehicle"]), ("2026-070", "Falcon 9"))  # joined by programme; GCAT names the vehicle
+
+    def test_needs_the_same_vehicle_and_a_pad_at_no_site(self):
+        sea = [-116.2, 33.5]
+        g = gcat_rec("2026-071", "2026-04-01T10:05:00Z", "Falcon 9", "Starlink 9-9", "VSFBS", country="US")
+        other = chart_event("hist:t", "2026-04-01T10:00:00Z", "Minotaur IV", "NROL-1", sea, actor=None)
+        r = [x for x in self.build([other], [g])["records"] if x["id"] == "hist:t"][0]
+        self.assertNotIn("gcat", r)  # another vehicle at the same time is another launch
+        self.assertNotIn("chart_pad", r)
+        cape = chart_event("hist:u", "2026-04-01T10:00:00Z", "Falcon 9", "Starlink 9-9", [-80.54, 28.46], actor=None)
+        r = [x for x in self.build([cape], [g])["records"] if x["id"] == "hist:u"][0]
+        self.assertNotIn("gcat", r)  # a pad at a known site is measured from: the Cape is not Vandenberg
+
+
 class Suborbital(unittest.TestCase):
     """GCAT's suborbital launches and missile firings (LaunchCode S, Y, A, M, L): kinds, orbit, paths and joins."""
 
