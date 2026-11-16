@@ -113,6 +113,14 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   in its header, guards text cells against formulas and starts with a byte-order mark. GeoJSON and KML carry the
   sources and licences in their header, the CSV per row. Unnumbered NotamForChina areas carry their FIR.
   `greatCircle()` moved from `hmap.js` to `notam.js` so the export can use it without MapLibre.
+- **Path crosses** (15 Nov 2026; fourth of the old mapper's features, which only guessed "likely crosses land"):
+  `launch/overfly.py`, run by `build`, gives each record with a flight path `over`, the countries its ground track
+  crosses, one list per path (a charted event's two or three paths longest first), each `[{cc, from, to}]` in order,
+  NM from the path's start, from the kit's Natural Earth outlines
+  (`doctrine/kit/geo/countries.json`, de facto borders, 0.05 deg). Sampled every 5 NM; land only; gaps under 25 NM
+  over one country closed; an enclave the kit keeps without a hole (Lesotho) wins over its neighbour. Shown in the
+  detail card (with the caveat that a ground track is not
+  airspace), as the "Path crosses" filter (`ovf=` in the address) and in the downloads. About 4 s for all paths.
 - **Ranges** (15 Nov 2026; fifth of the old launch mapper's features): three from/to filters under the facets,
   `history.js` `RANGES`, in the address as `inc=`, `far=`, `plen=` (`lo-hi`, either end open, e.g. `inc=96-102`,
   `far=-500`): GCAT's payload inclination (`inc`), the farthest closure area's distance from the pad (`far_nm`,

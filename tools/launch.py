@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
-from launch import catalog, feed, fetch, gcat, history, joey, live, nfc, patterns, privacy, public, wayback  # noqa: E402
+from launch import catalog, feed, fetch, gcat, history, joey, live, nfc, overfly, patterns, privacy, public, wayback  # noqa: E402
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
@@ -271,9 +271,9 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     # Internet Archive copies of FAA space-operations TFRs and NGA warnings (history/wayback.json, `launch.py wayback build`).
     wb_path = root / "history" / "wayback.json"
     wb_doc = json.loads(wb_path.read_text(encoding="utf-8")) if wb_path.exists() else None
-    index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
-                                snap["generated_at"], nfc_doc, joey_doc, wb_doc)
     countries = json.loads((root / "doctrine" / "kit" / "geo" / "countries.json").read_text(encoding="utf-8"))
+    index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
+                                snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries))
     files = {"data/snapshot.json": dump(snap), "data/feed.geojson": dump(feed.build_feed(snap)),
              "data/sources.json": dump(sources_doc(root)),
              "data/history.json": dump(hist, compact=True),

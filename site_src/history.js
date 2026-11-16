@@ -54,6 +54,9 @@ const FACETS = [
   { k: "out", label: "Outcome", get: (r) => (r.status === "upcoming" ? "Scheduled" : r.outcome === "success" ? "Success" : r.outcome ? "Failure or partial" : NK) },
   { k: "src", label: "Source", get: (r) => r.sources, name: (v) => SOURCES[v] || v },
   { k: "path", label: "Flight path", get: (r) => (r.path ? (r.path.kind === "drawn" ? "As charted" : "Estimated from an azimuth") : "None"), },
+  // overfly.py: the countries the path's ground track crosses (land only).
+  { k: "ovf", label: "Path crosses", get: (r) => { const cc = r.over ? [...new Set(r.over.flat().map((o) => o.cc))] : []; return !r.over ? ["nopath"] : cc.length ? cc : ["water"]; },
+    name: (v) => (v === "nopath" ? "No flight path" : v === "water" ? "No land (water only)" : countryName(v)), flag: true, search: true },
 ];
 /* Ranges: key in the address (lo-hi, either end open), label, unit, how a record's number is read, presets. A record
    without the number is left out while its range is set. Inclination bands follow the Paste tab's orbit types. */
@@ -204,7 +207,7 @@ function renderFacets() {
           state.shown = PAGE; update(true);
         });
         lab.appendChild(cb);
-        if (f.flag && v) lab.appendChild(mark(v));
+        if (f.flag && /^[A-Z]{2}$/.test(v)) lab.appendChild(mark(v));
         lab.appendChild(el("span", "nm", f.name ? f.name(v) : v));
         lab.appendChild(el("span", "n", String(n)));
         if (f.note && f.note(v)) lab.title = `${v}: ${f.note(v)}`;
@@ -532,6 +535,11 @@ function detail(r) {
   if (r.path) fact(dl, "Flight path", r.path.kind === "drawn" ? `as charted (azimuth about ${r.path.az}°` + (r.path.len_nm ? `, ${r.path.len_nm.toLocaleString("en-US")} NM long)` : ")") : `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
   else if (r.kind && r.kind !== "Orbital" && r.kind !== NK) fact(dl, "Flight path", "none: a suborbital flight's path is drawn only as charted or towards its closure areas, and this one has neither");
   else fact(dl, "Flight path", r.pad ? "none: no closure area, inclination or corridor history to infer an azimuth from" : "none: no pad position");
+  if (r.over) {
+    const one = (p) => (p.length ? p.map((o) => `${countryName(o.cc)} ${o.from.toLocaleString("en-US")}–${o.to.toLocaleString("en-US")} NM`).join(", ") : "no land");
+    fact(dl, "Path crosses", (r.over.length > 1 ? r.over.map((p, i) => `charted path ${i + 1}${i ? "" : " (longest)"}: ${one(p)}`).join("; ") : one(r.over[0]))
+      + ". Land under the ground track, NM from the path's start (Natural Earth's de facto borders). Not airspace: a few hundred NM out the vehicle is in space.");
+  }
   if (r.join && r.join.pass === 3) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat} by a NOTAM that NotamForChina lists for this launch (same number and FIR)` + (r.join.hours > 1 ? `; the charted time is ${r.join.hours >= 8000 ? "about a year" : r.join.hours + " h"} out` : ""));
   else if (r.join) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat}: ${r.join.hours} h apart` + (r.join.nm !== null ? `, ${r.join.nm} NM apart` : "") + (r.join.same ? ", same vehicle or programme" : "") + (r.join.pass === 2 ? " (matched by vehicle and place; the map's time differs)" : ""));
   else if (r.gcat) fact(dl, "GCAT", r.gcat);
