@@ -340,6 +340,17 @@ class NotamForChina(unittest.TestCase):
         self.assertIsNone(catalog.same_vehicle(P.NOT_KNOWN, "LM-2C"))
 
 
+class AreaBearings(unittest.TestCase):
+    def test_bearings_come_from_the_records_pad(self):
+        # The import's bearing (from a line start inside the area) is stale once the pad is moved to the site.
+        area = {"centroid": [107.7417, 37.9917], "azimuth": 74.3, "downrange_nm": 10.7}
+        a = catalog._bear([111.585, 38.8587], [area])[0]
+        self.assertAlmostEqual(a["azimuth"], 255.5, delta=0.5)
+        self.assertAlmostEqual(a["downrange_nm"], 190, delta=2)
+        self.assertEqual(catalog.farthest_nm([111.585, 38.8587], [a]), round(a["downrange_nm"]))
+        self.assertEqual(catalog._bear([111.585, 38.8587], [{"ring": []}]), [{"ring": []}])  # no centroid: as it was
+
+
 class PadAtNoSite(unittest.TestCase):
     """A charted path drawn from a point downrange (Starship Flight 6, 19 Nov 2024: 219 NM out in the Gulf) left the
     charted event unjoined and the launch listed twice."""
