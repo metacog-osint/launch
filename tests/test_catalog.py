@@ -121,6 +121,21 @@ class Azimuths(unittest.TestCase):
         self.assertIsNone(catalog.infer_path(pad, "Wenchang", [{"from": 100, "to": 105, "events": 2}]))  # too few to use
         self.assertIsNone(catalog.infer_path(None, None, [], inc=50))
 
+    def test_paths_drawn_back_to_the_pad_are_turned_round(self):
+        wen = [110.95, 19.61]
+        sites = {"WEN": SITES["WEN"]}
+        back = {"id": "x", "pad": [120.0, 10.0], "paths": [[[120.0, 10.0], [115.0, 15.0], wen]]}
+        e = catalog.orient_paths(back, sites)
+        self.assertEqual(e["pad"], wen)
+        self.assertEqual(e["paths"][0][0], wen)
+        self.assertEqual(back["paths"][0][0], [120.0, 10.0])  # the source event is not changed
+        sea = {"id": "y", "pad": [125.0, 30.0], "paths": [[[125.0, 30.0], [130.0, 25.0]]]}  # starts at no site
+        self.assertIs(catalog.orient_paths(sea, sites), sea)
+        legs = {"id": "z", "pad": [125.0, 30.0], "paths": [[[125.0, 30.0], [130.0, 25.0]], [[120.0, 10.0], wen]]}
+        self.assertEqual(catalog.orient_paths(legs, sites)["pad"], wen)  # the first line starting at a site
+        later = {"id": "w", "pad": [125.0, 30.0], "paths": [[[125.0, 30.0], [130.0, 25.0]], [wen, [120.0, 10.0]]]}
+        self.assertEqual(catalog.orient_paths(later, sites)["pad"], wen)  # a later leg drawn first
+
     def test_path_length_and_farthest_area(self):
         # The History tab's range filters: a charted path's length (legs summed) and the farthest area's distance.
         one_deg = catalog.path_length_nm([[0.0, 0.0], [1.0, 0.0]])
@@ -191,6 +206,17 @@ class Index(unittest.TestCase):
         other = gcat_rec("2026-051", "2026-03-02T09:00:00Z", "Chang Zheng 5", "Something", "WEN")
         r = [x for x in self.build([ev], [other])["records"] if x["id"] == "hist:c"][0]
         self.assertNotIn("gcat", r)  # a different vehicle a day later is not the same launch
+
+    def test_same_country_far_away_needs_a_vehicle_that_does_not_differ(self):
+        # An ICBM charted 1,393 NM from Wenchang joined a Wenchang launch 71 minutes away (25 Sep 2024) by country alone.
+        far = [100.3, 40.96]
+        g = gcat_rec("2026-060", "2026-04-01T10:00:00Z", "Chang Zheng 7A", "Something", "WEN")
+        for veh, joined in (("ICBM", False), ("LM-7A", True), ("Unknown Rocket and Unknown Payload", True)):
+            ev = chart_event("hist:f", "2026-04-01T11:00:00Z", veh, "X", far)
+            r = [x for x in self.build([ev], [g])["records"] if x["id"] == "hist:f"][0]
+            self.assertEqual("gcat" in r, joined, veh)
+        self.assertFalse(catalog._other_vehicle("Pegasus", "Pegasus XL"))
+        self.assertTrue(catalog._other_vehicle("ICBM", "Lijian-1"))
 
     def test_upcoming_and_borrowed_inclination(self):
         g = gcat_rec("2026-200", "2026-10-01T00:00:00Z", "Falcon 9", "Starlink Group 11-1", "VSFBS", inc=53.0, country="US")

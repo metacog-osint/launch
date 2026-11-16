@@ -334,6 +334,22 @@ def farthest_nm(pad, areas: list[dict] | None) -> int | None:
     return round(max(d)) if pad and d else None
 
 
+def orient_paths(e: dict, sites: dict) -> dict:
+    """A charted event with its flight paths running from the pad outward. Some were drawn from the far end back to
+    the pad, and the import takes the first point of the first path as the pad: a line whose last point is a launch
+    site (within SITE_NM) and whose first is not is turned round, and a pad at no site becomes the first line's start that is.
+    Paths starting at no site (air and sea launches, drop-zone legs) are left as drawn."""
+    paths = e.get("paths") or []
+    if not paths or not sites:
+        return e
+    at_site = lambda q: nearest_site(q[1], q[0], sites) is not None
+    out = [list(reversed(ln)) if (not at_site(ln[0]) and at_site(ln[-1])) else ln for ln in paths]
+    pad = e.get("pad") if (e.get("pad") and at_site(e["pad"])) else next((ln[0] for ln in out if at_site(ln[0])), e.get("pad"))
+    if out == paths and pad == e.get("pad"):
+        return e
+    return dict(e, paths=out, pad=pad)
+
+
 def infer_path(pad, site: str | None, bands: list[dict], *, drawn=None, areas=None, inc=None, inc_note=None,
                orbit_code=None, orbit=None, suborbital=False) -> dict | None:
     """{kind, az, nm, basis} for a record, or None. `drawn`: the charted path lines; `areas`: [{azimuth, downrange_nm}];
@@ -405,6 +421,15 @@ NFC_SITE_CODE = {"Jiuquan": "JQ", "Xichang": "XSC", "Taiyuan": "TYSC", "Wenchang
 def _veh_key(v: str | None) -> str:
     """A vehicle name for comparing: GCAT lists LM-11S as LM-11 and Zhuque-2E as Zhuque-2."""
     return re.sub(r"(?<=\d)[SE]$", "", v or P.NOT_KNOWN)
+
+
+def _other_vehicle(a: str | None, b: str | None) -> bool:
+    """True when both vehicles are read and neither name starts with the other ("Pegasus" is "Pegasus XL"); a charted
+    name starting "Unknown" is not read."""
+    if not a or not b or P.NOT_KNOWN in (a, b) or a.upper().startswith("UNKNOWN"):
+        return False
+    x, y = _veh_key(a).upper(), _veh_key(b).upper()
+    return not (x.startswith(y) or y.startswith(x))
 
 
 def same_vehicle(a: str | None, b: str | None) -> bool | None:
@@ -877,7 +902,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                 nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None) -> dict:
     sites = ledger.get("sites") or {}
     nowdt = _dt(now)
-    events = chart_events(hist)
+    events = [orient_paths(e, sites) for e in chart_events(hist)]
     all_copies: dict[str, list] = {}
     for e in hist.get("events") or []:
         all_copies.setdefault(e["id"], []).append(e)
@@ -914,8 +939,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                            "time": g.get("time") or (g["date"] + "T12:00:00Z")}
 
     # Charted events <-> GCAT launches. Pass 1: within MATCH_HOURS (a day when either has no time), near in place or
-    # of the same country. Pass 2, for the rest: within 72 hours, near in place and of the same vehicle or programme
-    # (a charted name often carries the scheduled time: a day early, or before a slip). A missile fired in combat
+    # of the same country; a same-country launch farther than MATCH_NM only when the vehicles do not differ
+    # (`_other_vehicle`; an ICBM charted at Wenchang joined Jiuquan's Lijian-1 before). Pass 2, for the rest: within
+    # 72 hours, near in place and of the same vehicle or programme (a charted name often carries the scheduled time: a day early, or before a slip). A missile fired in combat
     # joins no charted event; any other suborbital launch joins in pass 1 only when near in place (a country's
     # missile firings are too many for "same country" to tell them apart).
     def candidates(e, second: bool):
@@ -933,8 +959,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             same = (e_veh != P.NOT_KNOWN and e_veh == gi["vehicle"]) or bool(e_progs & set(gi["progs"]))
             if not second:
                 tol = MATCH_HOURS if (e["time_basis"] == "time" and g.get("time")) else 30
-                if h > tol or not ((d is not None and d <= MATCH_NM) or
-                                   (not sub and e.get("actor") and e["actor"] == g.get("country"))):
+                country = bool(not sub and e.get("actor") and e["actor"] == g.get("country"))
+                near = (d is not None and d <= MATCH_NM) or (country and (d is None or same or not _other_vehicle(e_veh, gi["vehicle"])))
+                if h > tol or not near:
                     continue
             elif h > 72 or d is None or d > MATCH_NM or not same:
                 continue
@@ -1232,7 +1259,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
              "vehicle": veh if veh != P.NOT_KNOWN or not g else gi["vehicle"],
              "payload": e.get("payload") or ((g or {}).get("mission") or None),
              "programmes": progs, "mtype": mtype, "pad": e.get("pad") or (gi["pad"] if gi else None),
-             "site": chart_site.get(e["id"]) or (gi["site"] if gi else None),
+             "site": (gi["site"] if gi and gi["site"] and gi["pad"] and e.get("pad") and  # GCAT names neighbouring pads
+                      notam.haversine_nm(e["pad"][1], e["pad"][0], gi["pad"][1], gi["pad"][0]) <= SITE_NM else None)
+                     or chart_site.get(e["id"]) or (gi["site"] if gi else None),
              "orbit": P.orbit_class((g or {}).get("category")), "kind": kind, "cancelled": e.get("cancelled"),
              "sources": ["chart"] + (["gcat"] if g else []), "chart": [m["id"] for m in grp],
              "areas": sum(len(m.get("areas") or []) for m in grp)}

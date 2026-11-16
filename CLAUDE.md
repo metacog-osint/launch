@@ -42,7 +42,8 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   (Chinese launches 2012-2026 and their notices) and Joey0609/notams (launch NOTAMs with their text, mostly China's,
   Dec 2020 onward). A record's `sources` holds `chart`, `gcat`, `ll2`, `nfc`, `joey`, `wayback`; `chart` lists the charted events joined into
   it, `chart_time` keeps the time in the charted name, `chart_labels` its other names.
-- **Joins:** a charted event and a GCAT launch within 3 h and 200 NM or the same country (pass 1; a suborbital
+- **Joins:** a charted event and a GCAT launch within 3 h and 200 NM, or the same country when the vehicles do not
+  differ (`catalog._other_vehicle()`: both read and neither name starts with the other) (pass 1; a suborbital
   launch or missile needs the 200 NM, and a missile fired in combat joins no charted event), or within 72 h,
   200 NM and the same vehicle or programme (pass 2); a charted event holding a NOTAM that NotamForChina lists for a
   GCAT launch (pass 3). A joined record takes GCAT's launch time.
@@ -69,6 +70,12 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   Van Horn and Poker Flat flights.
   First build: 2,235 records (1,594 + 641); the 25 Sep 2024 ICBM charted event now joins GCAT's DF-31AG test
   2024-S55 (16 NM, 0 h) instead of the Wenchang orbital launch 2024-174 (1,393 NM).
+- **Pads and site names** (16 Nov 2026): some charted paths were drawn from the far end back to the pad, and the
+  import takes the first point of the first path as the pad. `catalog.orient_paths()` turns a line round when its
+  last point is a launch site (within `SITE_NM`) and its first is not, and moves a pad at no site to the first line
+  start that is one (28 pads were up to 4,800 NM off, with azimuths pointing backwards). A joined launch takes GCAT's
+  site name when GCAT's site is within `SITE_NM` of the pad (neighbouring pads: Wenchang and Hainan commercial,
+  Cape Canaveral and Kennedy); else the nearest site to the charted pad (sea launches, where GCAT's point is coarse).
 - **Flight paths:** a charted path is drawn as charted (a great circle per leg); otherwise it is estimated from the
   bearing to the closure areas, the payload's inclination, the orbit class's, or the site's most-used corridor.
   A suborbital launch or missile: as charted, or towards its farthest closure area (at any distance, drawn to it),
