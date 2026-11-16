@@ -3,6 +3,7 @@
    tab is history.js). Times are stored UTC and shown in the viewer's zone through tic-time.js. No inline scripts (CSP). */
 import { createMap } from "./map.js";
 import * as N from "./notam.js";
+import * as TR from "./traj.js";
 import { initHistory } from "./history.js";
 
 const T = window.TicTime;
@@ -149,24 +150,96 @@ function paste() {
     const parts = N.splitMany($("paste-text").value);
     if (!parts.length) { out.appendChild(muted("No NOTAM header or Q-line found.")); map.set("paste", null); return; }
     const feats = [];
-    parts.forEach((p) => {
+    trajAreas = [];
+    parts.forEach((p, k) => {
       let n;
       try { n = N.parse(p); } catch (err) { out.appendChild(muted("Could not read: " + err.message)); return; }
       const d = el("div", "paste-item");
       d.appendChild(el("p", "small", `${n.number || "Notice"}${n.q ? ` · ${n.q.fir} · ${n.q.code}` : ""}${n.q && n.q.subject_text ? ` (${n.q.subject_text}${n.q.condition_text ? ", " + n.q.condition_text : ""})` : ""}` +
         ` · ${n.start ? fmt(n.start.slice(0, 20)) : "?"} to ${n.end && n.end !== "PERM" ? fmt(n.end.slice(0, 20)) : n.end || "?"}` + (n.lower ? ` · ${n.lower} to ${n.upper}` : "")));
+      const areaShapes = n.shapes.filter((s) => s.ring || s.point);
       n.shapes.forEach((s) => {
         d.appendChild(el("p", "small muted", "Shape: " + s.derived));
+        if (s.ring || s.point) {
+          const label = (n.number || `Notice ${k + 1}`) + (areaShapes.length > 1 ? ` area ${areaShapes.indexOf(s) + 1}` : "");
+          trajAreas.push(s.ring ? { label, ring: s.ring } : { label, point: s.point });
+        }
         if (s.ring) feats.push(poly(s.ring, { key: "paste" }));
         if (s.line) feats.push({ type: "Feature", properties: { key: "paste" }, geometry: { type: "LineString", coordinates: s.line } });
       });
       n.rejected.forEach((r) => d.appendChild(el("p", "small badge-warn", `Not read: ${r.token} (${r.reason})`)));
       out.appendChild(d);
     });
-    const fc = { type: "FeatureCollection", features: feats };
-    map.set("paste", fc); if (feats.length) map.fit(fc);
+    pasteFc = { type: "FeatureCollection", features: feats };
+    map.set("paste", pasteFc); if (feats.length) map.fit(pasteFc);
+    trajRun(true);
   });
-  $("paste-clear").addEventListener("click", () => { $("paste-text").value = ""; out.textContent = ""; map.set("paste", null); });
+  $("paste-clear").addEventListener("click", () => { $("paste-text").value = ""; out.textContent = ""; map.set("paste", null); pasteFc = null; trajAreas = []; trajRun(false); });
+}
+
+/* ---------- trajectory from a pad (traj.js has the maths and its limits) ---------- */
+let pasteFc = null, trajAreas = [], trajPad = null, picking = false;
+const whole = (x) => Math.round(x).toLocaleString("en-US");
+const latLon = (lon, lat) => `${Math.abs(lat).toFixed(3)}° ${lat < 0 ? "S" : "N"}, ${Math.abs(lon).toFixed(3)}° ${lon < 0 ? "W" : "E"}`;
+const azText = (az) => `${az.toFixed(1)}° ${TR.compass(az)}`;
+function trajSetup() {
+  const sel = $("traj-pad"), btn = $("traj-click");
+  sel.append(new Option("Choose a launch site", ""));
+  [...ix.sites].sort((a, b) => a.name.localeCompare(b.name)).forEach((s) => sel.append(new Option(`${s.name} (${countryName(s.country)})`, s.name)));
+  const choose = (s) => { trajPad = s ? { name: s.name, lon: s.lon, lat: s.lat } : null; sel.value = s ? s.name : ""; trajRun(true); };
+  trajSetup.choose = choose;
+  sel.addEventListener("change", () => {
+    if (sel.value === "__point") return;
+    sel.querySelectorAll('option[value="__point"]').forEach((o) => o.remove());
+    choose(ix.sites.find((x) => x.name === sel.value));
+  });
+  const stop = () => { picking = false; btn.textContent = "or click the map"; map.pickPoint(null); };
+  btn.addEventListener("click", () => {
+    if (picking) { stop(); return; }
+    picking = true; btn.textContent = "Click the pad's position on the map (or here to cancel)";
+    map.pickPoint(([lon, lat]) => {
+      stop();
+      trajPad = { name: "Point clicked on the map", lon, lat };
+      sel.querySelectorAll('option[value="__point"]').forEach((o) => o.remove());
+      sel.append(new Option("Point: " + latLon(lon, lat), "__point")); sel.value = "__point";
+      trajRun(true);
+    });
+  });
+}
+function trajRun(fit) {
+  const out = $("traj-out");
+  $("traj").hidden = !trajAreas.length;
+  out.textContent = "";
+  map.set("traj", null); map.set("trajpad", null);
+  if (!trajAreas.length) return;
+  if (!trajPad) {
+    const centres = trajAreas.map((a) => (a.ring ? TR.areaCentre(a.ring).centre : a.point));
+    const near = ix.sites.map((s) => {
+      const p = [s.lon, s.lat];
+      const c = centres.reduce((best, x) => (TR.distNm(p, x) < TR.distNm(p, best) ? x : best));
+      const az = TR.bearing(p, c);
+      return { s, nm: TR.distNm(p, c), az, inc: TR.inclination(s.lat, az) };
+    }).sort((a, b) => a.nm - b.nm).slice(0, 5);
+    out.append(muted("No pad chosen. The launch sites nearest the pasted areas; choose one, or pick a pad above:"),
+      table(["Launch site", { label: "To the nearest area, NM", num: true }, "Azimuth", { label: "Implied inclination", num: true }],
+        near.map((r) => ({ r, cells: [r.s.name, whole(r.nm), azText(r.az), r.inc.toFixed(1) + "°"] })), (row) => trajSetup.choose(row.r.s)));
+    return;
+  }
+  const pad = [trajPad.lon, trajPad.lat];
+  const res = TR.analyse(pad, trajAreas), d = res.dogleg;
+  const say = !d.tested ? "One area: the dog-leg test needs two or more."
+    : !d.flagged ? `No sign of a dog-leg: every area lies on the great circle from the pad through ${d.farthest.label} (within ${TR.OFF_LINE_NM} NM).`
+    : `Possible dog-leg: ${d.worst.label} ${d.worst.line.behind ? "lies behind the pad" : `lies ${whole(d.worst.line.off)} NM outside the great circle from the pad through ${d.farthest.label}`}. It can also mean the areas are from different events.`;
+  out.append(el("p", "small", `${trajPad.name} (${latLon(pad[0], pad[1])}). `), el("p", d.flagged ? "small badge-warn" : "small", say));
+  const lineText = (r) => (!r.line ? "not tested" : r === d.farthest ? "sets the line" : r.line.behind ? "behind the pad" : r.line.on ? "on it" : `${whole(r.line.off)} NM off`);
+  out.append(el("div", "tbl-wrap"));
+  out.lastChild.append(table(["Area", "Azimuth", { label: "Distance NM", num: true }, { label: "km", num: true },
+    { label: "Implied inclination", num: true }, "Orbit type", "Mirrored azimuth", "On the line"],
+    res.rows.map((r) => ({ cells: [r.label, azText(r.az), whole(r.nm), whole(r.nm * 1.852), r.inc.toFixed(1) + "°", r.type, azText(r.mirror), lineText(r)] }))));
+  map.set("traj", { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: N.geodesic(res.path) } }] });
+  const padFeat = { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: pad } };
+  map.set("trajpad", { type: "FeatureCollection", features: [padFeat] });
+  if (fit) map.fit({ type: "FeatureCollection", features: [...((pasteFc && pasteFc.features) || []), padFeat] });
 }
 
 function sourcesBox() {
@@ -222,7 +295,7 @@ async function main() {
   const shown = showTab();
   const model = liveModel();
   map = await createMap($("map"), model, { onPick: (k) => { if (k.startsWith("live:") || k.startsWith("pad:")) pickLive(k); } });
-  patterns(); paste();
+  patterns(); paste(); trajSetup();
   map.resize();
   await shown;
   window.addEventListener("hashchange", () => {

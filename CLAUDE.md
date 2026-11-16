@@ -54,6 +54,16 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   holds (the 4 Feb 2025 Soyuz-2.1v/Volga launch, Plesetsk to the South Pacific) centre on the pad with the whole
   globe. The globe's scale follows the centre latitude (radius 512 * 2^z / (2pi cos lat)). A map made in a hidden
   tab gets its world zoom when first shown, and a switch at world view goes to the other projection's world view.
+- **Trajectory from a pad** (Paste tab, 15 Nov 2026; second of the old launch mapper's features): `site_src/traj.js`
+  (pure maths, tested in Node by `tests/test_traj.py`, which checks the inclination against `history.inclination()`)
+  and `app.js` `trajRun()`. Pad from Launch's 35 sites or a map click (`map.js` `pickPoint()`); with none chosen, the
+  five sites nearest the pasted areas, one click to choose. Per area (polygon, circle or point, nearest first):
+  azimuth and distance from the pad to its centre, implied inclination (cos i = cos lat * sin az), orbit type
+  (near-equatorial < 10, prograde < 85, near-polar to 95, retrograde; 96-102 named "sun-synchronous range"), the
+  mirrored azimuth (180 - az, same inclination on the other branch), and the dog-leg test: every area should lie on
+  the great circle from the pad through the farthest area; one more than 25 NM outside it (beyond its own radius) or
+  behind the pad is flagged, worded as a possible dog-leg or areas from different events. The map draws the great
+  circle pad -> areas (dashed) and the pad. Not ported: the old tool's typed-in dog-leg azimuth.
 - **One notice per NOTAM:** where the charted notices and NotamForChina hold the same NOTAM (number and a shared
   FIR), the charted text is shown and NotamForChina's ring is a check under it.
 - **Address:** filter state is in the address (`#history?veh=LM-7A&site=Wenchang&...`). Addresses from before
