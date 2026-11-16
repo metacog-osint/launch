@@ -34,7 +34,7 @@ function mark(cc) {
 }
 
 const STATUS = { launched: "Launched", upcoming: "Scheduled (next 14 days)", notice: "Notices with no identified launch" };
-const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina" };
+const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina", joey: "Joey0609/notams", wayback: "FAA and NGA notices (Internet Archive)" };
 const OUTCOME = { success: "Success", failure: "Failure", "": "Not known" };
 const NK = "Not known";
 
@@ -133,7 +133,9 @@ function hay(r) {
   r._hay = [r.label, r.vehicle, r.gcat_vehicle, r.ll2_vehicle, r.payload, r.flight, r.site, r.pad_name, r.gcat, r.mtype, r.orbit,
     countryName(r.actor), r.actor, ...(r.programmes || []), ...((r.payloads || {}).names || []), ...(r.chart_labels || []),
     ...charted.flatMap((e) => [e.extra, ...e.notams.map((n) => (n.number || "") + " " + ((n.q || {}).fir || ""))]),
-    ...(r.nfc_notices || []).map((n) => (n.number || "") + " " + (n.fir || "") + " " + (n.label || ""))]
+    ...(r.nfc_notices || []).map((n) => (n.number || "") + " " + (n.fir || "") + " " + (n.label || "")),
+    ...(r.joey_notices || []).map((n) => (n.number || "") + " " + (n.fir || "") + " " + (n.locations || []).join(" ")),
+    ...(r.archive_notices || []).map((n) => (n.number || n.id || "") + " " + (n.location || ""))]
     .filter(Boolean).join(" ").toUpperCase();
   return r._hay;
 }
@@ -499,6 +501,8 @@ function detail(r) {
   const evs = (r.chart || []).flatMap((id) => chartById.get(id) || []);
   const nfcN = r.nfc_notices || [];
   const nfcFor = (num) => nfcN.find((x) => x.chart && x.number === num);
+  const joeyN = r.joey_notices || [];
+  const joeyFor = (num) => joeyN.find((x) => x.chart && x.number === num);
   if (evs.length) {
     box.appendChild(el("h4", "", `Charted: ${r.areas} closure area${r.areas === 1 ? "" : "s"}, ${evs.reduce((n, e) => n + e.notams.length, 0)} notice(s)`));
     if (r.chart_labels) box.appendChild(el("p", "small muted", "Also charted as: " + r.chart_labels.join("; ")));
@@ -512,6 +516,8 @@ function detail(r) {
         (n.checks || []).forEach((c) => d.appendChild(el("p", "small muted", "Check: " + c)));
         const x = n.number && nfcFor(n.number);
         if (x) d.appendChild(el("p", "small muted", "Check: " + nfcCheck(x)));
+        const jx = n.number && joeyFor(n.number);
+        if (jx) d.appendChild(el("p", "small muted", "Check: " + joeyCheck(jx)));
         d.appendChild(el("pre", "", n.text));
         box.appendChild(d);
       });
@@ -526,7 +532,60 @@ function detail(r) {
     const wh = evs.reduce((n, e) => n + (e.withheld_notes || 0), 0);
     if (wh) box.appendChild(el("p", "muted small", `${wh} note(s) on the source map are not public notices and are not shown.`));
   }
+  if (joeyN.some((x) => !x.chart)) joeySection(box, r, joeyN, nfcN);
+  if ((r.archive_notices || []).length) archiveSection(box, r.archive_notices);
   if (r.nfc) nfcSection(box, r, nfcN);
+}
+
+/* Joey0609/notams' notices on a record: the NOTAM's own text, FIRs, window and area. One also charted is a check
+   under the charted notice; NotamForChina's copy of one is a check under it. */
+function joeyCheck(x) {
+  const agree = IX.joey ? IX.joey.agree_nm : 5;
+  if (x.gap_nm === undefined) return "Joey0609/notams lists this notice too.";
+  return x.gap_nm <= agree ? `Joey0609/notams holds this notice too; its area lies within ${x.gap_nm} NM of the charted one.`
+    : `Joey0609/notams holds this notice too, its area up to ${x.gap_nm} NM from the charted one: one of the two may be drawn for another notice.`;
+}
+function joeyJoin(j) {
+  if (!j) return "";
+  if (j.by === "notam") return "joined by its NOTAM (same number and FIR) on this launch's charted or NotamForChina notices";
+  const t = j.after_start_h;
+  return `joined by window and place: the launch came ${Math.abs(t)} h ${t < 0 ? "before the window opened" : "after it opened"}`
+    + (j.nm !== null && j.nm !== undefined ? `, ${j.nm} NM from the pad` : "") + (j.candidates > 1 ? ` (nearest of ${j.candidates} launches in the window)` : "");
+}
+/* FAA space-operations TFRs and NGA warnings read from Internet Archive copies, each linked to its capture. */
+function archiveSection(box, all) {
+  box.appendChild(el("h4", "", `From Internet Archive copies: ${all.length} notice${all.length === 1 ? "" : "s"}`));
+  all.forEach((n) => {
+    const d = el("details", "notam");
+    const when = n.kind === "faa-tfr" ? (n.start ? ` · ${fmt(n.start)} to ${fmt(n.end)}` : "")
+      : ((n.windows || [])[0] ? ` · ${fmt(n.windows[0].start)} to ${fmt(n.windows[0].end, { date: false })}` + (n.windows.length > 1 ? ` (+${n.windows.length - 1} more)` : "") : "");
+    d.appendChild(el("summary", "", (n.kind === "faa-tfr" ? `FAA TFR ${n.number || ""}` : `NGA ${n.id}`) + when));
+    if (n.join) d.appendChild(el("p", "small muted", "Its launch: " + joeyJoin(n.join) + "."));
+    if (n.location) d.appendChild(el("p", "small", n.location + (n.reason ? ` · ${n.reason}` : "")));
+    if (n.chart) d.appendChild(el("p", "small muted", "Check: the charted notices hold this warning too."));
+    if (n.text) d.appendChild(el("pre", "", n.text));
+    if (n.source) { const p = el("p", "small"); const a = el("a", "", "Archived copy"); a.href = n.source; a.rel = "noopener"; p.appendChild(a); d.appendChild(p); }
+    box.appendChild(d);
+  });
+  box.appendChild(el("p", "small muted", "Read from the Internet Archive's copies of tfr.faa.gov and msi.nga.mil: samples, not a complete record."));
+}
+function joeySection(box, r, all, nfcN) {
+  const own = all.filter((x) => !x.chart);
+  box.appendChild(el("h4", "", `From Joey0609/notams: ${own.length} notice${own.length === 1 ? "" : "s"}` + (all.length > own.length ? ` (and ${all.length - own.length} charted above)` : "")));
+  own.forEach((n) => {
+    const d = el("details", "notam");
+    const firs = [...new Set([n.fir, ...(n.locations || [])].filter((f) => f && f !== "ZXXX"))].join(" ");
+    d.appendChild(el("summary", "", (n.number || "Notice") + (n.part ? ` (${n.part})` : "") + (firs ? ` · ${firs}` : "") + (n.q_code ? ` · ${n.q_code}` : "") + (n.start ? ` · ${fmt(n.start)} to ${fmt(n.end)}` : "")));
+    if (n.join) d.appendChild(el("p", "small muted", "Its launch: " + joeyJoin(n.join) + "."));
+    if (n.named_states && n.named_states.length && n.issuing_state && !n.named_states.includes(n.issuing_state)) d.appendChild(el("p", "small badge-warn", `Relayed: issued by ${countryName(n.issuing_state)} for ${n.named_states.map(countryName).join(", ")}.`));
+    if (n.schedule) d.appendChild(el("p", "small", "Schedule: " + n.schedule));
+    const x = n.number && nfcN.find((y) => y.joey && y.number === n.number);
+    if (x) d.appendChild(el("p", "small muted", "Check: " + nfcCheck(x)));
+    if (!(n.rings || []).length) d.appendChild(el("p", "small muted", "No area read from its text."));
+    d.appendChild(el("pre", "", n.text || ""));
+    box.appendChild(d);
+  });
+  box.appendChild(el("p", "small muted", "Joey0609/notams (MIT) keeps the NOTAMs as the FAA's NOTAM search returned them; Launch keeps the launch-related ones and reads their areas. Credit on the Sources tab."));
 }
 
 /* NotamForChina's notices on a record: numbers, FIRs, windows and charted areas (it carries no NOTAM text). Those
@@ -539,6 +598,9 @@ const NFC_JOIN = {
   chart: (r, j) => `joined to a charted event: ${j.hours} h apart`,
 };
 function nfcCheck(x) {
+  if (x.joey) return x.gap_nm !== undefined
+    ? `NotamForChina lists this notice too; its charted area lies ${x.gap_nm <= (IX.nfc ? IX.nfc.agree_nm : 5) ? "within" : "up to"} ${x.gap_nm} NM of the area read from the text.`
+    : "NotamForChina lists this notice too" + (x.start ? ` (${fmt(x.start)} to ${fmt(x.end, { date: false })})` : "") + ".";
   if (x.gap_nm !== undefined) {
     const agree = IX.nfc ? IX.nfc.agree_nm : 5;
     return x.gap_nm <= agree ? `NotamForChina charts this notice too; its corners lie within ${x.gap_nm} NM of the charted area.`
@@ -548,9 +610,9 @@ function nfcCheck(x) {
   return "NotamForChina lists this notice" + (x.start ? ` (${fmt(x.start)} to ${fmt(x.end, { date: false })})` : "") + ".";
 }
 function nfcSection(box, r, all) {
-  const own = all.filter((x) => !x.chart);
+  const own = all.filter((x) => !x.chart && !x.joey);
   const charted = own.filter((x) => x.ring).length;
-  box.appendChild(el("h4", "", `From NotamForChina: ${own.length} notice${own.length === 1 ? "" : "s"}, ${charted} charted` + (all.length > own.length ? ` (and ${all.length - own.length} charted above)` : "")));
+  box.appendChild(el("h4", "", `From NotamForChina: ${own.length} notice${own.length === 1 ? "" : "s"}, ${charted} charted` + (all.length > own.length ? ` (and ${all.length - own.length} shown above)` : "")));
   const j = r.nfc_join;
   if (j && NFC_JOIN[j.by]) box.appendChild(el("p", "small muted", "Its launch record is " + NFC_JOIN[j.by](r, j) + "."));
   else if (r.nfc_unmatched) box.appendChild(el("p", "small badge-warn", "GCAT lists no launch of this vehicle near this time, so these notices have no identified launch: an attempt that was scrubbed or moved, or a sheet entry made ahead of a launch."));
@@ -641,6 +703,7 @@ export async function initHistory(ix, hist) {
   FIRST_YEAR = Math.min(2023, ...IX.records.filter((r) => r.time).map((r) => Number(r.time.slice(0, 4))));
   $("h-about").textContent = `${c.gcat} orbital launches GCAT lists since ${IX.ledger_since.slice(0, 4)}, ${c.chart} events in Launch's charted notices (${c.gcat_joined} GCAT launches joined to them), and Launch Library 2's schedule.`
     + (c.nfc ? ` NotamForChina adds the notices of ${c.nfc.records - c.nfc.own_records} of those launches, and ${c.nfc.own_launched} Chinese launches from ${FIRST_YEAR} to ${Number((IX.ledger_since || "2023").slice(0, 4)) - 1}.` : "")
+    + (c.joey ? ` Joey0609/notams adds NOTAM texts to ${c.joey.records} launches (${c.joey.notices - c.joey.unjoined} of its ${c.joey.notices} launch-related notices; the rest match no launch here).` : "")
     + ` Updated ${fmt(IX.generated_at)}.`;
   update(true); // filters and list first; the map follows when its base has loaded
   createHistoryMap($("hmap"), IX, { onPick: (id) => select(id, false), onSite: (name) => { state.f.site = [name]; update(true); } })

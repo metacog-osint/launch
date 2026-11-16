@@ -19,6 +19,7 @@ the farthest closure area or to DEFAULT_PATH_NM; it is not a ground track.
 """
 from __future__ import annotations
 
+import bisect
 import math
 import re
 from datetime import datetime, timedelta, timezone
@@ -532,6 +533,251 @@ def _nfc_join(doc: dict | None, gcat_recs: list[dict], g_info: dict) -> tuple[di
     return joined, loose, counts
 
 
+# ---------- Joey0609/notams ----------
+# history/joey.json (joey.py): launch-related NOTAMs, mostly China's and its downrange FIRs', Dec 2020 onward, with
+# their text and areas. Each notice goes to one record:
+#   1. by NOTAM: a notice that the charted notices or NotamForChina hold (same number and a shared FIR; a number is
+#      unique only within a FIR's series) goes to the record that holds it;
+#   2. by window and place: else to the GCAT launch whose time lies inside the notice's window, within JOEY_TOL_HOURS
+#      either side, whose country is the notice's (the state its text names, else the issuing FIR's state when GCAT
+#      lists launches by that state; else any), and whose pad lies within JOEY_NM of the notice's area. Of several,
+#      the nearest pad, then the nearest in time; a window over JOEY_LONG_HOURS (a launch period weeks long) joins
+#      only when one launch qualifies. A notice with no area joins only when one launch qualifies.
+#   3. else it joins nothing and is counted (`joey_unjoined`); no record is made for it.
+# On a record the charted text comes first: a Joey notice that is also charted is a check under it (`chart`, and
+# `gap_nm` from the charted area) and its area is not drawn. NotamForChina's notice that Joey also holds becomes the
+# check (`joey`, `gap_nm`) and Joey's area is drawn, since Joey's comes with the notice's text.
+
+JOEY_TOL_HOURS = 2     # replaced notices for a slip of an hour or two stay with the launch
+JOEY_NM = 5000         # Jiuquan to the Australian FIR's drop zones for Chinese launches is 4,300-4,900 NM
+JOEY_LONG_HOURS = 7 * 24
+JOEY_LICENCE_FILE = "data/JOEY-NOTAMS-LICENSE.txt"   # the site's copy of history/JOEY-NOTAMS-LICENSE.txt
+
+
+def joey_firs(n: dict) -> frozenset:
+    return _firs(n.get("fir") if n.get("fir") != "ZXXX" else None, *(n.get("locations") or []))
+
+
+def joey_actor(n: dict, launching: set) -> str | None:
+    """The state a notice is for: the one its text names, else the issuing FIR's state if it launches."""
+    if n.get("named_states"):
+        return n["named_states"][0]
+    return n.get("issuing_state") if n.get("issuing_state") in launching else None
+
+
+def _ring_centres(n: dict) -> list[tuple[float, float]]:
+    return [notam.centroid(r) for r in n.get("rings") or [] if len(r) >= 3]
+
+
+def joey_window_join(n: dict, gcat_recs: list[dict], g_info: dict, launching: set):
+    """(GCAT tag, join) for a notice by window and place (rule 2 above), or (None, reason)."""
+    start, end = _dt(n.get("start")), _dt(n.get("end"))
+    if not (start and end):
+        return None, "no window"
+    lo, hi = start - timedelta(hours=JOEY_TOL_HOURS), end + timedelta(hours=JOEY_TOL_HOURS)
+    actor = joey_actor(n, launching)
+    centres = _ring_centres(n)
+    cands = []
+    for g in gcat_recs:
+        gi = g_info[g["id"]]
+        t = _dt(gi["time"])
+        if not t or not (lo <= t <= hi) or not g.get("time"):
+            continue
+        if actor and g.get("country") != actor:
+            continue
+        d = None
+        if centres and gi["pad"]:
+            d = min(notam.haversine_nm(la, lo_, gi["pad"][1], gi["pad"][0]) for la, lo_ in centres)
+            if d > JOEY_NM:
+                continue
+        cands.append((d if d is not None else 0, abs((t - start).total_seconds()) / 3600, g, d))
+    if not cands:
+        return None, "no launch in the window"
+    long = (end - start).total_seconds() / 3600 > JOEY_LONG_HOURS
+    if len(cands) > 1 and (long or not centres):
+        return None, "several launches in the window"
+    best = min(cands, key=lambda c: (c[0], c[1]))
+    t = _dt(g_info[best[2]["id"]]["time"])
+    return best[2]["tag"], {"by": "window", "nm": None if best[3] is None else round(best[3]),
+                            "after_start_h": round((t - start).total_seconds() / 3600, 2),
+                            "candidates": len(cands)}
+
+
+def joey_notices(xs: list[dict], chart_events: list[dict]) -> list[dict]:
+    """A record's Joey notices for the page, each once; one that is charted is a check (`chart`, `gap_nm`)."""
+    chart_idx: dict[str, dict] = {}
+    for num, firs in chart_notice_keys(chart_events):
+        chart_idx.setdefault(num, {}).setdefault(firs, set()).add(num)
+    chart_rings: dict[str, list] = {}
+    for e in chart_events:
+        for a in e.get("areas") or []:
+            if a.get("notam") and a.get("ring"):
+                chart_rings.setdefault(a["notam"], []).append(a["ring"])
+    out, seen = [], set()
+    for n in xs:
+        if n["id"] in seen:
+            continue
+        seen.add(n["id"])
+        rec = {k: n.get(k) for k in ("id", "number", "part", "fir", "locations", "q_code", "start", "end", "schedule",
+                                     "lower", "upper", "issuing_state", "named_states", "created", "text", "rings")}
+        rec["join"] = n.get("join")
+        if _key_hits((n["number"], joey_firs(n)), chart_idx):
+            rec["chart"] = True
+            if rec["rings"] and chart_rings.get(n["number"]):
+                rec["gap_nm"] = min(ring_gap_nm(a, t) for a in rec["rings"] for t in chart_rings[n["number"]])
+            rec["rings"] = []
+            rec.pop("text")  # the charted copy carries it
+        if not rec["rings"]:
+            rec.pop("rings")
+        out.append(rec)
+    return out
+
+
+def joey_over_nfc(nfc_nn: list[dict], joey_nn: list[dict]) -> int:
+    """NotamForChina's notices that a Joey notice on the same record also holds become a check under it."""
+    idx: dict[str, dict] = {}
+    for j in joey_nn:
+        if not j.get("chart"):
+            idx.setdefault(j["number"], {}).setdefault(joey_firs(j), []).append(j)
+    n_over = 0
+    for x in nfc_nn:
+        if not x.get("number") or x.get("chart"):
+            continue
+        hits = [j for firs, js in (idx.get(x["number"]) or {}).items()
+                if not firs or not _firs(x.get("fir")) or firs & _firs(x.get("fir")) for j in js]
+        if not hits:
+            continue
+        x["joey"] = True
+        n_over += 1
+        rings = [r for j in hits for r in j.get("rings") or []]
+        if x.get("ring") and rings:
+            x["gap_nm"] = min(ring_gap_nm(x["ring"], r) for r in rings)
+            x.pop("ring")
+    return n_over
+
+
+# ---------- Internet Archive copies (FAA space-operations TFRs, NGA warnings) ----------
+# history/wayback.json (wayback.py). Each notice goes to at most one GCAT launch; none makes a record of its own.
+#   FAA TFR: a window of at most WB_TFR_MAX_DAYS (a standing months-long area is not one launch's) holding the launch
+#   time, WB_TOL_HOURS either side, with the launch's pad within WB_TFR_NM of one of the TFR's areas; nearest in time.
+#   A TFR with no area read joins nothing.
+#   NGA warning: one of its windows holding the launch time, WB_TOL_HOURS either side, with the pad within JOEY_NM of
+#   one of its areas; nearest pad. A warning whose windows span more than WB_LONG_HOURS joins only when one launch
+#   qualifies. A charted text naming the same warning ("HYDROPAC 1234/23") marks it `chart`.
+
+WB_TOL_HOURS = 2
+WB_TFR_NM = 100
+WB_TFR_MAX_DAYS = 7
+WB_LONG_HOURS = 7 * 24
+
+
+def _centre_of(coords: list) -> tuple[float, float] | None:
+    return notam.centroid(coords) if len(coords) >= 3 else ((coords[0][1], coords[0][0]) if coords else None)
+
+
+def _timed(gcat_recs: list[dict], g_info: dict) -> tuple[list, list]:
+    """GCAT launches with a time, sorted by it, and their times (for bisect)."""
+    rows = sorted(((_dt(g_info[g["id"]]["time"]), g) for g in gcat_recs if g.get("time") and _dt(g_info[g["id"]]["time"])),
+                  key=lambda x: x[0])
+    return [t for t, _ in rows], [g for _, g in rows]
+
+
+def _in_windows(timed: tuple[list, list], windows: list[tuple]) -> list[dict]:
+    """The launches whose time lies in any window, WB_TOL_HOURS either side, each once."""
+    times, recs = timed
+    out, seen = [], set()
+    for s, e in windows:
+        lo = bisect.bisect_left(times, s - timedelta(hours=WB_TOL_HOURS))
+        hi = bisect.bisect_right(times, e + timedelta(hours=WB_TOL_HOURS))
+        for g in recs[lo:hi]:
+            if g["id"] not in seen:
+                seen.add(g["id"])
+                out.append(g)
+    return out
+
+
+def wayback_join(windows: list[tuple], centres: list, max_nm: float, timed: tuple[list, list], g_info: dict,
+                 by_time: bool):
+    """(GCAT tag, join) or (None, reason). windows: [(start, end) datetimes]; centres: [(lat, lon)]."""
+    if not windows:
+        return None, "no window"
+    if not centres:
+        return None, "no area"
+    cands = []
+    for g in _in_windows(timed, windows):
+        gi = g_info[g["id"]]
+        t = _dt(gi["time"])
+        if not gi["pad"]:
+            continue
+        w = next(((s, e) for s, e in windows if s - timedelta(hours=WB_TOL_HOURS) <= t <= e + timedelta(hours=WB_TOL_HOURS)), None)
+        if not w:
+            continue
+        d = min(notam.haversine_nm(la, lo, gi["pad"][1], gi["pad"][0]) for la, lo in centres)
+        if d > max_nm:
+            continue
+        cands.append((abs((t - w[0]).total_seconds()) / 3600, d, g, t - w[0]))
+    if not cands:
+        return None, "no launch in the window"
+    span = (max(e for _, e in windows) - min(s for s, _ in windows)).total_seconds() / 3600
+    if len(cands) > 1 and span > WB_LONG_HOURS:
+        return None, "several launches in the window"
+    best = min(cands, key=lambda c: (c[0], c[1]) if by_time else (c[1], c[0]))
+    return best[2]["tag"], {"by": "window", "nm": round(best[1]), "after_start_h": round(best[3].total_seconds() / 3600, 2),
+                            "candidates": len(cands)}
+
+
+def wayback_targets(doc: dict | None, gcat_recs: list[dict], g_info: dict, chart_texts: str) -> tuple[dict, dict]:
+    """{GCAT tag: [notices for the page]} and counts."""
+    counts = {"tfrs": 0, "tfr_joined": 0, "nga": 0, "nga_joined": 0, "nga_chart": 0,
+              "unjoined_why": {}, "joined_by_year": {}, "unjoined_by_year": {}}
+    out: dict[str, list] = {}
+    if not doc:
+        return out, counts
+
+    def tally(kind, when, tag, why):
+        y = (when or "????")[:4]
+        k = "joined_by_year" if tag else "unjoined_by_year"
+        counts[k].setdefault(kind, {})
+        counts[k][kind][y] = counts[k][kind].get(y, 0) + 1
+        if not tag:
+            counts["unjoined_why"][f"{kind}: {why}"] = counts["unjoined_why"].get(f"{kind}: {why}", 0) + 1
+
+    timed = _timed(gcat_recs, g_info)
+    for t in doc.get("tfrs") or []:
+        counts["tfrs"] += 1
+        s, e = _dt(t.get("start")), _dt(t.get("end"))
+        windows = [(s, e)] if s and e and (e - s) <= timedelta(days=WB_TFR_MAX_DAYS) else []
+        centres = [c for a in t.get("areas") or [] if (c := _centre_of(a["ring"]))]
+        tag, j = wayback_join(windows, centres, WB_TFR_NM, timed, g_info, by_time=True)
+        if s and e and not windows:
+            tag, j = None, f"window over {WB_TFR_MAX_DAYS} days"
+        tally("tfr", t.get("start") or t.get("list_date"), tag, j)
+        if tag:
+            counts["tfr_joined"] += 1
+            out.setdefault(tag, []).append({"kind": "faa-tfr", "id": t["id"], "number": t.get("number"),
+                                            "start": t.get("start"), "end": t.get("end"), "location": t.get("location"),
+                                            "reason": t.get("reason"), "rings": [a["ring"] for a in t.get("areas") or []],
+                                            "source": t.get("source"), "join": j})
+    for w in doc.get("nga") or []:
+        counts["nga"] += 1
+        windows = [(_dt(x["start"]), _dt(x["end"])) for x in w.get("windows") or [] if _dt(x["start"]) and _dt(x["end"])]
+        centres = [c for a in w.get("areas") or [] if (c := _centre_of(a["coords"]))]
+        tag, j = wayback_join(windows, centres, JOEY_NM, timed, g_info, by_time=False)
+        tally("nga", w.get("issued"), tag, j)
+        if tag:
+            counts["nga_joined"] += 1
+            rec = {"kind": "nga", "id": w["id"], "issued": w.get("issued"), "hazard": w.get("hazard"),
+                   "windows": w.get("windows"), "rings": [a["coords"] for a in w.get("areas") or [] if len(a["coords"]) >= 3],
+                   "text": w.get("text"), "source": w.get("source"), "join": j}
+            if w["id"] in chart_texts:
+                rec["chart"] = True
+                rec["rings"] = []
+                rec.pop("text")
+                counts["nga_chart"] += 1
+            out.setdefault(tag, []).append(rec)
+    return out, counts
+
+
 # ---------- the index ----------
 
 def _hours_apart(a: str | None, b: str | None) -> float | None:
@@ -590,7 +836,7 @@ def _bear(pad, areas: list[dict]) -> list[dict]:
 
 
 def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[dict], now: str,
-                nfc_doc: dict | None = None) -> dict:
+                nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None) -> dict:
     sites = ledger.get("sites") or {}
     nowdt = _dt(now)
     events = chart_events(hist)
@@ -724,6 +970,50 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     nfc_counts["by_chart"] = len(nfc_loose) - len(left) - by_notam
     nfc_loose = left
 
+    # Joey0609/notams (see the Joey section above): each notice to a target, "chart:<event id>", "gcat:<tag>" or
+    # "nfc:<NotamForChina launch id>", which the record loops below collect.
+    nfc_key_target: dict[str, dict] = {}
+    for tag, xs in nfc_by_tag.items():
+        for x in xs:
+            for k in nfc_notice_keys(x):
+                nfc_key_target.setdefault(k[0], {}).setdefault(k[1], set()).add("gcat:" + tag)
+    for eid, xs in nfc_by_chart.items():
+        for x in xs:
+            for k in nfc_notice_keys(x):
+                nfc_key_target.setdefault(k[0], {}).setdefault(k[1], set()).add("chart:" + eid)
+    for x in nfc_loose:
+        for k in nfc_notice_keys(x):
+            nfc_key_target.setdefault(k[0], {}).setdefault(k[1], set()).add("nfc:" + x["id"])
+    launching = {g.get("country") for g in gcat if g.get("country")}
+    joey_by: dict[str, list] = {}
+    joey_counts = {"notices": 0, "by_notam_chart": 0, "by_notam_nfc": 0, "by_window": 0, "window_several": 0,
+                   "unjoined": 0, "unjoined_by_year": {}, "unjoined_why": {}}
+    for n in (joey_doc or {}).get("notices") or []:
+        joey_counts["notices"] += 1
+        key = (n["number"], joey_firs(n))
+        hits = {"chart:" + eid for eid in _key_hits(key, chart_by_key)}
+        how = "by_notam_chart"
+        if not hits:
+            hits, how = _key_hits(key, nfc_key_target), "by_notam_nfc"
+        if hits:
+            joey_by.setdefault(sorted(hits)[0], []).append({**n, "join": {"by": "notam"}})
+            joey_counts[how] += 1
+            continue
+        tag, j = joey_window_join(n, gcat, g_info, launching)
+        if tag:
+            joey_by.setdefault("gcat:" + tag, []).append({**n, "join": j})
+            joey_counts["by_window"] += 1
+            joey_counts["window_several"] += j["candidates"] > 1
+            continue
+        joey_counts["unjoined"] += 1
+        y = (n.get("start") or "????")[:4]
+        joey_counts["unjoined_by_year"][y] = joey_counts["unjoined_by_year"].get(y, 0) + 1
+        joey_counts["unjoined_why"][j] = joey_counts["unjoined_why"].get(j, 0) + 1
+
+    # Internet Archive copies (see that section above): FAA space-operations TFRs and NGA warnings, by GCAT tag.
+    chart_texts = " ".join(t for e in hist.get("events") or [] for t in e.get("texts") or [])
+    wb_by, wb_counts = wayback_targets(wayback_doc, gcat, g_info, chart_texts)
+
     # The inclination of the last launch of the same programme (else the same vehicle, when its recent launches
     # agree) from the same site: for a launch whose own payloads have none yet, and for scheduled launches.
     inc_hist: dict[tuple, list] = {}
@@ -774,6 +1064,36 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             if n.get("ring"):
                 la, lo = notam.centroid(n["ring"])
                 out.append({"ring": n["ring"], "centroid": [round(lo, 4), round(la, 4)]})
+        return out
+
+    def add_wayback(r: dict, tag: str | None) -> list[dict]:
+        """The archive copies' notices on the record; returns their areas (for the path estimate)."""
+        xs = wb_by.get(tag or "", [])
+        if not xs:
+            return []
+        r["archive_notices"] = [{k: v for k, v in x.items() if not (k == "rings" and not v)} for x in xs]
+        r["sources"].append("wayback")
+        out = []
+        for x in xs:
+            for ring in x.get("rings") or []:
+                la, lo = notam.centroid(ring)
+                out.append({"ring": ring, "centroid": [round(lo, 4), round(la, 4)]})
+        return out
+
+    def add_joey(r: dict, targets: list[str], evs: list[dict]) -> list[dict]:
+        """Joey0609/notams' notices on the record; returns its areas to draw (for the path estimate)."""
+        xs = [n for t in targets for n in joey_by.get(t, [])]
+        if not xs:
+            return []
+        jn = joey_notices(xs, evs)
+        r["joey_notices"] = jn
+        r["sources"].append("joey")
+        joey_over_nfc(r.get("nfc_notices") or [], jn)
+        out = []
+        for n in jn:
+            for ring in n.get("rings") or []:
+                la, lo = notam.centroid(ring)
+                out.append({"ring": ring, "centroid": [round(lo, 4), round(la, 4)]})
         return out
 
     def finish(r: dict, *, drawn=None, areas=None, orbit_code=None):
@@ -849,6 +1169,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         extra = add_nfc(r, (nfc_by_tag.get(g["tag"], []) if g else []) +
                         [x for m in grp for x in nfc_by_chart.get(m["id"], [])],
                         [c for m in grp for c in all_copies.get(m["id"], [m])])
+        extra += add_joey(r, (["gcat:" + g["tag"]] if g else []) + ["chart:" + m["id"] for m in grp],
+                          [c for m in grp for c in all_copies.get(m["id"], [m])])
+        extra += add_wayback(r, g["tag"] if g else None)
         # bearings from the record's pad to every area of the group (placemarks without a path have none)
         areas = _bear(r.get("pad"), [a for m in grp for a in (m.get("areas") or [])] + extra)
         finish(r, drawn=[p for m in grp for p in (m.get("paths") or [])], areas=areas,
@@ -871,6 +1194,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         if link and link.get("lat") is not None:
             r["pad"], r["pad_basis"] = [link["lon"], link["lat"]], "ll2"
         extra = add_nfc(r, nfc_by_tag.get(g["tag"], []), [])
+        extra += add_joey(r, ["gcat:" + g["tag"]], [])
+        extra += add_wayback(r, g["tag"])
         finish(r, areas=list(cl) + _bear(r["pad"], extra), orbit_code=P.gcat_orbit_code(g.get("category")))
 
     # NotamForChina's launches that joined nothing. Before ledger_since GCAT's list here does not reach, so the
@@ -891,6 +1216,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         if status == "notice":
             r["nfc_unmatched"] = True
         extra = add_nfc(r, [x], [])
+        extra += add_joey(r, ["nfc:" + x["id"]], [])
         finish(r, areas=_bear(pad, extra))
 
     def ll2_rec(u: dict, status: str, provisional: bool):
@@ -942,6 +1268,15 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                          "charted": sum(1 for n in nn if n.get("ring")), "chart_held": sum(1 for n in nn if n.get("chart")),
                          "chart_disagree": sum(1 for n in nn if (n.get("gap_nm") or 0) > NFC_AGREE_NM),
                          "folded": sum(1 for n in nn if n.get("folded"))}
+    if joey_doc:
+        jn = [n for r in recs for n in r.get("joey_notices") or []]
+        counts["joey"] = {**joey_counts, "records": sum(1 for r in recs if r.get("joey_notices")),
+                          "on_records": len(jn), "drawn": sum(1 for n in jn if n.get("rings")),
+                          "chart_held": sum(1 for n in jn if n.get("chart")),
+                          "chart_disagree": sum(1 for n in jn if (n.get("gap_nm") or 0) > NFC_AGREE_NM),
+                          "nfc_held": sum(1 for r in recs for x in r.get("nfc_notices") or [] if x.get("joey"))}
+    if wayback_doc:
+        counts["wayback"] = {**wb_counts, "records": sum(1 for r in recs if r.get("archive_notices"))}
     used_sites = {r["site"] for r in recs if r.get("site")}
     site_list, seen = [], set()
     for s in sites.values():
@@ -959,4 +1294,11 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     if nfc_doc:
         out["nfc"] = {k: nfc_doc.get(k) for k in ("source", "commit", "licence", "attribution")}
         out["nfc"].update(licence_file=NFC_LICENCE_FILE, agree_nm=NFC_AGREE_NM)
+    if joey_doc:
+        out["joey"] = {k: joey_doc.get(k) for k in ("source", "commit", "licence", "attribution", "rule")}
+        out["joey"].update(licence_file=JOEY_LICENCE_FILE, agree_nm=NFC_AGREE_NM, tol_hours=JOEY_TOL_HOURS,
+                           nm=JOEY_NM)
+    if wayback_doc:
+        out["wayback"] = {"source": wayback_doc.get("source"), "rule": wayback_doc.get("rule"),
+                          "tol_hours": WB_TOL_HOURS, "tfr_nm": WB_TFR_NM, "tfr_max_days": WB_TFR_MAX_DAYS}
     return out

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
-from launch import catalog, feed, fetch, gcat, history, live, nfc, patterns, privacy, public  # noqa: E402
+from launch import catalog, feed, fetch, gcat, history, joey, live, nfc, patterns, privacy, public, wayback  # noqa: E402
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
@@ -258,8 +258,16 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     nfc_doc = json.loads(nfc_path.read_text(encoding="utf-8")) if nfc_path.exists() else None
     if nfc_doc and not lic_path.exists():
         raise SystemExit("history/nfc.json is here without history/NOTAMFORCHINA-LICENSE.txt: its licence goes with it.")
+    # Joey0609/notams (history/joey.json, `launch.py joey build`): launch-related NOTAMs with text, with its licence.
+    joey_path, jlic_path = root / "history" / "joey.json", root / "history" / "JOEY-NOTAMS-LICENSE.txt"
+    joey_doc = json.loads(joey_path.read_text(encoding="utf-8")) if joey_path.exists() else None
+    if joey_doc and not jlic_path.exists():
+        raise SystemExit("history/joey.json is here without history/JOEY-NOTAMS-LICENSE.txt: its licence goes with it.")
+    # Internet Archive copies of FAA space-operations TFRs and NGA warnings (history/wayback.json, `launch.py wayback build`).
+    wb_path = root / "history" / "wayback.json"
+    wb_doc = json.loads(wb_path.read_text(encoding="utf-8")) if wb_path.exists() else None
     index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
-                                snap["generated_at"], nfc_doc)
+                                snap["generated_at"], nfc_doc, joey_doc, wb_doc)
     countries = json.loads((root / "doctrine" / "kit" / "geo" / "countries.json").read_text(encoding="utf-8"))
     files = {"data/snapshot.json": dump(snap), "data/feed.geojson": dump(feed.build_feed(snap)),
              "data/sources.json": dump(sources_doc(root)),
@@ -269,6 +277,8 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
              "data/launches.json": dump(index, compact=True), "data/ledger.json": dump(ledger, compact=True)}
     if nfc_doc:
         files[catalog.NFC_LICENCE_FILE] = lic_path.read_text(encoding="utf-8")
+    if joey_doc:
+        files[catalog.JOEY_LICENCE_FILE] = jlic_path.read_text(encoding="utf-8")
     for p in sorted((root / "site_src").rglob("*")):
         if p.is_file():
             rel = p.relative_to(root / "site_src").as_posix()
@@ -327,7 +337,33 @@ def main(argv=None) -> int:
     sub.add_parser("check")
     n = sub.add_parser("nfc", help="NotamForChina: fetch its files at the pinned commit, or build history/nfc.json")
     n.add_argument("step", choices=["fetch", "build"])
+    j = sub.add_parser("joey", help="Joey0609/notams: fetch its month files at the pinned commit, or build history/joey.json")
+    j.add_argument("step", choices=["fetch", "build"])
+    w = sub.add_parser("wayback", help="Internet Archive copies of FAA space-operations TFRs and NGA warnings")
+    w.add_argument("step", choices=["fetch", "build"])
+    w.add_argument("--since", help="fetch TFR detail pages listed from this date (YYYY-MM-DD) only; newest first")
     a = ap.parse_args(argv)
+    if a.cmd == "wayback":
+        src = ROOT / "history" / "wayback_source"
+        if a.step == "fetch":
+            print("Wayback fetch:", wayback.fetch(src, log=lambda m: print(m, flush=True), since=a.since))
+            return 0
+        doc = wayback.build(src)
+        print("Wayback build:", wayback.summary(doc))
+        (ROOT / "history" / "wayback.json").write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
+        return 0
+    if a.cmd == "joey":
+        src = ROOT / "history" / "joey_source"
+        if a.step == "fetch":
+            print("Joey0609/notams fetch:", joey.fetch(src))
+            return 0
+        doc = joey.build(src)
+        print("Joey0609/notams build:", joey.summary(doc))
+        (ROOT / "history" / "joey.json").write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
+        lic = src / "LICENSE"
+        if lic.exists():
+            (ROOT / "history" / "JOEY-NOTAMS-LICENSE.txt").write_bytes(lic.read_bytes())
+        return 0
     if a.cmd == "nfc":
         src = ROOT / "history" / "nfc_source"
         if a.step == "fetch":

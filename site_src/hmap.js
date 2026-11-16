@@ -12,7 +12,11 @@ const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n
 const BIG = { US: "us", CN: "cn", RU: "ru" };
 const group = (cc) => BIG[cc] || "other";
 // NotamForChina's charted areas on a record (catalog.py leaves out the ring of a notice already charted).
-const nfcRings = (r) => (r.nfc_notices || []).filter((n) => n.ring && n.ring.length >= 3).map((n) => n.ring);
+const nfcRings = (r) => (r.nfc_notices || []).filter((n) => n.ring && n.ring.length >= 3).map((n) => n.ring)
+  // Joey0609/notams' areas (catalog.py leaves out those already charted)
+  .concat((r.joey_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)))
+  // FAA TFRs and NGA warnings from Internet Archive copies
+  .concat((r.archive_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)));
 
 const lineCache = new Map();
 const drawnCache = new WeakMap(); // a charted path or a closure ring (an array from the data) -> its great-circle line
@@ -33,7 +37,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
   const map = new ml.Map({
     container, style: first.style, center: [100, 30], zoom: worldZoom(container),
     dragRotate: false, pitchWithRotate: false, cooperativeGestures: true,
-    attributionControl: { compact: true, customAttribution: "Land: Natural Earth · Launches: GCAT (J. McDowell, CC BY 4.0), Launch Library 2, Launch's charted notices · Chinese notices: NotamForChina (mikezang, Apache-2.0)" },
+    attributionControl: { compact: true, customAttribution: "Land: Natural Earth · Launches: GCAT (J. McDowell, CC BY 4.0), Launch Library 2, Launch's charted notices · Chinese notices: NotamForChina (mikezang, Apache-2.0), Joey0609/notams (MIT)" },
   });
   map.touchZoomRotate.disableRotation();
   map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
