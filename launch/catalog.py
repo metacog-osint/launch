@@ -889,10 +889,13 @@ def _closure_list(cl: list[dict]) -> list[dict]:
 
 
 def _bear(pad, areas: list[dict]) -> list[dict]:
-    """Bearing and distance from the record's pad to each area that has a centroid and no bearing yet."""
+    """Bearing and distance from the record's pad to each area that has a centroid. Always from the record's pad: a
+    charted area carries the bearing the import took from the event's first point, which is stale when the pad was
+    moved (`orient_paths`, or GCAT's pad for a pad at no site): the LM-6A of 13 Jan 2026 read its Taiyuan drop zone
+    as 11 NM away at 74 deg, from a line start inside it, instead of 190 NM at 255 deg."""
     if not pad:
         return areas
-    return [a if a.get("azimuth") is not None or not a.get("centroid") else
+    return [a if not a.get("centroid") else
             {**a, "azimuth": round(history.bearing(pad[1], pad[0], a["centroid"][1], a["centroid"][0]), 1),
              "downrange_nm": round(notam.haversine_nm(pad[1], pad[0], a["centroid"][1], a["centroid"][0]), 1)}
             for a in areas]
