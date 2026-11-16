@@ -178,7 +178,11 @@ Shared copies (`tic-nav.*`, `tic-time.*`, `doctrine/kit/`) are reported, not fai
 
 ## Live lanes (`launch/live.py`)
 - `tfr`: FAA TFR list, map-service shapes (joined to the active list; the service keeps stale shapes) and the
-  XNOTAM XML of each SPACE OPERATIONS TFR. XML times carry a local-zone code, so TFR windows are shown as written.
+  XNOTAM XML of each SPACE OPERATIONS TFR. Windows are UTC (`live.tfr_windows`, 16 Nov 2026): from the NOTAM text's
+  "EFFECTIVE yymmddhhmm UTC ... UNTIL yymmddhhmm UTC" (or the range that ends the text), else `dateEffective` /
+  `dateExpire` read as UTC. `codeTimeZone` names the zone the FAA's page displays, not the zone of those fields
+  (FDC 6/7113, 15 Nov: 17:01-18:50 with codeTimeZone EST, text "2611151701 UTC ... UNTIL 2611151850 UTC").
+  Before this, TFRs had no window and were never time-matched.
 - `orbit`: Orbit's published `data/snapshot.json` (scheduled launches, GCAT launches, NGA navigational warnings).
 - `nms`: `waiting` until the FAA grants NOTAM Management Service access.
 - NotamForChina (`launch/nfc.py`, Apache-2.0, pinned commit `nfc.SHA`): `nfc fetch` copies its workbook and
