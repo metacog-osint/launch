@@ -135,6 +135,18 @@ export function fitCoords(map, coords, { padding = 50, maxZoom = 6, duration = 6
 /* The globe button, and each map's world view kept right: a map made in a hidden tab has no size, so its world
    zoom is wrong (a globe the size of a coin) until it has one. resize() fires moveend too, so "at world view" is
    only read while the map has a size and nothing is pending. */
+/* On a narrow map (a phone) MapLibre opens its compact credit box over the map; start it closed, behind its (i)
+   button: now (Launch's own credits open it when the map is made) and again at the load, in case the style's credits
+   opened it. The credits are also on the Sources tab. */
+export function collapseAttribution(map) {
+  const close = () => {
+    if (map.getContainer().offsetWidth > 640) return;
+    map.getContainer().querySelectorAll(".maplibregl-ctrl-attrib.maplibregl-compact-show").forEach((e) => e.classList.remove("maplibregl-compact-show"));
+  };
+  close();
+  map.once("load", close);
+}
+
 export function addProjectionToggle(map) {
   const ctl = new ProjectionToggle();
   map.addControl(ctl, "top-right");
@@ -159,6 +171,7 @@ export async function createMap(container, model, { onPick }) {
   map.touchZoomRotate.disableRotation();
   map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
   addProjectionToggle(map);
+  collapseAttribution(map);
   map.getCanvas().setAttribute("aria-label", "Map of launch and reentry closure areas. Every item on it is also listed on this page.");
   const data = { live: model.live, pads: model.pads, zones: EMPTY, paste: EMPTY, traj: EMPTY, trajpad: EMPTY };
   const note = (on) => {

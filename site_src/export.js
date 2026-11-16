@@ -119,6 +119,7 @@ export function properties(r, events, o) {
     programmes: (r.programmes || []).join("; "), mission_type: r.mtype || "", site: r.site || "", orbit: r.orbit || "",
     inclination_deg: r.inc ?? null, outcome: outcome(r), flight_path: pathName(r),
     path_azimuth_deg: r.path && r.path.az != null ? r.path.az : null, path_basis: (r.path && r.path.basis) || "",
+    path_length_nm: (r.path && r.path.len_nm) ?? null, farthest_area_nm: r.far_nm ?? null,
     notams: notams(r, events).join("; "), sources: (r.sources || []).map((s) => SOURCE[s] || s).join("; "),
     gcat: r.gcat || "", ll2: r.ll2_url || "", link: o.link(r.id),
   };
@@ -158,7 +159,8 @@ const kmlColour = (hex, alpha) => alpha + hex.slice(4, 6) + hex.slice(2, 4) + he
 const LABELS = { label: "Name", status: "Status", time_utc: "Time (UTC)", time_precision: "Time precision", country_name: "Country",
   vehicle: "Vehicle", payload: "Payload", programmes: "Programmes", mission_type: "Mission type", site: "Launch site",
   orbit: "Orbit", inclination_deg: "Inclination (deg)", outcome: "Outcome", flight_path: "Flight path",
-  path_azimuth_deg: "Path azimuth (deg)", path_basis: "Path basis", notams: "NOTAMs", sources: "Sources", gcat: "GCAT",
+  path_azimuth_deg: "Path azimuth (deg)", path_basis: "Path basis", path_length_nm: "Charted path length (NM)",
+  farthest_area_nm: "Farthest closure area (NM from the pad)", notams: "NOTAMs", sources: "Sources", gcat: "GCAT",
   ll2: "Launch Library 2", link: "On Launch" };
 
 export function toKML(rows, o) {
@@ -195,7 +197,7 @@ export function toKML(rows, o) {
 }
 
 /* ---------- CSV (RFC 4180; a byte-order mark so spreadsheet programs read it as UTF-8) ---------- */
-const NUMERIC = new Set(["pad_lat", "pad_lon", "inclination_deg", "path_azimuth_deg", "closure_areas"]);
+const NUMERIC = new Set(["pad_lat", "pad_lon", "inclination_deg", "path_azimuth_deg", "path_length_nm", "farthest_area_nm", "closure_areas"]);
 function cell(k, v) {
   if (v === null || v === undefined) return "";
   let s = String(v);
@@ -207,7 +209,7 @@ function cell(k, v) {
 export function toCSV(rows, o) {
   const cols = ["id", "status", "time_utc", "when_local", "time_precision", "country", "country_name", "label", "vehicle",
     "payload", "programmes", "mission_type", "site", "pad_lat", "pad_lon", "orbit", "inclination_deg", "outcome",
-    "flight_path", "path_azimuth_deg", "path_basis", "closure_areas", "notams", "sources", "gcat", "ll2", "link"];
+    "flight_path", "path_azimuth_deg", "path_basis", "path_length_nm", "farthest_area_nm", "closure_areas", "notams", "sources", "gcat", "ll2", "link"];
   const head = cols.map((c) => (c === "when_local" ? `when (${o.zone})` : c));
   const lines = [head.map((h) => cell("", h)).join(",")];
   rows.forEach((r) => {

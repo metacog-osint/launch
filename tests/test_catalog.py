@@ -121,6 +121,19 @@ class Azimuths(unittest.TestCase):
         self.assertIsNone(catalog.infer_path(pad, "Wenchang", [{"from": 100, "to": 105, "events": 2}]))  # too few to use
         self.assertIsNone(catalog.infer_path(None, None, [], inc=50))
 
+    def test_path_length_and_farthest_area(self):
+        # The History tab's range filters: a charted path's length (legs summed) and the farthest area's distance.
+        one_deg = catalog.path_length_nm([[0.0, 0.0], [1.0, 0.0]])
+        self.assertEqual(one_deg, 60)  # one degree of the equator is about 60 NM
+        self.assertEqual(catalog.path_length_nm([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]), 120)
+        self.assertEqual(catalog.path_length_nm([[0.0, 0.0]]), 0)
+        drawn = catalog.infer_path([0.0, 0.0], None, [], drawn=[[[0.0, 0.0], [1.0, 0.0]], [[0.0, 0.0], [3.0, 0.0], [4.0, 0.0]]])
+        self.assertEqual(drawn["len_nm"], 240)  # the longest line, as for its azimuth
+        areas = [{"azimuth": 120.0, "downrange_nm": 400.4}, {"azimuth": 290.0, "downrange_nm": 9500.6}, {"ring": []}]
+        self.assertEqual(catalog.farthest_nm([0, 0], areas), 9501)  # every area counts here, a splashdown too
+        self.assertIsNone(catalog.farthest_nm(None, areas))
+        self.assertIsNone(catalog.farthest_nm([0, 0], [{"ring": []}]))
+
 
 class Ledger(unittest.TestCase):
     def test_merge_keeps_fields_and_unions(self):

@@ -295,6 +295,17 @@ def site_bands(corridors: list[dict], sites: dict) -> dict[str, list[dict]]:
     return {k: sorted(v.values(), key=lambda b: b["from"]) for k, v in out.items()}
 
 
+def path_length_nm(line: list) -> int:
+    """Length of a charted path ([lon, lat] points, a great circle per leg), NM."""
+    return round(sum(notam.haversine_nm(a[1], a[0], b[1], b[0]) for a, b in zip(line, line[1:])))
+
+
+def farthest_nm(pad, areas: list[dict] | None) -> int | None:
+    """Distance from the pad to the record's farthest closure area (its centroid), NM; None without both."""
+    d = [a["downrange_nm"] for a in (areas or []) if a.get("downrange_nm") is not None]
+    return round(max(d)) if pad and d else None
+
+
 def infer_path(pad, site: str | None, bands: list[dict], *, drawn=None, areas=None, inc=None, inc_note=None,
                orbit_code=None, orbit=None) -> dict | None:
     """{kind, az, nm, basis} for a record, or None. `drawn`: the charted path lines; `areas`: [{azimuth, downrange_nm}];
@@ -303,7 +314,7 @@ def infer_path(pad, site: str | None, bands: list[dict], *, drawn=None, areas=No
         line = max(drawn, key=len)
         a, b = line[0], line[-1]
         return {"kind": "drawn", "az": round(history.bearing(a[1], a[0], b[1], b[0]), 1), "nm": None,
-                "basis": "path as charted"}
+                "len_nm": path_length_nm(line), "basis": "path as charted"}
     if not pad:
         return None
     ar = [x for x in (areas or []) if x.get("azimuth") is not None and x.get("downrange_nm")]
@@ -779,6 +790,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                           inc_note=note, orbit_code=orbit_code, orbit=r.get("orbit"))
         if path:
             r["path"] = path
+        far = farthest_nm(r.get("pad"), areas)
+        if far is not None:
+            r["far_nm"] = far
         recs.append(r)
 
     def attach_ll2(r: dict, link: dict | None):
