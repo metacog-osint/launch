@@ -1,0 +1,20 @@
+{
+  "program": "launch",
+  "version": "1.0",
+  "interests": [
+    {
+      "id": "LA-INT-1",
+      "about": "Orbit's scheduled launches, GCAT launches and launch-hazard navigational warnings are Launch's live inputs.",
+      "programs": [
+        "orbit"
+      ],
+      "anywhere": true,
+      "tiers": [
+        "routine",
+        "anomaly",
+        "warning"
+      ],
+      "indicator_id": "LA-IND-1"
+    }
+  ]
+}

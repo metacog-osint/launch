@@ -1,0 +1,305 @@
+"""Offline tests for the History tab's launch list (catalog.py, programs.py, gcat.py).
+Run: python -m unittest discover -s tests"""
+import sys
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from launch import catalog, gcat  # noqa: E402
+from launch import programs as P  # noqa: E402
+
+NOW = "2026-11-15T00:00:00Z"
+SITES = {
+    "WEN": {"name": "Wenchang", "gcat_name": "Wenchang", "lat": 19.6142, "lon": 110.9511, "country": "CN"},
+    "VOST": {"name": "Vostochny", "gcat_name": "Vostochniy", "lat": 51.7, "lon": 128.0, "country": "RU"},
+    "CC": {"name": "Cape Canaveral", "gcat_name": "Canaveral", "lat": 28.46, "lon": -80.54, "country": "US"},
+    "KSC": {"name": "Kennedy (KSC)", "gcat_name": "Kennedy", "lat": 28.6083, "lon": -80.6041, "country": "US"},
+    "VSFBS": {"name": "Vandenberg", "gcat_name": "Vandenberg", "lat": 34.63, "lon": -120.61, "country": "US"},
+}
+
+
+def gcat_rec(tag, time, vehicle, mission, site_code, category="Sat LEO O", inc=None, country="CN", names=None):
+    s = SITES[site_code]
+    return {"id": "gcat:" + tag, "source": "gcat", "tag": tag, "time": time, "date": time[:10], "vehicle_raw": vehicle,
+            "flight": mission, "mission": mission, "agency": "X", "country": country, "outcome": "success",
+            "kind": "orbital", "category": category, "site_code": site_code,
+            "site": {"name": s["gcat_name"], "lat": s["lat"], "lon": s["lon"], "country": s["country"]},
+            "pad_name": "", "payloads": {"count": 1, "names": names or [mission], "more": 0, "owners": [], "states": [],
+                                         "op_orbits": []}, "inc": inc, "updated": "2026-11-01T00:00:00Z"}
+
+
+def chart_event(eid, time, vehicle, payload, pad, paths=None, areas=None, actor="CN"):
+    return {"id": eid, "layer": "Previous Chinese Launches", "kind": "launch", "actor": actor, "label": f"x_{vehicle}_{payload}",
+            "extra": None, "cancelled": False, "vehicle": vehicle, "payload": payload, "time": time, "time_basis": "time",
+            "pad": pad, "areas": areas or [], "paths": paths or [], "points": [], "notams": [], "texts": [], "links": [],
+            "withheld_notes": 0}
+
+
+class Names(unittest.TestCase):
+    def test_vehicles(self):
+        for raw, want in [("LM-7A", "LM-7A"), ("Chang Zheng 7A", "LM-7A"), ("Long March 7A", "LM-7A"),
+                          ("Chang Zheng 2C/YZ-1S", "LM-2C"), ("LM-2F/G", "LM-2F"), ("Soyuz-2-1B", "Soyuz-2.1b"),
+                          ("SOYUZ 2.1B W/FREGAT", "Soyuz-2.1b"), ("Soyuz 2.1b/Fregat-M", "Soyuz-2.1b"),
+                          ("Gushenxing 1", "Ceres-1"), ("Shuang Quxian 1", "Hyperbola-1"), ("Yinli-1", "Gravity-1"),
+                          ("Falcon 9 FT5", "Falcon 9"), ("???", P.NOT_KNOWN), ("", P.NOT_KNOWN),
+                          ("LM-6A or 4B", "LM-6A or 4B")]:
+            self.assertEqual(P.vehicle(raw), want, raw)
+
+    def test_programmes(self):
+        self.assertEqual(P.programmes("Yaogan-40 04A-C")[0], ["Yaogan"])
+        self.assertEqual(P.programmes("Rassvet-3 G1")[1], "LEO broadband constellation")
+        self.assertEqual(P.programmes("Tongxin Jishu Shiyan 24")[0], ["TJS"])  # not also Shiyan
+        self.assertEqual(P.programmes("Xingwang Digui 27A-I")[0], ["Guowang (SatNet)"])
+        self.assertEqual(P.programmes("Shenzhou-20 Return")[1], "Reentry / landing")
+        self.assertEqual(P.programmes("Mystery payload"), ([], "Not classified"))
+        self.assertIn("assessed", P.NOTES["Yaogan"])
+        # Reviewed 15 Nov 2026
+        for text, want in [("25 Sep 24_0044 UTC_ICBM", "Missile / suborbital test"),  # "_" splits words
+                           ("WHG-03", "Communications"), ("Weixing Hulianwang Gaogui 01", "Communications"),
+                           ("GMM KA", "Test flight"), ("Test?", "Test flight"), ("Tatara-1R", "Rideshare"),
+                           ("Dragon C207.4", "Human spaceflight"), ("INSAT-2DS", "Weather"),
+                           ("MACH-TB?", "Missile / suborbital test"), ("FOBS Test", "Missile / suborbital test"),
+                           ("Multiple Payloads", "Rideshare")]:
+            self.assertEqual(P.programmes(text)[1], want, text)
+        self.assertEqual(P.programmes("Jielong-3 Multiple Payloads Tech Demo")[1], "Technology / experimental")
+
+    def test_payload_unknown(self):
+        for name in ["Unk Payload", "Unknown Payload DELAYED", "Payload Unk", "Payload", "UNK", "", None,
+                     "2240-0320 ???", "Poss Zhuque-3 Unk Payload"]:
+            self.assertTrue(P.payload_unknown(name), name)
+        for name in ["Horus 1", "Test", "Funky-1"]:
+            self.assertFalse(P.payload_unknown(name), name)
+        self.assertEqual(P.MTYPES[-1], "Not classified")  # catalog.py reads the last as "not classified"
+
+    def test_orbits(self):
+        self.assertEqual(P.orbit_class("Sat SSO D"), "SSO / polar")
+        self.assertEqual(P.orbit_class("Sat LSS O"), "Space station")
+        self.assertEqual(P.orbit_class(None, "PO"), "SSO / polar")
+        self.assertEqual(P.orbit_class("Test"), P.NOT_KNOWN)
+
+    def test_gcat_dates_and_agency(self):
+        self.assertEqual(gcat.vague_date("2026 Nov 12 0436:30")["time"], "2026-11-12T04:36:30Z")
+        self.assertEqual(gcat.vague_date("2026 Nov  4?")["date"], "2026-11-04")
+        self.assertTrue(gcat.vague_date("2026 Nov  4?")["uncertain"])
+        self.assertEqual(gcat.agency_country("CALT/CASC", {"CALT": {"state": "CN"}}), "CN")
+        self.assertEqual(gcat.agency_country("XX", {}), None)
+
+
+class Azimuths(unittest.TestCase):
+    def test_branches(self):
+        az, direct = catalog.branches(45.92, 51.64)  # Baikonur to the ISS: about 63 or 117 degrees
+        self.assertTrue(direct)
+        self.assertAlmostEqual(az[0], 63.2, delta=0.6)
+        self.assertAlmostEqual(az[1], 116.8, delta=0.6)
+        self.assertEqual(catalog.branches(28.5, 10.0), ([90.0], False))  # below the latitude: due east
+        polar = catalog.branches(34.6, 97.6)[0]  # retrograde: north-west or south-west
+        self.assertTrue(any(180 < a < 200 for a in polar) and any(340 < a < 360 for a in polar))
+
+    def test_choose(self):
+        bands = [{"from": 140, "to": 145, "events": 6}]
+        self.assertEqual(catalog.choose([40.0, 140.0], bands, None)[0], 140.0)
+        az, why = catalog.choose([350.0, 190.0], [], "Vandenberg", polar=True)
+        self.assertEqual(az, 190.0)
+        self.assertIn("south-going", why)
+        az, why = catalog.choose([40.0, 140.0], [], "Kourou")
+        self.assertEqual(az, 40.0)
+        self.assertIn("assumed", why)
+
+    def test_infer_path_order(self):
+        pad = [110.95, 19.61]
+        drawn = catalog.infer_path(pad, "Wenchang", [], drawn=[[[110.95, 19.61], [118.0, 15.0]]])
+        self.assertEqual(drawn["kind"], "drawn")
+        area = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400}, {"azimuth": 125.0, "downrange_nm": 900}], inc=50)
+        self.assertEqual((area["az"], area["nm"]), (125.0, 1035))
+        far = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400},
+                                                               {"azimuth": 290.0, "downrange_nm": 9500}])
+        self.assertEqual(far["az"], 120.0)  # a splashdown half a world away sets no azimuth
+        geo = catalog.infer_path(pad, "Wenchang", [], orbit="GTO / GEO")
+        self.assertEqual(geo["az"], 90.0)
+        self.assertIsNone(catalog.infer_path(pad, "Wenchang", [{"from": 100, "to": 105, "events": 2}]))  # too few to use
+        self.assertIsNone(catalog.infer_path(None, None, [], inc=50))
+
+
+class Ledger(unittest.TestCase):
+    def test_merge_keeps_fields_and_unions(self):
+        old = {"launches": [dict(gcat_rec("2026-001", "2026-01-01T00:00:00Z", "Chang Zheng 7A", "A", "WEN", inc=19.5), updated="2026-01-02T00:00:00Z")]}
+        new = {"launches": [dict(gcat_rec("2026-001", "2026-01-01T00:00:00Z", "Chang Zheng 7A", "A", "WEN"), outcome="failure",
+                                 updated="2026-01-03T00:00:00Z"),
+                            gcat_rec("2026-002", "2026-01-05T00:00:00Z", "Falcon 9", "B", "CC", country="US")]}
+        m = catalog.merge(old, None, new)
+        self.assertEqual(len(m["launches"]), 2)
+        a = m["launches"][0]
+        self.assertEqual(a["outcome"], "failure")  # the newer reading wins
+        self.assertEqual(a["inc"], 19.5)  # and a field it lacks is kept
+
+    def test_flown_and_closures(self):
+        up = [{"id": "u1", "net": "2026-11-14T01:00:00Z", "status": "Success", "name": "x", "lat": 51.88, "lon": 128.33},
+              {"id": "u2", "net": "2026-11-20T01:00:00Z", "status": "Go", "name": "y", "lat": 51.88, "lon": 128.33}]
+        f = catalog.flown_from_ll2(up, NOW)
+        self.assertEqual([x["id"] for x in f], ["ll2:u1"])
+        self.assertTrue(f[0]["provisional"])
+        cl = catalog.closures_from_matches(
+            [{"launch": "u2", "area": "A1", "level": "time and place", "area_source": "faa-tfr", "window": ["a", "b"]},
+             {"launch": "u2", "area": "A2", "level": "time"}],
+            [{"key": "A1", "ring": [[0, 0], [1, 0], [1, 1], [0, 0]]}, {"key": "A2", "ring": [[0, 0], [1, 0], [1, 1], [0, 0]]}], NOW)
+        self.assertEqual([c["area"] for c in cl], ["A1"])  # time-only coincidences are not kept
+
+
+class Index(unittest.TestCase):
+    def build(self, events, launches, upcoming=(), corridors=()):
+        return catalog.build_index({"events": events}, {"since": "2023-01-01", "sites": SITES, "launches": launches, "closures": []},
+                                   list(upcoming), list(corridors), NOW)
+
+    def test_chart_joins_gcat_and_placemarks_fold(self):
+        pad = [110.95, 19.61]
+        ev1 = chart_event("hist:a", "2026-05-26T16:16:00Z", "LM-7A", "TJS-24", pad, paths=[[pad, [120.0, 15.0]]])
+        ev2 = chart_event("hist:b", "2026-05-26T16:16:00Z", "LM-7A", "TJS-24 nav warning", None)
+        g = gcat_rec("2026-116", "2026-05-26T16:16:30Z", "Chang Zheng 7A", "TJS-24", "WEN", category="Sat GTO O", inc=0.04)
+        g2 = gcat_rec("2026-117", "2026-06-01T00:00:00Z", "Chang Zheng 5", "Other", "WEN")
+        ix = self.build([ev1, ev2], [g, g2])
+        recs = {r["id"]: r for r in ix["records"]}
+        self.assertEqual(set(recs), {"hist:a", "gcat:2026-117"})  # one record for the launch, one GCAT-only
+        r = recs["hist:a"]
+        self.assertEqual(r["chart"], ["hist:a", "hist:b"])
+        self.assertEqual((r["gcat"], r["vehicle"], r["site"], r["orbit"]), ("2026-116", "LM-7A", "Wenchang", "GTO / GEO"))
+        self.assertEqual(r["time"], "2026-05-26T16:16:30Z")  # GCAT's launch time
+        self.assertEqual(r["path"]["kind"], "drawn")
+        self.assertEqual(r["programmes"], ["TJS"])
+
+    def test_second_pass_needs_vehicle_and_place(self):
+        pad = [110.95, 19.61]
+        ev = chart_event("hist:c", "2026-03-01T10:00:00Z", "LM-7A", "Unknown", pad)  # the map's time is a day early
+        g = gcat_rec("2026-050", "2026-03-02T09:00:00Z", "Chang Zheng 7A", "Something", "WEN")
+        r = [x for x in self.build([ev], [g])["records"] if x["id"] == "hist:c"][0]
+        self.assertEqual(r["join"]["pass"], 2)
+        self.assertEqual(r["chart_time"], "2026-03-01T10:00:00Z")
+        other = gcat_rec("2026-051", "2026-03-02T09:00:00Z", "Chang Zheng 5", "Something", "WEN")
+        r = [x for x in self.build([ev], [other])["records"] if x["id"] == "hist:c"][0]
+        self.assertNotIn("gcat", r)  # a different vehicle a day later is not the same launch
+
+    def test_upcoming_and_borrowed_inclination(self):
+        g = gcat_rec("2026-200", "2026-10-01T00:00:00Z", "Falcon 9", "Starlink Group 11-1", "VSFBS", inc=53.0, country="US")
+        up = {"id": "u9", "name": "Falcon 9 | Starlink Group 11-9", "net": "2026-11-20T00:00:00Z", "status": "Go",
+              "vehicle": "Falcon 9 Block 5", "mission": "Starlink Group 11-9", "orbit": "LEO", "provider_countries": ["US"],
+              "location": "Vandenberg SFB, CA, USA", "lat": 34.632, "lon": -120.611}
+        ix = self.build([], [g], [up])
+        r = [x for x in ix["records"] if x["id"] == "ll2:u9"][0]
+        self.assertEqual((r["status"], r["site"], r["mtype"]), ("upcoming", "Vandenberg", "LEO broadband constellation"))
+        self.assertIn("last Starlink launch from Vandenberg", r["path"]["basis"])
+        self.assertGreater(r["path"]["az"], 90)  # Vandenberg launches go south
+        self.assertLess(r["path"]["az"], 270)
+
+    def test_site_named_by_launch_library_wins(self):
+        # SLC-41 is closer to GCAT's coarse Kennedy point than to its Canaveral point; the place name decides.
+        self.assertEqual(catalog.nearest_site(28.583, -80.583, SITES, place="Cape Canaveral SFS, FL, USA"), "Cape Canaveral")
+        self.assertEqual(catalog.nearest_site(28.583, -80.583, SITES), "Kennedy (KSC)")
+
+
+
+def ring(lon, lat, d=0.5):
+    return [[lon, lat], [lon + d, lat], [lon + d, lat - d], [lon, lat - d], [lon, lat]]
+
+
+def nfc_launch(nid, time, vehicle_zh, site, notices, gcat=None):
+    return {"id": nid, "vehicle": None, "vehicle_zh": vehicle_zh, "site": site, "site_zh": None, "time": time,
+            "date": time[:10] if time else None, "notices": notices, "paths": [], "from": ["map"], "gcat": gcat}
+
+
+def nn(fir, number=None, start=None, end=None, rg=None, label=None):
+    return {"fir": fir, "number": number, "label": label, "start": start, "end": end, "ring": rg}
+
+
+class NotamForChina(unittest.TestCase):
+    def build(self, events, launches, launches_nfc):
+        doc = {"source": "github.com/mikezang/NotamForChina", "commit": "x" * 40, "licence": "Apache-2.0",
+               "attribution": "NotamForChina by mikezang", "launches": launches_nfc}
+        return catalog.build_index({"events": events}, {"since": "2023-01-01", "sites": SITES, "launches": launches,
+                                                         "closures": []}, [], [], NOW, doc)
+
+    def recs(self, ix):
+        return {r["id"]: r for r in ix["records"]}
+
+    def test_notices_join_by_tag_and_areas_are_drawn(self):
+        g = gcat_rec("2024-100", "2024-06-01T10:00:00Z", "Chang Zheng 7A", "X", "WEN")
+        x = nfc_launch("nfc:1", "2024-06-01T10:00:00Z", "长征七号甲", "Wenchang",
+                       [nn("ZJSA", "A1000/24", rg=ring(112, 18)), nn("ZJSA", "A1000/24", "2024-06-01T09:50:00Z", "2024-06-01T10:40:00Z")],
+                       gcat="2024-100")
+        ix = self.build([], [g], [x])
+        r = self.recs(ix)["gcat:2024-100"]
+        self.assertEqual(r["sources"], ["gcat", "nfc"])
+        self.assertEqual(len(r["nfc_notices"]), 1)  # one notice: the sheet's window folded into the charted area
+        self.assertEqual(r["nfc_notices"][0]["start"], "2024-06-01T09:50:00Z")
+        self.assertIn("closure area", r["path"]["basis"])  # the charted area sets the azimuth
+        self.assertEqual(ix["nfc"]["licence"], "Apache-2.0")
+        self.assertEqual(ix["nfc"]["licence_file"], catalog.NFC_LICENCE_FILE)
+
+    def test_a_tag_to_another_vehicle_is_refused(self):
+        g = gcat_rec("2024-101", "2024-06-01T10:00:00Z", "Lijian-1", "X", "WEN")
+        x = nfc_launch("nfc:2", "2024-06-01T10:05:00Z", "快舟一号甲", "Wenchang", [nn("ZJSA", "A1001/24")], gcat="2024-101")
+        r = self.recs(self.build([], [g], [x]))
+        self.assertNotIn("nfc", r["gcat:2024-101"])
+        self.assertEqual(r["nfc:2"]["status"], "notice")  # GCAT covers 2024 and lists no such launch
+        self.assertTrue(r["nfc:2"]["nfc_unmatched"])
+
+    def test_untagged_joins_by_vehicle_and_time_else_stands_alone(self):
+        g = gcat_rec("2023-145", "2023-09-17T04:13:00Z", "Chang Zheng 2D", "X", "WEN")
+        x = nfc_launch("nfc:3", "2023-09-17T04:13:00Z", "长征二号丁", "Jiuquan", [nn("ZLHW", rg=ring(100, 40))])
+        old = nfc_launch("nfc:4", "2019-01-01T00:00:00Z", "长征二号F", "Wenchang", [nn("ZJSA", rg=ring(112, 18))])
+        undated = nfc_launch("nfc:5", None, None, None, [nn("ZBPE", rg=ring(110, 40))])
+        ix = self.build([], [g], [x, old, undated])
+        r = self.recs(ix)
+        self.assertEqual(r["gcat:2023-145"]["nfc_join"], {"by": "vehicle", "hours": 0.0})  # the folder named another site
+        self.assertEqual((r["nfc:4"]["status"], r["nfc:4"]["vehicle"], r["nfc:4"]["site"], r["nfc:4"]["sources"]),
+                         ("launched", "LM-2F", "Wenchang", ["nfc"]))  # before GCAT's list here: NotamForChina's word
+        self.assertNotIn("nfc:5", r)
+        self.assertEqual(ix["counts"]["nfc"]["undated"], 1)
+
+    def test_one_notice_with_toms_text_and_nfc_ring_as_a_check(self):
+        pad = [110.95, 19.61]
+        ev = chart_event("hist:t", "2025-03-01T10:00:00Z", "LM-7A", "Y", pad,
+                       areas=[{"ring": ring(112, 18), "notam": "A0500/25", "centroid": [112.25, 17.75]}])
+        ev["notams"] = [{"number": "A0500/25", "q": {"fir": "ZJSA"}, "locations": ["ZJSA"], "text": "x", "start": None, "end": None}]
+        g = gcat_rec("2025-050", "2025-03-01T10:00:00Z", "Chang Zheng 7A", "Y", "WEN")
+        x = nfc_launch("nfc:6", "2025-03-01T10:00:00Z", "长征七号甲", "Wenchang",
+                       [nn("ZJSA", "A0500/25", rg=ring(112.01, 18)), nn("ZGZU", "A0500/25", rg=ring(116, 20)),
+                        nn("ZJSA", "A0501/25", rg=ring(113, 17))], gcat="2025-050")
+        r = self.recs(self.build([ev], [g], [x]))["hist:t"]
+        by = {(n["number"], n["fir"]): n for n in r["nfc_notices"]}
+        self.assertTrue(by[("A0500/25", "ZJSA")]["chart"])
+        self.assertNotIn("ring", by[("A0500/25", "ZJSA")])  # the charted area is drawn; NotamForChina's is the check
+        self.assertLess(by[("A0500/25", "ZJSA")]["gap_nm"], catalog.NFC_AGREE_NM)
+        self.assertNotIn("chart", by[("A0501/25", "ZJSA")])
+        # the same number in another FIR is another NOTAM
+        self.assertEqual(len(r["nfc_notices"]), 3)
+        self.assertNotIn("chart", by[("A0500/25", "ZGZU")])
+
+    def test_a_shared_notam_joins_toms_misdated_event(self):
+        ev = chart_event("hist:y", "2025-03-12T22:33:00Z", "LM-2D", "Z", [100.3, 40.96])  # the map's name is a year out
+        ev["notams"] = [{"number": "A0600/26", "q": {"fir": "ZLHW"}, "locations": ["ZLHW"], "text": "x"}]
+        g = gcat_rec("2026-048", "2026-03-12T22:33:00Z", "Chang Zheng 2D", "Z", "WEN")
+        x = nfc_launch("nfc:7", "2026-03-12T22:33:00Z", "长征二号丁", "Wenchang", [nn("ZLHW", "A0600/26")], gcat="2026-048")
+        ix = self.build([ev], [g], [x])
+        r = self.recs(ix)
+        self.assertNotIn("gcat:2026-048", r)
+        self.assertEqual((r["hist:y"]["gcat"], r["hist:y"]["join"]["pass"]), ("2026-048", 3))
+        self.assertEqual(r["hist:y"]["chart_time"], "2025-03-12T22:33:00Z")
+
+    def test_fold_windows_only_when_one_to_one(self):
+        rows = [nn("ZHWH/ZPKM", rg=ring(1, 1)), nn("ZHWH", start="2023-01-01T00:00:00Z", end="2023-01-01T01:00:00Z"),
+                nn("ZPKM", start="2023-01-01T00:10:00Z", end="2023-01-01T01:10:00Z"), nn("ZLHW", rg=ring(2, 2)),
+                nn("ZLHW", rg=ring(3, 3)), nn("ZLHW", start="2023-01-01T00:00:00Z", end="2023-01-01T00:30:00Z")]
+        out = catalog.fold_windows(rows)
+        self.assertEqual(len(out), 4)  # ZHWH and ZPKM fold into the area spanning both; ZLHW has two areas: stays
+        self.assertEqual((out[0]["start"], out[0]["end"]), ("2023-01-01T00:00:00Z", "2023-01-01T01:10:00Z"))
+
+    def test_vehicle_keys(self):
+        self.assertTrue(catalog.same_vehicle("LM-11S", "LM-11"))
+        self.assertTrue(catalog.same_vehicle("Zhuque-2E", "Zhuque-2"))
+        self.assertFalse(catalog.same_vehicle("LM-2", "LM-2C"))
+        self.assertIsNone(catalog.same_vehicle(P.NOT_KNOWN, "LM-2C"))
+
+
+if __name__ == "__main__":
+    unittest.main()

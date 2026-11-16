@@ -1,0 +1,66 @@
+{
+  "program": "launch",
+  "version": "1.0",
+  "sources": [
+    {
+      "id": "faa-tfr",
+      "name": "FAA Temporary Flight Restrictions (tfr.faa.gov): list, map-service shapes, XNOTAM detail",
+      "url": "https://tfr.faa.gov/",
+      "licence": "US Government work (17 U.S.C. 105); no licence stated on the site (read 13 Nov 2026)",
+      "use": "ingest",
+      "grade": "A1",
+      "independence_group": "faa",
+      "commercial_ok": true
+    },
+    {
+      "id": "orbit-snapshot",
+      "name": "Orbit (The Intelligence Company): scheduled launches (Launch Library 2), GCAT launches, NGA and NAVAREA XI launch-hazard warnings",
+      "url": "https://orbit.theintelligence.company/data/snapshot.json",
+      "licence": "Each item keeps its source's terms: GCAT CC BY 4.0; Launch Library 2 free access, no licence stated; NGA US Government work; Japan Coast Guard Government Standard Terms of Use 2.0",
+      "use": "ingest",
+      "grade": "B2",
+      "independence_group": "orbit",
+      "commercial_ok": "unknown"
+    },
+    {
+      "id": "gcat-mcdowell",
+      "name": "Jonathan McDowell's General Catalog of Artificial Space Objects (GCAT): launch list, satcat, satcat100k, sites, orgs (read once for the history backfill; kept current through Orbit)",
+      "url": "https://planet4589.org/space/gcat/",
+      "licence": "CC BY 4.0; cite as 'Data from GCAT (J. McDowell, planet4589.org/space/gcat)' (read on the GCAT page 13 Nov 2026)",
+      "use": "ingest",
+      "grade": "A2",
+      "independence_group": "gcat",
+      "commercial_ok": true
+    },
+    {
+      "id": "launch-charted-notices",
+      "name": "Launch's charted notices (Google My Maps export, 13 Nov 2026): launches 2022-2026 with closure areas, NOTAM text, flight paths and launch sites",
+      "url": "https://theintelligence.company",
+      "licence": "The Intelligence Company's own work; the notices quoted in it are official publications of the issuing states; source links kept",
+      "use": "ingest",
+      "grade": "B2",
+      "independence_group": "chart",
+      "commercial_ok": "unknown"
+    },
+    {
+      "id": "faa-nms",
+      "name": "FAA NOTAM Management Service API",
+      "url": "https://nms.aim.faa.gov/",
+      "licence": "Access by FAA approval (requested 13 Nov 2026); terms to be read on approval",
+      "use": "excluded",
+      "grade": "A1",
+      "independence_group": "faa",
+      "commercial_ok": "unknown"
+    },
+    {
+      "id": "nsf-forum",
+      "name": "NASASpaceflight forum: The Chinese NOTAMs thread; Russian Launch Schedule - Discussion",
+      "url": "https://forum.nasaspaceflight.com/index.php?topic=57867.0",
+      "licence": "All content (c) NASASpaceFlight.com; robots.txt content signal use=reference. Linked from history entries, not collected",
+      "use": "link",
+      "grade": "B2",
+      "independence_group": "nsf",
+      "commercial_ok": false
+    }
+  ]
+}

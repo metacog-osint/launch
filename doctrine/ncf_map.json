@@ -1,0 +1,22 @@
+{
+  "program": "launch",
+  "version": "1.0",
+  "rules": [
+    {
+      "match": {
+        "event_type": "closure_area"
+      },
+      "ncf": [
+        "provide_satellite_access"
+      ]
+    },
+    {
+      "match": {
+        "event_type": "launch_match"
+      },
+      "ncf": [
+        "provide_satellite_access"
+      ]
+    }
+  ]
+}

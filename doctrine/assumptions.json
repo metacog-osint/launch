@@ -1,0 +1,24 @@
+{
+  "program": "launch",
+  "version": "1.0",
+  "assumptions": [
+    {
+      "id": "LA-ASM-1",
+      "assumption": "A first-stage drop zone's bearing from the pad approximates the launch azimuth, so cos i = cos(latitude) x sin(azimuth) gives the inclination to within a few degrees for launches without a dog-leg.",
+      "status": "untested",
+      "test": "Compare inclination_est with GCAT's orbit for history launches that GCAT lists."
+    },
+    {
+      "id": "LA-ASM-2",
+      "assumption": "Launch's charted notices group each closure area with the launch it was issued for.",
+      "status": "untested",
+      "test": "Hand-check a sample against GCAT launch times and the notices' windows."
+    },
+    {
+      "id": "LA-ASM-3",
+      "assumption": "A NOTAM announces intent, not a launch: some are cancelled or never used, and some may be issued as decoys (B. Hendrickx, NASASpaceflight forum, 22 Jul 2026).",
+      "status": "holds",
+      "test": "Keep cancellations; count notices with no launch in their window."
+    }
+  ]
+}

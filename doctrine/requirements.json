@@ -1,0 +1,43 @@
+{
+  "program": "launch",
+  "version": "1.0",
+  "review_by": "2027-02-13",
+  "requirements": [
+    {
+      "id": "LA-REQ-1",
+      "type": "standing",
+      "question": "Where and when are states closing airspace and sea areas for launches, stage drops and reentries, and how do those closures compare with each pad's own history?"
+    },
+    {
+      "id": "LA-PIR-1",
+      "type": "pir",
+      "parent": "LA-REQ-1",
+      "question": "Which launch and reentry closure areas are in force or announced now, from which issuing state, and for which named state when a notice is relayed?",
+      "series": [
+        "faa_tfr_space_ops",
+        "orbit_navwarn",
+        "faa_nms"
+      ]
+    },
+    {
+      "id": "LA-PIR-2",
+      "type": "pir",
+      "parent": "LA-REQ-1",
+      "question": "Which scheduled launches coincide with an announced closure area in time, in time and place, or as a launch GCAT has since dated?",
+      "series": [
+        "orbit_upcoming",
+        "orbit_gcat_launches",
+        "launch_history"
+      ]
+    },
+    {
+      "id": "LA-EEI-1",
+      "type": "eei",
+      "parent": "LA-PIR-2",
+      "question": "For each pad, in which azimuth bands do its closures fall, what inclination does each band imply, and which drop zones recur or appear for the first time?",
+      "series": [
+        "launch_history"
+      ]
+    }
+  ]
+}
