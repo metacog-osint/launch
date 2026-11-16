@@ -55,7 +55,7 @@ const poly = (ring, props) => ({ type: "Feature", properties: props, geometry: {
 
 async function getJSON(p) { const r = await fetch(p, { cache: "no-cache" }); if (!r.ok) throw new Error(p + " " + r.status); return r.json(); }
 
-let snap, hist, pat, srcs, ix, map, H = null;
+let snap, hist, pat, srcs, ix, map, H = null, Hstart = null;
 const byKey = new Map();
 
 function tiles() {
@@ -283,7 +283,7 @@ async function showTab() {
     if (map) map.resize();
   }
   if (tab === "history") {
-    if (!H) H = await initHistory(ix, hist);
+    if (!H) H = await (Hstart = Hstart || initHistory(ix, hist));
     else { H.resize(); H.refresh(); }
   }
 }
@@ -292,16 +292,18 @@ async function main() {
   [snap, hist, pat, srcs, ix] = await Promise.all(["data/snapshot.json", "data/history.json", "data/patterns.json", "data/sources.json", "data/launches.json"].map(getJSON));
   if (T && T.mountSettings) T.mountSettings($("time-settings"));
   tiles(); liveTables(); sourcesBox();
+  // Address changes (tab links, a pasted or hand-edited History address) are taken from the start: waiting for the
+  // maps to load left every tab link dead until then, and for good where a map never loads.
+  window.addEventListener("hashchange", () => {
+    const t = location.hash.replace(/^#/, "").split("?")[0];
+    if (t === "history" && H && document.body.dataset.tab === "history") H.fromHash(); else showTab();
+  });
   const shown = showTab();
   const model = liveModel();
   map = await createMap($("map"), model, { onPick: (k) => { if (k.startsWith("live:") || k.startsWith("pad:")) pickLive(k); } });
   patterns(); paste(); trajSetup();
   map.resize();
   await shown;
-  window.addEventListener("hashchange", () => {
-    const t = location.hash.replace(/^#/, "").split("?")[0];
-    if (t === "history" && H && document.body.dataset.tab === "history") H.fromHash(); else showTab();
-  });
   if (T && T.onChange) T.onChange(() => { tiles(); liveTables(); sourcesBox(); });
 }
 main().catch((err) => { document.querySelector("main").prepend(el("p", "notice", "Launch could not load its data: " + err.message)); });

@@ -73,6 +73,18 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   in its header, guards text cells against formulas and starts with a byte-order mark. GeoJSON and KML carry the
   sources and licences in their header, the CSV per row. Unnumbered NotamForChina areas carry their FIR.
   `greatCircle()` moved from `hmap.js` to `notam.js` so the export can use it without MapLibre.
+- **Ranges** (15 Nov 2026; fifth of the old launch mapper's features): three from/to filters under the facets,
+  `history.js` `RANGES`, in the address as `inc=`, `far=`, `plen=` (`lo-hi`, either end open, e.g. `inc=96-102`,
+  `far=-500`): GCAT's payload inclination (`inc`), the farthest closure area's distance from the pad (`far_nm`,
+  `catalog.farthest_nm()`: the centre of every charted or NotamForChina area, a splashdown too; coincident live
+  areas do not count) and a charted path's length (`path.len_nm`, `catalog.path_length_nm()`: its longest line, legs
+  summed; estimated paths have none). A launch without the number is hidden while its range is set, and each range
+  says how many in the other filters have one. Presets: inclination by the Paste tab's orbit types, distances by
+  band. Both distances are on the detail card and in the downloads (`farthest_area_nm`, `path_length_nm`). The
+  range inputs are built once (`buildRanges()`) so typing keeps focus; `rangesShow()` refreshes them.
+- **Address changes and the maps:** `app.js` listens for `hashchange` from the start, and `initHistory()` no longer
+  waits for its map, so tab links and a pasted or hand-edited History address work before (or without) the maps
+  loading. On a map 640 px wide or less the credit box starts closed (`map.js` `collapseAttribution()`).
 - **One notice per NOTAM:** where the charted notices and NotamForChina hold the same NOTAM (number and a shared
   FIR), the charted text is shown and NotamForChina's ring is a check under it.
 - **Address:** filter state is in the address (`#history?veh=LM-7A&site=Wenchang&...`). Addresses from before

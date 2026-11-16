@@ -51,11 +51,26 @@ const FACETS = [
   { k: "src", label: "Source", get: (r) => r.sources, name: (v) => SOURCES[v] || v },
   { k: "path", label: "Flight path", get: (r) => (r.path ? (r.path.kind === "drawn" ? "As charted" : "Estimated from an azimuth") : "None"), },
 ];
+/* Ranges: key in the address (lo-hi, either end open), label, unit, how a record's number is read, presets. A record
+   without the number is left out while its range is set. Inclination bands follow the Paste tab's orbit types. */
+const RANGES = [
+  { k: "inc", label: "Inclination", unit: "°", step: "0.1", get: (r) => r.inc,
+    about: "GCAT's payload inclination (launches GCAT lists)",
+    presets: [["Near-equatorial", null, 10], ["Prograde 10-85", 10, 85], ["Near-polar 85-95", 85, 95], ["Sun-synchronous range", 96, 102], ["Retrograde", 90, null]] },
+  { k: "far", label: "Farthest closure area", unit: "NM", step: "1", get: (r) => r.far_nm,
+    about: "from the pad to the centre of the launch's farthest charted or NotamForChina area",
+    presets: [["Under 500 NM", null, 500], ["500-2,500 NM", 500, 2500], ["Over 2,500 NM", 2500, null]] },
+  { k: "plen", label: "Charted path length", unit: "NM", step: "1", get: (r) => (r.path && r.path.len_nm) || null,
+    about: "length of the flight path as charted (estimated paths have no length)",
+    presets: [["Under 1,000 NM", null, 1000], ["1,000-3,000 NM", 1000, 3000], ["Over 3,000 NM", 3000, null]] },
+];
+const num = (v) => (v === "" || v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
+const rangeText = (g, [lo, hi]) => (lo !== null && hi !== null ? `${lo} to ${hi}` : lo !== null ? `${lo} or more` : `up to ${hi}`) + (g.unit === "°" ? "°" : " " + g.unit);
 const DEFAULT = { st: ["launched"] };
 const PAGE = 100;
 
 let IX, HIST, map, byId = new Map(), chartById = new Map(), FIRST_YEAR = 2023;
-let state = { f: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
+let state = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
 let lastFiltered = [];
 
 /* ---------- time keys in the viewer's zone ---------- */
@@ -80,11 +95,16 @@ const legacy = (k, v) => (LEGACY[k] || {})[strHash(v)] || v;
 function readHash() {
   const h = location.hash.replace(/^#/, "");
   const [tab, qs] = h.split("?");
-  const s = { f: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
+  const s = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
   if (tab !== "history" || !qs) { s.f = JSON.parse(JSON.stringify(DEFAULT)); return s; }
   const p = new URLSearchParams(qs);
   FACETS.forEach((f) => { if (p.has(f.k)) s.f[f.k] = p.get(f.k).split("|").filter((x) => x !== "").map((x) => legacy(f.k, x)); });
   if (!p.has("st")) s.f.st = DEFAULT.st.slice();
+  RANGES.forEach((g) => {
+    const m = /^([\d.]*)-([\d.]*)$/.exec(p.get(g.k) || "");
+    const lo = m ? num(m[1]) : null, hi = m ? num(m[2]) : null;
+    if (lo !== null || hi !== null) s.r[g.k] = lo !== null && hi !== null && lo > hi ? [hi, lo] : [lo, hi];
+  });
   s.q = p.get("q") || ""; s.from = p.get("from") || ""; s.to = p.get("to") || ""; s.sel = p.get("sel") || "";
   if (p.get("areas") === "0") s.areas = false;
   if (p.get("sort")) { s.sort = p.get("sort"); s.dir = p.get("dir") === "1" ? 1 : -1; }
@@ -94,6 +114,7 @@ function writeHash() {
   const p = new URLSearchParams();
   Object.entries(state.f).forEach(([k, v]) => { if (v && v.length) p.set(k, v.join("|")); });
   if (!state.f.st || !state.f.st.length) p.set("st", "");
+  RANGES.forEach((g) => { const v = state.r[g.k]; if (v) p.set(g.k, `${v[0] ?? ""}-${v[1] ?? ""}`); });
   if (state.q) p.set("q", state.q);
   if (state.from) p.set("from", state.from);
   if (state.to) p.set("to", state.to);
@@ -123,6 +144,14 @@ function passes(r, skip) {
     if (!want || !want.length) { if (f.k === "st") return false; continue; }
     const have = vals(f, r);
     if (!have.some((v) => want.includes(v))) return false;
+  }
+  for (const g of RANGES) {
+    const want = state.r[g.k];
+    if (!want || skip === g.k) continue;
+    const v = g.get(r);
+    if (v === null || v === undefined) return false;
+    if (want[0] !== null && v < want[0]) return false;
+    if (want[1] !== null && v > want[1]) return false;
   }
   if (skip !== "date") {
     if (state.from && (!r._day || r._day < state.from)) return false;
@@ -196,6 +225,58 @@ function renderFacets() {
   });
 }
 
+/* ---------- the range panel (inclination and distances): built once so typing keeps its focus ---------- */
+const rangeBox = {};
+function setRange(k, lo, hi) {
+  lo = num(lo); hi = num(hi);
+  if (lo !== null && hi !== null && lo > hi) [lo, hi] = [hi, lo];
+  if (lo === null && hi === null) delete state.r[k]; else state.r[k] = [lo, hi];
+  state.shown = PAGE; update(true);
+}
+function buildRanges() {
+  const box = $("h-ranges"); box.textContent = "";
+  RANGES.forEach((g) => {
+    const d = el("details", "facet range");
+    d.open = !!state.r[g.k];
+    const sum = el("summary", "", g.label);
+    const badge = el("span", "badge", "1"); sum.appendChild(badge);
+    d.appendChild(sum);
+    d.appendChild(el("p", "small muted range-about", g.about + "."));
+    const row = el("div", "date-row");
+    const inp = (word) => {
+      const lab = el("label", "", `${word} (${g.unit})`);
+      const i = document.createElement("input"); i.type = "number"; i.min = "0"; i.step = g.step; i.inputMode = "decimal";
+      i.addEventListener("change", () => setRange(g.k, rangeBox[g.k].lo.value, rangeBox[g.k].hi.value));
+      lab.appendChild(i); row.appendChild(lab); return i;
+    };
+    const lo = inp("From"), hi = inp("To");
+    d.appendChild(row);
+    const pre = el("div", "presets");
+    const btns = g.presets.map(([t, a, b]) => {
+      const btn = el("button", "chip-btn", t); btn.type = "button";
+      btn.addEventListener("click", () => { const v = state.r[g.k]; v && v[0] === a && v[1] === b ? setRange(g.k, null, null) : setRange(g.k, a, b); });
+      pre.appendChild(btn); return [btn, a, b];
+    });
+    d.appendChild(pre);
+    const n = el("p", "small muted range-n"); d.appendChild(n);
+    rangeBox[g.k] = { d, lo, hi, badge, btns, n };
+    box.appendChild(d);
+  });
+}
+function rangesShow() {
+  RANGES.forEach((g) => {
+    const b = rangeBox[g.k]; if (!b) return;
+    const v = state.r[g.k];
+    if (document.activeElement !== b.lo) b.lo.value = v && v[0] !== null ? v[0] : "";
+    if (document.activeElement !== b.hi) b.hi.value = v && v[1] !== null ? v[1] : "";
+    if (v) b.d.open = true;
+    b.badge.hidden = !v;
+    b.btns.forEach(([btn, a, c]) => btn.classList.toggle("on", !!v && v[0] === a && v[1] === c));
+    const base = filtered(g.k), have = base.filter((r) => { const x = g.get(r); return x !== null && x !== undefined; }).length;
+    b.n.textContent = `${have} of ${base.length} in your other filters have one` + (v ? "; the rest are hidden while this is set." : ".");
+  });
+}
+
 function setDates(from, to) {
   state.from = from || ""; state.to = to || "";
   if (state.from && state.to && state.from > state.to) [state.from, state.to] = [state.to, state.from];
@@ -230,11 +311,12 @@ function chips() {
     if (f.k === "st") return;
     sel.forEach((v) => add(`${f.label}: ${f.name ? f.name(v) : v}`, () => { state.f[f.k] = sel.filter((x) => x !== v); update(true); }));
   });
+  RANGES.forEach((g) => { if (state.r[g.k]) add(`${g.label}: ${rangeText(g, state.r[g.k])}`, () => setRange(g.k, null, null)); });
   if (state.from || state.to) add(`Dates: ${state.from || "start"} to ${state.to || "now"}`, () => setDates("", ""));
   if (state.q) add(`Search: ${state.q}`, () => { state.q = ""; $("h-q").value = ""; update(true); });
   if (box.childNodes.length) {
     const c = el("button", "linkish small", "Clear all filters"); c.type = "button";
-    c.addEventListener("click", () => { state.f = JSON.parse(JSON.stringify(DEFAULT)); state.q = ""; $("h-q").value = ""; setDates("", ""); });
+    c.addEventListener("click", () => { state.f = JSON.parse(JSON.stringify(DEFAULT)); state.r = {}; state.q = ""; $("h-q").value = ""; setDates("", ""); });
     box.appendChild(c);
   }
 }
@@ -398,7 +480,8 @@ function detail(r) {
   fact(dl, "Type", r.mtype + (notes.length ? ` · ${notes.join(", ")}` : ""));
   fact(dl, "Orbit", r.orbit + (r.inc ? ` · payload inclination ${r.inc}° (GCAT)` : ""));
   if (r.outcome) fact(dl, "Outcome", r.outcome);
-  if (r.path) fact(dl, "Flight path", r.path.kind === "drawn" ? `as charted (azimuth about ${r.path.az}°)` : `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
+  if (r.far_nm !== undefined) fact(dl, "Farthest closure area", `${r.far_nm.toLocaleString("en-US")} NM from the pad`);
+  if (r.path) fact(dl, "Flight path", r.path.kind === "drawn" ? `as charted (azimuth about ${r.path.az}°` + (r.path.len_nm ? `, ${r.path.len_nm.toLocaleString("en-US")} NM long)` : ")") : `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
   else fact(dl, "Flight path", r.pad ? "none: no closure area, inclination or corridor history to infer an azimuth from" : "none: no pad position");
   if (r.join && r.join.pass === 3) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat} by a NOTAM that NotamForChina lists for this launch (same number and FIR)` + (r.join.hours > 1 ? `; the charted time is ${r.join.hours >= 8000 ? "about a year" : r.join.hours + " h"} out` : ""));
   else if (r.join) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat}: ${r.join.hours} h apart` + (r.join.nm !== null ? `, ${r.join.nm} NM apart` : "") + (r.join.same ? ", same vehicle or programme" : "") + (r.join.pass === 2 ? " (matched by vehicle and place; the map's time differs)" : ""));
@@ -521,7 +604,7 @@ function update(refit) {
   const total = IX.records.length;
   const up = rows.filter((r) => r.status === "upcoming").length;
   $("h-count").textContent = `${rows.length} of ${total} shown` + (up ? ` (${up} scheduled)` : "") + (rows.length > state.shown ? `; the list shows ${state.shown}` : "");
-  renderFacets(); presets(); chips(); timeline(); list(rows);
+  renderFacets(); rangesShow(); presets(); chips(); timeline(); list(rows);
   if (map) map.show(rows, state.areas, refit || fitNext);
   fitNext = false;
   if (state.sel && !byId.get(state.sel)) state.sel = "";
@@ -535,6 +618,7 @@ export async function initHistory(ix, hist) {
   HIST.events.forEach((e) => { if (!chartById.has(e.id)) chartById.set(e.id, []); chartById.get(e.id).push(e); });
   rekey();
   state = readHash();
+  buildRanges();
   $("h-q").value = state.q; $("h-from").value = state.from; $("h-to").value = state.to; $("h-areas").checked = state.areas;
   let qt = null;
   $("h-q").addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { state.q = $("h-q").value.trim(); state.shown = PAGE; update(true); }, 200); });
@@ -559,10 +643,14 @@ export async function initHistory(ix, hist) {
     + (c.nfc ? ` NotamForChina adds the notices of ${c.nfc.records - c.nfc.own_records} of those launches, and ${c.nfc.own_launched} Chinese launches from ${FIRST_YEAR} to ${Number((IX.ledger_since || "2023").slice(0, 4)) - 1}.` : "")
     + ` Updated ${fmt(IX.generated_at)}.`;
   update(true); // filters and list first; the map follows when its base has loaded
-  map = await createHistoryMap($("hmap"), IX, { onPick: (id) => select(id, false), onSite: (name) => { state.f.site = [name]; update(true); } });
-  map.setCharted(HIST.events);
-  map.show(lastFiltered, state.areas, true);
-  if (state.sel && byId.get(state.sel)) select(state.sel, true);
+  createHistoryMap($("hmap"), IX, { onPick: (id) => select(id, false), onSite: (name) => { state.f.site = [name]; update(true); } })
+    .then((m) => {
+      map = m;
+      map.setCharted(HIST.events);
+      map.show(lastFiltered, state.areas, true);
+      if (state.sel && byId.get(state.sel)) select(state.sel, true);
+    })
+    .catch((err) => { $("hmap").textContent = "The map could not load: " + err.message + ". The filters and the list still work."; });
   if (T && T.onChange) T.onChange(() => { rekey(); update(false); });
   return {
     resize: () => map && map.resize(), refresh: () => update(false),

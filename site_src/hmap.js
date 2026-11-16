@@ -3,7 +3,7 @@
 // closure areas. The selected launch is drawn on top with its pad. Same base map as map.js. Colours come from the
 // style.css actor tokens through MapLibre paint (no inline styles, CSP).
 import * as ml from "./vendor/maplibre-gl/maplibre-gl.mjs";
-import { buildStyle, addProjectionToggle, fitCoords, worldZoom } from "./map.js";
+import { buildStyle, addProjectionToggle, collapseAttribution, fitCoords, worldZoom } from "./map.js";
 import { geodesic, greatCircle } from "./notam.js";
 
 const dark = matchMedia("(prefers-color-scheme: dark)");
@@ -38,6 +38,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
   map.touchZoomRotate.disableRotation();
   map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
   addProjectionToggle(map);
+  collapseAttribution(map);
   map.getCanvas().setAttribute("aria-label", "Map of launch sites and flight paths for the launches in your filters. Every launch on it is also in the list below.");
   const chartById = new Map();
   const featCache = new Map(); // per launch: its path and area features, built once
