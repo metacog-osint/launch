@@ -73,7 +73,9 @@ def _tfr_item(t: dict, generated: str, accessed: str) -> dict:
         "summary": (f"The FAA lists FDC {t['id']} (space operations, {t.get('facility')}, {t.get('state')}), created "
                     f"{t.get('created')}: {t.get('description')}."
                     + (f" Limits: {alt}." if alt else "")
-                    + (f" The FAA's XML gives the expiry as {d['expires']} in time zone {d['time_zone']}." if d.get("expires") else "")
+                    + (" In force " + "; ".join(f"{w['start']} to {w['end']}" for w in d["windows"][:3])
+                       + (f" and {len(d['windows']) - 3} more windows" if len(d["windows"]) > 3 else "") + " (UTC)."
+                       if d.get("windows") else "")
                     + " Not for navigation."),
         "data_as_of": accessed,
         "countries": ["US"],

@@ -177,6 +177,54 @@ class Matching(unittest.TestCase):
         t = live.tfr_space_ops(lst, shp)
         self.assertEqual([x["id"] for x in t], ["6/7131"])
 
+    # FDC 6/7113 as the FAA's XML gave it on 15 Nov 2026 (cut down): times in UTC although codeTimeZone says EST.
+    XNOTAM_7113 = b"""<XNOTAM-Update><Group><Add><Not>
+      <dateIssued>2026-11-11T14:02:00</dateIssued><dateEffective>2026-11-15T17:01:00</dateEffective>
+      <dateExpire>2026-11-15T18:50:00</dateExpire><codeTimeZone>EST</codeTimeZone>
+      <txtLocalName>261115 ULA Vulcan KV-01 (A1174)</txtLocalName>
+      <txtDescrTraditional>!FDC 6/7113 ZJX FL..AIRSPACE CAPE CANAVERAL, FL..TEMPORARY FLIGHT RESTRICTIONS. ...
+      EFFECTIVE 2611151701 UTC (1201 LOCAL 11/15/26) UNTIL 2611151850 UTC (1350 LOCAL 11/15/26). ...
+      2611151701-2611151850</txtDescrTraditional>
+    </Not></Add></Group></XNOTAM-Update>"""
+
+    def test_tfr_windows_are_utc_and_match_the_launch(self):
+        d = live.tfr_detail(self.XNOTAM_7113)
+        self.assertEqual(d["windows"], [{"start": "2026-11-15T17:01:00Z", "end": "2026-11-15T18:50:00Z"}])
+        self.assertEqual(d["window_basis"], "notam-text")
+        self.assertEqual(d["time_zone"], "EST")  # kept as written
+        sq = [[-80.4, 28.9], [-80.2, 28.9], [-80.2, 29.1], [-80.4, 28.9]]
+        areas = live.tfr_areas([{"id": "6/7113", "description": "Cape Canaveral", "rings": [sq], "detail": d}], {})
+        self.assertEqual(areas[0]["windows"], d["windows"])
+        up = [{"id": "u1", "name": "Vulcan VC6L | Amazon Leo (LV-01)", "net": "2026-11-15T17:11:30Z",
+               "lat": 28.583, "lon": -80.583}]
+        m = live.match(up, areas, [], [])
+        self.assertEqual([(x["area"], x["window"]) for x in m],
+                         [("FDC 6/7113", ["2026-11-15T17:01:00Z", "2026-11-15T18:50:00Z"])])
+        # read as EST (five hours later) the launch would have fallen outside the window
+        self.assertEqual(live.match([{**up[0], "net": "2026-11-15T12:11:30Z"}], areas, [], []), [])
+
+    def test_tfr_windows_fall_back_to_xml_dates_read_as_utc(self):
+        w, basis = live.tfr_windows("NO TIMES IN THIS TEXT.", [("2026-11-16T15:00:00", "2026-11-16T16:30:00"),
+                                                                ("2026-11-16T15:00:00", "2026-11-16T16:30:00")])
+        self.assertEqual((w, basis), ([{"start": "2026-11-16T15:00:00Z", "end": "2026-11-16T16:30:00Z"}], "xml-dates"))
+        self.assertEqual(live.tfr_windows(None, []), ([], None))
+        self.assertEqual(live.tfr_windows("", [("bad", "2026-11-16T16:30:00")]), ([], None))
+        # two periods in one text, each kept
+        w, _ = live.tfr_windows("EFFECTIVE 2611161500 UTC UNTIL 2611161700 UTC AND 2611171500 UTC UNTIL "
+                                "2611171700 UTC.", [])
+        self.assertEqual([x["start"] for x in w], ["2026-11-16T15:00:00Z", "2026-11-17T15:00:00Z"])
+
+    def test_tfr_summary_gives_utc_window_not_the_xml_zone(self):
+        sq = [[-80.4, 28.9], [-80.2, 28.9], [-80.2, 29.1], [-80.4, 28.9]]
+        snap = {"generated_at": "2026-11-15T06:00:00Z", "lanes": {"tfr": {"fetched_at": "2026-11-15T06:00:00Z"},
+                                                                   "orbit": {"fetched_at": "2026-11-15T06:00:00Z"}},
+                "tfr": [{"id": "6/7113", "facility": "ZJX", "state": "FL", "description": "Cape Canaveral",
+                         "created": "11/11/2026", "rings": [sq], "detail": live.tfr_detail(self.XNOTAM_7113)}],
+                "areas": [], "matches": []}
+        s = feed.build_feed(snap)["features"][0]["properties"]["summary"]
+        self.assertIn("In force 2026-11-15T17:01:00Z to 2026-11-15T18:50:00Z (UTC).", s)
+        self.assertNotIn("time zone", s)
+
 
 class FeedAndRegisters(unittest.TestCase):
     def test_registers(self):

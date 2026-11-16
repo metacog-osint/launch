@@ -67,13 +67,56 @@ def tfr_space_ops(list_body: bytes, shapes_body: bytes) -> list[dict]:
     return list(out.values())
 
 
+# "EFFECTIVE 2611151701 UTC (1201 LOCAL 11/15/26) UNTIL 2611151850 UTC" in the NOTAM text, and the
+# "2611151701-2611151850" range that ends it.
+UTC_RANGE = re.compile(r"(\d{10})\s*UTC\b[^.]*?\bUNTIL\s+(\d{10})\s*UTC\b")
+TAIL_RANGE = re.compile(r"\b(\d{10})-(\d{10})\s*$")
+
+
+def _stamp(s: str) -> datetime | None:
+    try:
+        return datetime.strptime(s, "%y%m%d%H%M").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def tfr_windows(text: str | None, pairs: list[tuple[str | None, str | None]]) -> tuple[list[dict], str | None]:
+    """A TFR's windows in UTC and where they came from. The NOTAM text says UTC outright, so it comes first. The XML's
+    dateEffective / dateExpire are UTC too, although codeTimeZone names a local zone (the zone the FAA's page shows):
+    FDC 6/7113 on 15 Nov 2026 gave 17:01 to 18:50 with codeTimeZone EST, and its text read "EFFECTIVE 2611151701 UTC
+    (1201 LOCAL 11/15/26) UNTIL 2611151850 UTC". Cordon reads them the same way (cordon/tfr.py)."""
+    text = (text or "").strip()
+    found = [(_stamp(a), _stamp(b)) for a, b in UTC_RANGE.findall(text)]
+    if not found:
+        m = TAIL_RANGE.search(text)
+        found = [(_stamp(m.group(1)), _stamp(m.group(2)))] if m else []
+    basis = "notam-text"
+    if not any(s and e for s, e in found):
+        found = []
+        for a, b in pairs:
+            try:
+                found.append((_dt(a + "Z"), _dt(b + "Z")) if a and b else (None, None))
+            except ValueError:
+                continue
+        basis = "xml-dates"
+    out = []
+    for s, e in found:
+        w = {"start": _iso(s), "end": _iso(e)} if s and e and e > s else None
+        if w and w not in out:
+            out.append(w)
+    return sorted(out, key=lambda w: w["start"]), (basis if out else None)
+
+
 def tfr_detail(body: bytes) -> dict:
-    """Altitudes and the schedule from a TFR's XNOTAM XML. Times there carry a local-zone code
-    (codeTimeZone), so Launch keeps them as written and takes UTC only from fields that say UTC."""
+    """Altitudes and the schedule from a TFR's XNOTAM XML. `windows` are UTC (see tfr_windows); `effective`,
+    `expires` and `time_zone` are kept as the XML writes them."""
     root = ET.fromstring(body)
     def first(tag):
         el = root.find(".//" + tag)
         return el.text.strip() if el is not None and el.text else None
+    def texts(tag):
+        return [(el.text or "").strip() or None for el in root.iter(tag)]
+    windows, basis = tfr_windows(first("txtDescrTraditional"), list(zip(texts("dateEffective"), texts("dateExpire"))))
     areas = []
     for a in root.iter("aseTFRArea"):
         areas.append({"name": (a.findtext("txtName") or "").strip() or None,
@@ -81,7 +124,7 @@ def tfr_detail(body: bytes) -> dict:
                       "lower": f"{a.findtext('valDistVerLower')} {a.findtext('uomDistVerLower')} {a.findtext('codeDistVerLower')}"})
     return {"issued_utc": (first("dateIssued") or "") + "Z" if first("dateIssued") else None,
             "effective": first("dateEffective"), "expires": first("dateExpire"), "time_zone": first("codeTimeZone"),
-            "local_name": first("txtLocalName"), "areas": areas}
+            "windows": windows, "window_basis": basis, "local_name": first("txtLocalName"), "areas": areas}
 
 
 # ---------- Orbit ----------
@@ -183,13 +226,14 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
 
 
 def tfr_areas(tfrs: list[dict], details: dict) -> list[dict]:
-    """TFRs as areas for matching. A TFR's own window is in its XML with a local-zone code; without a UTC window
-    a TFR is shown but not time-matched."""
+    """TFRs as areas for matching, with the UTC windows read from each TFR's XML (tfr_detail). A TFR whose XML
+    was not read has no window and is shown but not time-matched."""
     out = []
     for t in tfrs:
+        d = t.get("detail") or details.get(t["id"]) or {}
         for i, ring in enumerate(t["rings"]):
             out.append({"source": "faa-tfr", "id": f"FDC {t['id']}", "label": t.get("description"), "ring": ring,
-                        "windows": [], "detail": details.get(t["id"])})
+                        "windows": list(d.get("windows") or []), "detail": d or None})
     return out
 
 
