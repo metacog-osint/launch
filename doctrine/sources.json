@@ -61,6 +61,39 @@
       "grade": "B2",
       "independence_group": "nsf",
       "commercial_ok": false
+    },
+    {
+      "id": "notamforchina",
+      "name": "NotamForChina (github.com/mikezang/NotamForChina): Chinese launches 2012-2026 with their NOTAM numbers by FIR and window, and per-launch drop-zone maps (read at a pinned commit)",
+      "url": "https://github.com/mikezang/NotamForChina",
+      "publisher": "mikezang (GitHub)",
+      "licence": "Apache License 2.0 (repository LICENSE, read 15 Nov 2026; a copy is published beside the data as data/NOTAMFORCHINA-LICENSE.txt); pinned commit 2d06a628 (19 Oct 2026)",
+      "use": "ingest",
+      "grade": "B2",
+      "independence_group": "notamforchina",
+      "commercial_ok": true
+    },
+    {
+      "id": "joey0609-notams",
+      "name": "Joey0609/notams (github.com/Joey0609/notams): monthly NOTAM archive from Dec 2020, mostly Chinese FIRs, with the FAA NOTAM search's text; launch-related notices only (read at a pinned commit)",
+      "url": "https://github.com/Joey0609/notams",
+      "publisher": "Joey0609 (GitHub)",
+      "licence": "MIT, Copyright (c) 2026-PRESENT Joey0609 (repository LICENSE, read 16 Nov 2026; a copy is published beside the data as data/JOEY-NOTAMS-LICENSE.txt). Its README asks that non-rocket NOTAMs not be analysed or redistributed: Launch keeps launch-related notices only; pinned commit 8c4b7c8d (16 Nov 2026)",
+      "use": "ingest",
+      "grade": "B2",
+      "independence_group": "joey0609",
+      "commercial_ok": true
+    },
+    {
+      "id": "internet-archive-faa-nga",
+      "name": "Internet Archive Wayback Machine copies of tfr.faa.gov (list and space-operations detail pages, 2006-Feb 2025) and NGA's broadcast-warn API (2021-2023)",
+      "url": "https://web.archive.org/",
+      "publisher": "Internet Archive (copies of FAA and NGA pages)",
+      "licence": "The pages are US Government works (FAA, NGA; 17 U.S.C. 105); read through the Internet Archive's public CDX and capture service, one request a second at most; each record links its capture",
+      "use": "ingest",
+      "grade": "A2",
+      "independence_group": "faa",
+      "commercial_ok": true
     }
   ]
 }
