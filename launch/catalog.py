@@ -328,6 +328,39 @@ def path_length_nm(line: list) -> int:
     return round(sum(notam.haversine_nm(a[1], a[0], b[1], b[0]) for a, b in zip(line, line[1:])))
 
 
+HEADING_NM = 50      # a first leg shorter than this sets no heading (a wiggle at the pad)
+QUARTER_NM = 5400    # a quarter of the globe: past it the bearing to a point stops saying which way a path set off
+
+
+def initial_heading(line: list) -> float:
+    """A line's heading from its start: to the first point at least HEADING_NM out, else to its end."""
+    a = line[0]
+    b = next((q for q in line[1:] if notam.haversine_nm(a[1], a[0], q[1], q[0]) >= HEADING_NM), line[-1])
+    return history.bearing(a[1], a[0], b[1], b[0])
+
+
+def drawn_heading(pad, drawn: list) -> float:
+    """The azimuth of a charted path: the bearing from its start to its farthest point within QUARTER_NM (a dog-leg's
+    downrange direction, which is what sets the orbit plane), else its first leg's heading. The bearing to the end of
+    a path drawn round half the world reads backwards: "Line 31" (Starbase east to off Australia) read 283 deg for a
+    line that sets off at 94, and Plesetsk's GLONASS lines over the pole to the South Pacific 292 for 112. The start
+    is the longest line's at the pad (within SITE_NM); with none there (a drop-zone outline, a downrange leg) the
+    pad, to the farthest charted point."""
+    at_pad = [ln for ln in drawn if pad and notam.haversine_nm(pad[1], pad[0], ln[0][1], ln[0][0]) <= SITE_NM]
+    line = max(at_pad or drawn, key=path_length_nm)
+    a = line[0] if at_pad or not pad else pad
+    pts = [q for ln in ([line] if at_pad or not pad else drawn) for q in ln]
+    dist = lambda q: notam.haversine_nm(a[1], a[0], q[1], q[0])
+    near = [q for q in pts if HEADING_NM <= dist(q) <= QUARTER_NM]
+    if near:
+        b = max(near, key=dist)
+        return history.bearing(a[1], a[0], b[1], b[0])
+    if at_pad or not pad:
+        return initial_heading(line)
+    b = max(pts, key=dist)
+    return history.bearing(a[1], a[0], b[1], b[0])
+
+
 def farthest_nm(pad, areas: list[dict] | None) -> int | None:
     """Distance from the pad to the record's farthest closure area (its centroid), NM; None without both."""
     d = [a["downrange_nm"] for a in (areas or []) if a.get("downrange_nm") is not None]
@@ -358,8 +391,7 @@ def infer_path(pad, site: str | None, bands: list[dict], *, drawn=None, areas=No
     drawn to that area, and nothing else: no orbit sets its azimuth and the site's corridors are its orbital ones."""
     if drawn:
         line = max(drawn, key=len)
-        a, b = line[0], line[-1]
-        return {"kind": "drawn", "az": round(history.bearing(a[1], a[0], b[1], b[0]), 1), "nm": None,
+        return {"kind": "drawn", "az": round(drawn_heading(pad, drawn), 1), "nm": None,
                 "len_nm": path_length_nm(line), "basis": "path as charted"}
     if not pad:
         return None

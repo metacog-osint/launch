@@ -351,6 +351,25 @@ class AreaBearings(unittest.TestCase):
         self.assertEqual(catalog._bear([111.585, 38.8587], [{"ring": []}]), [{"ring": []}])  # no centroid: as it was
 
 
+class DrawnHeading(unittest.TestCase):
+    def test_heading_is_the_first_legs_not_the_bearing_to_the_end(self):
+        line31 = [[-97.16, 26.0], [-83.0, 24.32], [50.66, -27.19], [113.82, -16.05]]  # Starbase, east, to off Australia
+        p = catalog.infer_path(line31[0], None, [], drawn=[line31])
+        self.assertAlmostEqual(p["az"], 94.4, delta=0.5)  # the bearing to the end would read 282.8
+        wiggle = [[0.0, 0.0], [0.1, 0.0], [0.0, 5.0]]  # a 6 NM first leg east, then north
+        self.assertAlmostEqual(catalog.initial_heading(wiggle), 0.0, delta=0.5)
+        glonass = [[40.6, 62.9], [164.1, -61.2], [-131.2, -61.0]]  # Plesetsk over the pole: every point past a quarter
+        self.assertAlmostEqual(catalog.infer_path(glonass[0], None, [], drawn=[glonass])["az"], 111.9, delta=0.5)
+        dogleg = [[121.2, 36.6], [121.6, 35.6], [123.2, 20.8], [111.2, -18.6]]  # Haiyang: SSE, then south-west
+        az = catalog.infer_path(dogleg[0], None, [], drawn=[dogleg])["az"]
+        self.assertAlmostEqual(az, catalog.history.bearing(36.6, 121.2, -18.6, 111.2), delta=0.1)  # downrange, not the first leg
+        self.assertAlmostEqual(catalog.initial_heading([[0.0, 0.0], [0.5, 0.0]]), 90.0, delta=0.5)  # short line: its end
+        baikonur = [63.56, 46.0]
+        outline = [[80.0, 50.5], [89.4, 51.5], [80.0, 50.5]]  # a drop zone drawn as a line, away from the pad
+        az = catalog.infer_path(baikonur, None, [], drawn=[outline])["az"]
+        self.assertAlmostEqual(az, catalog.history.bearing(46.0, 63.56, 51.5, 89.4), delta=0.1)  # pad to its far end
+
+
 class PadAtNoSite(unittest.TestCase):
     """A charted path drawn from a point downrange (Starship Flight 6, 19 Nov 2024: 219 NM out in the Gulf) left the
     charted event unjoined and the launch listed twice."""

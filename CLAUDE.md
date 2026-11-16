@@ -78,7 +78,9 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   start that is one (28 pads were up to 4,800 NM off, with azimuths pointing backwards). A joined launch takes GCAT's
   site name when GCAT's site is within `SITE_NM` of the pad (neighbouring pads: Wenchang and Hainan commercial,
   Cape Canaveral and Kennedy); else the nearest site to the charted pad (sea launches, where GCAT's point is coarse).
-- **Flight paths:** a charted path is drawn as charted (a great circle per leg); otherwise it is estimated from the
+- **Flight paths:** a charted path is drawn as charted (a great circle per leg), and its azimuth is the bearing from
+  its start to its farthest point within a quarter of the globe, else its first leg's heading (`drawn_heading`: the
+  bearing to the end of a path drawn round half the world reads backwards); otherwise it is estimated from the
   bearing to the closure areas, the payload's inclination, the orbit class's, or the site's most-used corridor.
   A suborbital launch or missile: as charted, or towards its farthest closure area (at any distance, drawn to it),
   else none. Each record says its basis.
