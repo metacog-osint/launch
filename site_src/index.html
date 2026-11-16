@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch · The Intelligence Company</title>
+<meta name="description" content="Launch and reentry closure areas from NOTAMs and navigational warnings: live areas, which scheduled launches coincide with them, every launch since 2023 on a map with flight paths and filters, and each pad's closure patterns.">
+<link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="tic-time.css">
+<link rel="stylesheet" href="tic-nav.css">
+<script src="tic-time.js"></script>
+<script src="tic-nav.js" defer data-current="launch"></script>
+<script type="module" src="app.js"></script>
+</head>
+<body data-tab="live">
+<header class="top">
+  <div class="wrap top-row">
+    <div class="brand"><strong>Launch</strong><span class="muted">The Intelligence Company</span></div>
+    <nav class="top-nav" aria-label="Launch">
+      <div class="tabs" role="tablist" aria-label="Views">
+        <a href="#live" role="tab" id="tab-live" aria-controls="live">Live</a>
+        <a href="#history" role="tab" id="tab-history" aria-controls="history">History</a>
+        <a href="#patterns" role="tab" id="tab-patterns" aria-controls="patterns">Patterns</a>
+        <a href="#paste" role="tab" id="tab-paste" aria-controls="paste">Paste a NOTAM</a>
+        <a href="#sources" role="tab" id="tab-sources" aria-controls="sources">Sources</a>
+      </div>
+      <a href="data/feed.geojson">Feed (contract v2)</a>
+      <span id="time-settings"></span>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <p class="notice small">Not for navigation or flight planning. Shapes are read from the notices' text or charted
+    by hand, and either can be wrong; every area says which. Flight paths other than charted ones are
+    estimates from an inferred azimuth, and each says what it was inferred from. Worldwide NOTAMs arrive once the
+    FAA grants Launch access to its NOTAM service (requested 13 Nov 2026).</p>
+
+  <section class="panel" id="live" role="tabpanel" aria-labelledby="tab-live">
+    <div class="hero">
+      <h1>Where states close the sky and sea for launches.</h1>
+      <p class="lede">Launch and reentry closure areas from NOTAMs and navigational warnings: what is announced now,
+        which scheduled launches coincide with it, every launch since 2023, and where each pad's closures fall.
+        Every area shows the issuer's own text. A closure announces intent: some are cancelled, some are never
+        used. <span id="asof"></span></p>
+      <div class="tiles" id="tiles" aria-live="polite"></div>
+      <p class="legend small muted" aria-label="Country colours">
+        <span><span class="sw g-us"></span>United States</span>
+        <span><span class="sw g-cn"></span>China</span>
+        <span><span class="sw g-ru"></span>Russia</span>
+        <span><span class="sw g-other"></span>Everyone else, by flag and code</span>
+      </p>
+    </div>
+
+    <section class="card" id="map-card" aria-labelledby="map-h">
+      <div class="card-head">
+        <h2 id="map-h">Map</h2>
+        <p class="muted small" id="map-note">Grey outlines: live closure areas. Amber dashed: recurring drop zones,
+          when shown. Purple: what you paste. Rings: pads of launches scheduled in the next 14 days. Ctrl and scroll
+          (or two fingers) to zoom.</p>
+        <p class="small"><label><input type="checkbox" id="show-zones"> Show recurring drop zones</label></p>
+      </div>
+      <div class="map-stage"><div id="map" class="map"></div></div>
+      <div class="small" id="map-info" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="live-h">
+      <div class="card-head">
+        <h2 id="live-h">Live: closure areas and scheduled launches</h2>
+        <p class="muted small">A coincidence is named by its level. <b>Time</b>: a launch's scheduled time falls in an
+          area's window of four hours or less, or up to an hour before it opens. <b>Time and place</b>: also, the area
+          lies in an azimuth band and at a distance where the pad's history has closures. <b>Grouped</b>: GCAT has
+          since dated a launch from that site inside the window. None says an area is for a launch.</p>
+      </div>
+      <div class="tbl-wrap" id="match-table"></div>
+      <h3 class="sub-h">Areas in force or announced</h3>
+      <div class="tbl-wrap" id="area-table"></div>
+    </section>
+  </section>
+
+  <section class="panel" id="history" role="tabpanel" aria-labelledby="tab-history" hidden>
+    <div class="h-head">
+      <div>
+        <h2>Launch history</h2>
+        <p class="small muted" id="h-about"></p>
+        <p class="small muted">A launch joins this list on its own: every six hours Launch reads the launches GCAT has
+          listed (through Orbit), and those Launch Library 2 reports as flown join sooner, marked provisional, until
+          GCAT lists them. Scheduled launches (the next 14 days) show when you tick them under Show. Chinese
+          launches carry the notices NotamForChina lists for them (number, FIR, window and charted area), and go
+          back to 2012; pick a year before 2023 to see the earlier ones.</p>
+      </div>
+      <div class="h-actions">
+        <button type="button" id="h-toggle" class="chip-btn h-toggle" aria-controls="h-side" aria-expanded="false">Filters</button>
+        <button type="button" id="h-fit" class="chip-btn">Fit map to results</button>
+        <button type="button" id="h-copy" class="chip-btn">Copy link to this view</button>
+      </div>
+    </div>
+    <div class="h-layout">
+      <aside class="h-side" id="h-side" aria-label="Filters">
+        <label class="h-search">Search <input type="search" id="h-q" placeholder="LM-7A, Rassvet, Vostochny, A4754/26" autocomplete="off"></label>
+        <div class="facet dates">
+          <p class="facet-h">Dates</p>
+          <div class="date-row">
+            <label>From <input type="date" id="h-from"></label>
+            <label>To <input type="date" id="h-to"></label>
+          </div>
+          <p class="small muted" id="h-zone"></p>
+          <div class="presets" id="h-presets"></div>
+        </div>
+        <div id="h-facets"></div>
+        <p class="small"><label><input type="checkbox" id="h-areas" checked> Draw closure areas of the launches shown</label></p>
+      </aside>
+      <div class="h-main">
+        <div class="h-chips" id="h-chips" aria-live="polite"></div>
+        <p class="small" id="h-count" aria-live="polite"></p>
+        <div class="h-mapwrap">
+          <div id="hmap" class="map hmap"></div>
+          <div id="h-detail" class="h-detail" aria-live="polite" hidden></div>
+        </div>
+        <p class="legend small muted h-legend" aria-label="Map key">
+          <span><span class="ln solid"></span>Flight path as charted</span>
+          <span><span class="ln dash"></span>Estimated from an inferred azimuth</span>
+          <span><span class="ln dot"></span>Scheduled launch, estimated</span>
+          <span><span class="mk dot"></span>Launch site, sized by launches shown</span>
+          <span><span class="sw g-us"></span>US</span><span><span class="sw g-cn"></span>China</span>
+          <span><span class="sw g-ru"></span>Russia</span><span><span class="sw g-other"></span>Others</span>
+        </p>
+        <div class="h-timeline" id="h-timeline"></div>
+        <div class="tbl-wrap h-listwrap" id="h-list"></div>
+        <p><button type="button" id="h-more" class="chip-btn" hidden></button></p>
+        <p class="small muted">How a flight path is estimated: from the bearing to the launch's closure areas; else
+          from the payloads' inclination (GCAT), the orbit's usual inclination, or the last launch of the same
+          programme from the same site, with cos i = cos(latitude) &times; sin(azimuth) and the direction (north- or
+          south-going) from the site's closure history; else the site's most-used corridor. It is a great circle
+          from the pad, drawn to the farthest closure area or 1,500 NM; not a ground track, and it ignores dog-legs.
+          Mission type is Launch's reading of payload names; series the operator describes otherwise but public
+          analysis assesses as military (Yaogan, TJS) say so.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="patterns" role="tabpanel" aria-labelledby="tab-patterns" hidden>
+    <section class="card" aria-labelledby="pat-h">
+      <div class="card-head">
+        <h2 id="pat-h">Patterns</h2>
+        <p class="muted small">Counted from Launch's charted notices; nothing here is predicted. Inclination is estimated from the
+          bearing of each closure area from its pad (cos i = cos latitude &times; sin azimuth), which holds for a launch
+          without a dog-leg.</p>
+      </div>
+      <h3 class="sub-h">Closure corridors by pad</h3>
+      <div class="tbl-wrap" id="corridor-table"></div>
+      <h3 class="sub-h">Recurring drop zones (three or more events within 25 NM)</h3>
+      <div class="tbl-wrap" id="zone-table"></div>
+      <div class="two">
+        <div><h3 class="sub-h">Notices by FIR and year</h3><div class="tbl-wrap" id="fir-table"></div></div>
+        <div><h3 class="sub-h">How long closures stay open</h3><div class="tbl-wrap" id="window-table"></div>
+          <h3 class="sub-h">Launch hour (UTC) by country</h3><div class="tbl-wrap" id="hour-table"></div></div>
+      </div>
+    </section>
+  </section>
+
+  <section class="panel" id="paste" role="tabpanel" aria-labelledby="tab-paste" hidden>
+    <section class="card" aria-labelledby="paste-h">
+      <div class="card-head">
+        <h2 id="paste-h">Paste a NOTAM</h2>
+        <p class="muted small">Paste one or more ICAO-format NOTAMs and they are read and drawn on the map above, in
+          your browser; nothing you paste leaves this page. Coordinates that fit no known form are listed, not guessed.</p>
+      </div>
+      <textarea id="paste-text" rows="8" spellcheck="false" aria-label="NOTAM text"></textarea>
+      <p><button type="button" id="paste-go">Read and map</button> <button type="button" id="paste-clear" class="linkish">Clear</button></p>
+      <div id="paste-out" aria-live="polite"></div>
+    </section>
+  </section>
+
+  <section class="panel" id="sources" role="tabpanel" aria-labelledby="tab-sources" hidden>
+    <section class="card" aria-labelledby="src-h">
+      <div class="card-head"><h2 id="src-h">Sources and method</h2></div>
+      <div id="source-list" class="small"></div>
+      <p class="small muted" id="lane-list"></p>
+      <p class="small">Feed method <code>launch-1.0</code>. History: GCAT's launch list since 2023 (J. McDowell,
+        planet4589.org/space/gcat, CC BY 4.0), kept current through Orbit; Launch Library 2's schedule through Orbit;
+        Launch's charted notices; Chinese launches 2012-2026 and the NOTAMs that closed their drop zones from
+        NotamForChina (credit above). Where Launch's charted notices and NotamForChina hold the same NOTAM (number and FIR), it is
+        shown once, with the charted text, and NotamForChina's area is a check on the charted one. The NASASpaceflight forum's
+        "Chinese NOTAMs thread" and Russian launch discussion are linked from history entries, not collected. Notes on
+        the source map that are not public notices are not shown.</p>
+    </section>
+  </section>
+</main>
+<footer class="foot"><div class="wrap small muted">Launch · The Intelligence Company. Publicly available information only. Not for navigation. Launch data from GCAT (J. McDowell, planet4589.org/space/gcat), CC BY 4.0. Chinese NOTAM history from NotamForChina (mikezang), Apache-2.0.</div></footer>
+</body>
+</html>

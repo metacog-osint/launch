@@ -1,0 +1,20 @@
+{
+  "program": "launch",
+  "version": "1.0",
+  "warning_problems": [],
+  "indicators": [
+    {
+      "id": "LA-IND-1",
+      "text": "A closure area from a pad falls outside every azimuth band in that pad's history.",
+      "series": "launch_history",
+      "rule": "match.place_basis == 'outside the azimuth bands and distances in the history for this pad'",
+      "gentry": {
+        "predictive": false,
+        "diagnostic": true,
+        "unambiguous": false,
+        "collectable": true
+      },
+      "note": "Reported on the page; not a feed tier yet."
+    }
+  ]
+}

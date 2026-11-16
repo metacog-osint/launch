@@ -1,0 +1,9 @@
+data/
+__pycache__/
+*.pyc
+site/
+GEMINI.md
+CLAUDE.local.md
+history/source/
+history/nfc_source/
+.wrangler/

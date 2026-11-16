@@ -1,0 +1,563 @@
+/* Launch's History tab: every launch since 2023 (Launch's charted notices, GCAT, Launch Library 2) and Chinese launches from 2012
+   with their notices (NotamForChina) on a map with flight paths,
+   filters that combine (AND across filters, OR within one), a month timeline that sets the date range, a list and
+   a detail card. State lives in the address (#history?...), so a view can be bookmarked or sent.
+   Data: data/launches.json (catalog.py; NotamForChina's notices are on its records) and data/history.json (the charted
+   notices, for the detail card).
+   Times are stored UTC; dates and months are read in the viewer's zone (tic-time.js), like every time shown. */
+import { createHistoryMap } from "./hmap.js";
+
+const T = window.TicTime;
+const BIG = { US: "us", CN: "cn", RU: "ru" };
+const group = (cc) => BIG[cc] || "other";
+let REGION = null;
+try { REGION = new Intl.DisplayNames(["en"], { type: "region" }); } catch { REGION = null; }
+const countryName = (cc) => { if (!cc) return "Not known"; try { return (REGION && REGION.of(cc)) || cc; } catch { return cc; } };
+const fmt = (iso, o) => (!iso ? "" : T ? T.format(iso, o || {}) : iso.replace("T", " ").replace(":00Z", "Z"));
+const $ = (id) => document.getElementById(id);
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
+}
+function mark(cc) {
+  const s = el("span", "cc g-" + group(cc));
+  if (!cc) { s.textContent = "?"; s.title = "Not known"; return s; }
+  s.title = countryName(cc);
+  const img = document.createElement("img");
+  img.src = "flags/" + cc.toLowerCase() + ".svg"; img.alt = ""; img.width = 16; img.height = 12; img.loading = "lazy";
+  img.onerror = () => img.remove();
+  s.append(img, document.createTextNode(cc));
+  return s;
+}
+
+const STATUS = { launched: "Launched", upcoming: "Scheduled (next 14 days)", notice: "Notices with no identified launch" };
+const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina" };
+const OUTCOME = { success: "Success", failure: "Failure", "": "Not known" };
+const NK = "Not known";
+
+/* Facets: key in the address, label, how a record's values are read. */
+const FACETS = [
+  { k: "st", label: "Show", get: (r) => r.status, name: (v) => STATUS[v] || v, open: true, fixed: ["launched", "upcoming", "notice"] },
+  { k: "cc", label: "Country", get: (r) => r.actor || "", name: (v) => (v ? countryName(v) : NK), flag: true },
+  { k: "veh", label: "Vehicle", get: (r) => r.vehicle || NK, search: true },
+  { k: "site", label: "Launch site", get: (r) => r.site || NK, search: true },
+  { k: "prog", label: "Programme", get: (r) => (r.programmes && r.programmes.length ? r.programmes : ["None found"]), search: true },
+  { k: "mt", label: "Mission type", get: (r) => r.mtype },
+  { k: "orb", label: "Orbit", get: (r) => r.orbit || NK },
+  { k: "out", label: "Outcome", get: (r) => (r.status === "upcoming" ? "Scheduled" : r.outcome === "success" ? "Success" : r.outcome ? "Failure or partial" : NK) },
+  { k: "src", label: "Source", get: (r) => r.sources, name: (v) => SOURCES[v] || v },
+  { k: "path", label: "Flight path", get: (r) => (r.path ? (r.path.kind === "drawn" ? "As charted" : "Estimated from an azimuth") : "None"), },
+];
+const DEFAULT = { st: ["launched"] };
+const PAGE = 100;
+
+let IX, HIST, map, byId = new Map(), chartById = new Map(), FIRST_YEAR = 2023;
+let state = { f: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
+let lastFiltered = [];
+
+/* ---------- time keys in the viewer's zone ---------- */
+let dayFmt = null;
+function zoneDay(iso) {
+  if (!iso) return "";
+  try {
+    if (!dayFmt) dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: T ? T.zone() : "UTC", year: "numeric", month: "2-digit", day: "2-digit" });
+    return dayFmt.format(new Date(iso));
+  } catch { return iso.slice(0, 10); }
+}
+function rekey() { dayFmt = null; IX.records.forEach((r) => { r._day = zoneDay(r.time); r._month = r._day.slice(0, 7); }); }
+const zoneName = () => (T && T.zoneLabel ? T.zoneLabel() : "UTC");
+
+/* ---------- the address ---------- */
+/* Addresses written before 15 Nov 2026 used other words for the charted source (src=) and for its flight paths
+   (path=). They are matched by a short string hash, so the old words are not spelled out in this public file, and
+   read as the new ones. No current value shares either hash (tests/test_privacy.py checks). */
+const strHash = (s) => [...s].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) | 0, 0);
+const LEGACY = { src: { 115026: "chart" }, path: { "-1763747857": "As charted" } };
+const legacy = (k, v) => (LEGACY[k] || {})[strHash(v)] || v;
+function readHash() {
+  const h = location.hash.replace(/^#/, "");
+  const [tab, qs] = h.split("?");
+  const s = { f: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
+  if (tab !== "history" || !qs) { s.f = JSON.parse(JSON.stringify(DEFAULT)); return s; }
+  const p = new URLSearchParams(qs);
+  FACETS.forEach((f) => { if (p.has(f.k)) s.f[f.k] = p.get(f.k).split("|").filter((x) => x !== "").map((x) => legacy(f.k, x)); });
+  if (!p.has("st")) s.f.st = DEFAULT.st.slice();
+  s.q = p.get("q") || ""; s.from = p.get("from") || ""; s.to = p.get("to") || ""; s.sel = p.get("sel") || "";
+  if (p.get("areas") === "0") s.areas = false;
+  if (p.get("sort")) { s.sort = p.get("sort"); s.dir = p.get("dir") === "1" ? 1 : -1; }
+  return s;
+}
+function writeHash() {
+  const p = new URLSearchParams();
+  Object.entries(state.f).forEach(([k, v]) => { if (v && v.length) p.set(k, v.join("|")); });
+  if (!state.f.st || !state.f.st.length) p.set("st", "");
+  if (state.q) p.set("q", state.q);
+  if (state.from) p.set("from", state.from);
+  if (state.to) p.set("to", state.to);
+  if (state.sel) p.set("sel", state.sel);
+  if (!state.areas) p.set("areas", "0");
+  if (state.sort !== "time" || state.dir !== -1) { p.set("sort", state.sort); p.set("dir", String(state.dir)); }
+  const url = "#history" + (p.toString() ? "?" + p.toString() : "");
+  if (location.hash !== url) history.replaceState(null, "", url);
+}
+
+/* ---------- filtering ---------- */
+const vals = (f, r) => [].concat(f.get(r));
+function hay(r) {
+  if (r._hay) return r._hay;
+  const charted = (r.chart || []).flatMap((id) => chartById.get(id) || []);
+  r._hay = [r.label, r.vehicle, r.gcat_vehicle, r.ll2_vehicle, r.payload, r.flight, r.site, r.pad_name, r.gcat, r.mtype, r.orbit,
+    countryName(r.actor), r.actor, ...(r.programmes || []), ...((r.payloads || {}).names || []), ...(r.chart_labels || []),
+    ...charted.flatMap((e) => [e.extra, ...e.notams.map((n) => (n.number || "") + " " + ((n.q || {}).fir || ""))]),
+    ...(r.nfc_notices || []).map((n) => (n.number || "") + " " + (n.fir || "") + " " + (n.label || ""))]
+    .filter(Boolean).join(" ").toUpperCase();
+  return r._hay;
+}
+function passes(r, skip) {
+  for (const f of FACETS) {
+    if (f.k === skip) continue;
+    const want = state.f[f.k];
+    if (!want || !want.length) { if (f.k === "st") return false; continue; }
+    const have = vals(f, r);
+    if (!have.some((v) => want.includes(v))) return false;
+  }
+  if (skip !== "date") {
+    if (state.from && (!r._day || r._day < state.from)) return false;
+    if (state.to && (!r._day || r._day > state.to)) return false;
+  }
+  if (state.q) {
+    const h = hay(r);
+    if (!state.q.toUpperCase().split(/\s+/).filter(Boolean).every((w) => h.includes(w))) return false;
+  }
+  return true;
+}
+const filtered = (skip) => IX.records.filter((r) => passes(r, skip));
+
+/* ---------- the filter panel ---------- */
+const facetOpen = {};
+function renderFacets() {
+  const box = $("h-facets"); box.textContent = "";
+  FACETS.forEach((f) => {
+    const counts = new Map();
+    filtered(f.k).forEach((r) => vals(f, r).forEach((v) => counts.set(v, (counts.get(v) || 0) + 1)));
+    const sel = state.f[f.k] || [];
+    let opts = f.fixed ? f.fixed.slice() : [...new Set([...counts.keys(), ...sel])];
+    if (!f.fixed) opts.sort((a, b) => (counts.get(b) || 0) - (counts.get(a) || 0) || String(a).localeCompare(String(b)));
+    const d = el("details", "facet");
+    d.open = facetOpen[f.k] !== undefined ? facetOpen[f.k] : !!(f.open || sel.length);
+    d.addEventListener("toggle", () => { facetOpen[f.k] = d.open; });
+    const sum = el("summary", "", f.label);
+    if (sel.length && f.k !== "st") sum.appendChild(el("span", "badge", String(sel.length)));
+    d.appendChild(sum);
+    let list = el("div", "opts");
+    let needle = "";
+    const draw = () => {
+      list.textContent = "";
+      const show = opts.filter((v) => !needle || (f.name ? f.name(v) : v).toUpperCase().includes(needle) || String(v).toUpperCase().includes(needle));
+      const limit = facetOpen[f.k + ":all"] || needle ? show.length : 10;
+      show.slice(0, limit).forEach((v) => {
+        const n = counts.get(v) || 0;
+        const lab = el("label", "opt" + (n ? "" : " zero"));
+        const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = sel.includes(v);
+        cb.addEventListener("change", () => {
+          const cur = new Set(state.f[f.k] || []);
+          cb.checked ? cur.add(v) : cur.delete(v);
+          state.f[f.k] = [...cur];
+          state.shown = PAGE; update(true);
+        });
+        lab.appendChild(cb);
+        if (f.flag && v) lab.appendChild(mark(v));
+        lab.appendChild(el("span", "nm", f.name ? f.name(v) : v));
+        lab.appendChild(el("span", "n", String(n)));
+        list.appendChild(lab);
+      });
+      if (show.length > limit) {
+        const b = el("button", "linkish small", `Show all ${show.length}`); b.type = "button";
+        b.addEventListener("click", () => { facetOpen[f.k + ":all"] = true; draw(); });
+        list.appendChild(b);
+      }
+      if (sel.length && f.k !== "st") {
+        const c = el("button", "linkish small", "Clear"); c.type = "button";
+        c.addEventListener("click", () => { state.f[f.k] = []; update(true); });
+        list.appendChild(c);
+      }
+    };
+    if (f.search && opts.length > 10) {
+      const inp = document.createElement("input"); inp.type = "search"; inp.placeholder = "Find a " + f.label.toLowerCase();
+      inp.setAttribute("aria-label", "Find a " + f.label.toLowerCase());
+      inp.addEventListener("input", () => { needle = inp.value.trim().toUpperCase(); draw(); });
+      d.appendChild(inp);
+    }
+    d.appendChild(list); draw();
+    box.appendChild(d);
+  });
+}
+
+function setDates(from, to) {
+  state.from = from || ""; state.to = to || "";
+  if (state.from && state.to && state.from > state.to) [state.from, state.to] = [state.to, state.from];
+  $("h-from").value = state.from; $("h-to").value = state.to;
+  state.shown = PAGE; update(true);
+}
+function presets() {
+  const box = $("h-presets"); box.textContent = "";
+  const today = zoneDay(new Date().toISOString());
+  const back = (days) => zoneDay(new Date(Date.now() - days * 864e5).toISOString());
+  const yr = today.slice(0, 4);
+  const items = [["Last 7 days", back(7), today], ["Last 30 days", back(30), today], ["Last 12 months", back(365), today]];
+  for (let y = Number(yr); y >= FIRST_YEAR; y--) items.push([String(y), `${y}-01-01`, `${y}-12-31`]);
+  items.push(["Any date", "", ""]);
+  items.forEach(([t, a, b]) => {
+    const btn = el("button", "chip-btn" + (state.from === a && state.to === b ? " on" : ""), t); btn.type = "button";
+    btn.addEventListener("click", () => setDates(a, b));
+    box.appendChild(btn);
+  });
+  $("h-zone").textContent = `Dates in ${zoneName()}. For one day, set both to it.`;
+}
+
+/* Active filters as chips above the map; each removes itself. */
+function chips() {
+  const box = $("h-chips"); box.textContent = "";
+  const add = (text, fn) => {
+    const b = el("button", "chip", text); b.type = "button"; b.title = "Remove this filter";
+    b.appendChild(el("span", "x", "×")); b.addEventListener("click", fn); box.appendChild(b);
+  };
+  FACETS.forEach((f) => {
+    const sel = state.f[f.k] || [];
+    if (f.k === "st") return;
+    sel.forEach((v) => add(`${f.label}: ${f.name ? f.name(v) : v}`, () => { state.f[f.k] = sel.filter((x) => x !== v); update(true); }));
+  });
+  if (state.from || state.to) add(`Dates: ${state.from || "start"} to ${state.to || "now"}`, () => setDates("", ""));
+  if (state.q) add(`Search: ${state.q}`, () => { state.q = ""; $("h-q").value = ""; update(true); });
+  if (box.childNodes.length) {
+    const c = el("button", "linkish small", "Clear all filters"); c.type = "button";
+    c.addEventListener("click", () => { state.f = JSON.parse(JSON.stringify(DEFAULT)); state.q = ""; $("h-q").value = ""; setDates("", ""); });
+    box.appendChild(c);
+  }
+}
+
+/* ---------- the month timeline (stacked by country; bars set the date range) ---------- */
+const SVGNS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs) => { const e = document.createElementNS(SVGNS, tag); Object.entries(attrs || {}).forEach(([k, v]) => e.setAttribute(k, v)); return e; };
+const GROUPS = ["ru", "us", "cn", "other"]; // stacked bottom to top; this order keeps every adjacent pair apart in both themes
+function timeline() {
+  const box = $("h-timeline"); box.textContent = "";
+  const recs = filtered("date").filter((r) => r._month);
+  const now = zoneDay(new Date().toISOString()).slice(0, 7);
+  // From 2023 (GCAT's list here); earlier months only when the dates reach back (NotamForChina's Chinese launches).
+  let first = state.from && state.from.slice(0, 7) < "2023-01" ? state.from.slice(0, 7) : "2023-01", last = now;
+  recs.forEach((r) => { if (r._month > last) last = r._month; });
+  const months = [];
+  for (let y = Number(first.slice(0, 4)), m = Number(first.slice(5)); `${y}-${String(m).padStart(2, "0")}` <= last; m++) {
+    if (m > 12) { m = 1; y++; }
+    const key = `${y}-${String(m).padStart(2, "0")}`; if (key > last) break; months.push(key);
+  }
+  const bins = new Map(months.map((k) => [k, { us: 0, cn: 0, ru: 0, other: 0, n: 0 }]));
+  let early = 0;
+  recs.forEach((r) => { const b = bins.get(r._month); if (b) { b[group(r.actor)]++; b.n++; } else if (r._month < first) early++; });
+  const max = Math.max(1, ...[...bins.values()].map((b) => b.n));
+  const W = Math.max(320, box.clientWidth || 800), H = 92, padL = 30, padB = 18, plotH = H - padB - 6;
+  const bw = (W - padL - 4) / months.length;
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", height: H, role: "img",
+    "aria-label": "Launches per month, stacked by country. Drag across months to set the date range; click one month to choose it." });
+  // grid and y labels
+  const ticks = [0, Math.round(max / 2), max];
+  ticks.forEach((t) => {
+    const y = 6 + plotH - (t / max) * plotH;
+    svg.appendChild(svgEl("line", { x1: padL, x2: W - 4, y1: y, y2: y, class: "tl-grid" }));
+    const tx = svgEl("text", { x: padL - 4, y: y + 3, class: "tl-ax", "text-anchor": "end" }); tx.textContent = String(t); svg.appendChild(tx);
+  });
+  const selFrom = state.from ? state.from.slice(0, 7) : null, selTo = state.to ? state.to.slice(0, 7) : null;
+  months.forEach((k, i) => {
+    const x = padL + i * bw, b = bins.get(k);
+    const inSel = (!selFrom || k >= selFrom) && (!selTo || k <= selTo);
+    const g = svgEl("g", { class: "tl-m" + (state.from || state.to ? (inSel ? " in" : " out") : "") + (k > now ? " future" : ""), "data-m": k });
+    let y = 6 + plotH;
+    const segs = GROUPS.filter((gr) => b[gr]);
+    segs.forEach((gr, j) => {
+      const h = (b[gr] / max) * plotH;
+      const top = j === segs.length - 1;
+      const hh = Math.max(1, h - (top ? 0 : 2)); // 2px surface gap between stacked segments
+      y -= h;
+      const w = Math.max(1, bw - 2);
+      if (top && hh > 4) {
+        // rounded data-end on the top segment only
+        const r = Math.min(3, w / 2);
+        svg.appendChild(g);
+        g.appendChild(svgEl("path", { class: "tl-bar g-" + gr, d: `M${x + 1},${y + hh} V${y + r} Q${x + 1},${y} ${x + 1 + r},${y} H${x + 1 + w - r} Q${x + 1 + w},${y} ${x + 1 + w},${y + r} V${y + hh} Z` }));
+      } else g.appendChild(svgEl("rect", { class: "tl-bar g-" + gr, x: x + 1, y: y + (top ? 0 : 2), width: w, height: hh }));
+    });
+    g.appendChild(svgEl("rect", { class: "tl-hit", x, y: 0, width: bw, height: H - padB + 4 }));
+    const tip = svgEl("title"); tip.textContent = `${monthName(k)}: ${b.n} (US ${b.us}, China ${b.cn}, Russia ${b.ru}, others ${b.other})`; g.appendChild(tip);
+    svg.appendChild(g);
+    if (k.endsWith("-01") || i === 0) {
+      const tx = svgEl("text", { x: x + 1, y: H - 4, class: "tl-ax" }); tx.textContent = k.slice(0, 4); svg.appendChild(tx);
+    }
+  });
+  if (early) { const tx = svgEl("text", { x: W - 4, y: 12, class: "tl-ax", "text-anchor": "end" }); tx.textContent = `${early} before ${first.slice(0, 4)} not drawn: set an earlier year`; svg.appendChild(tx); }
+  // brush: drag across months, or click one
+  let start = null;
+  const monthAt = (ev) => { const t = ev.target.closest && ev.target.closest(".tl-m"); return t ? t.getAttribute("data-m") : null; };
+  svg.addEventListener("pointerdown", (ev) => { start = monthAt(ev); if (start) svg.setPointerCapture(ev.pointerId); });
+  svg.addEventListener("pointerup", (ev) => {
+    if (!start) return;
+    const pt = document.elementFromPoint(ev.clientX, ev.clientY);
+    const t = pt && pt.closest && pt.closest(".tl-m");
+    let end = t ? t.getAttribute("data-m") : start;
+    let a = start, b = end; if (a > b) [a, b] = [b, a];
+    start = null;
+    const lastDay = (m) => { const [y, mo] = m.split("-").map(Number); return `${m}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, "0")}`; };
+    if (state.from === `${a}-01` && state.to === lastDay(b)) setDates("", ""); else setDates(`${a}-01`, lastDay(b));
+  });
+  box.appendChild(svg);
+  const lg = el("p", "small muted tl-note", "Launches per month in your filters, by launching country (colours as on the map). Drag across months to set the dates; click a chosen month again to clear.");
+  box.appendChild(lg);
+}
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthName = (k) => `${MON[Number(k.slice(5)) - 1]} ${k.slice(0, 4)}`;
+
+/* ---------- the list ---------- */
+const COLS = [
+  { k: "time", label: "When", sort: (r) => r.time || "" },
+  { k: "actor", label: "Country", sort: (r) => r.actor || "" },
+  { k: "vehicle", label: "Vehicle", sort: (r) => r.vehicle || "" },
+  { k: "payload", label: "Payload or mission", sort: (r) => r.payload || r.label || "" },
+  { k: "mtype", label: "Type", sort: (r) => r.mtype || "" },
+  { k: "site", label: "Site", sort: (r) => r.site || "" },
+  { k: "orbit", label: "Orbit", sort: (r) => r.orbit || "" },
+];
+function when(r) {
+  if (!r.time) return "undated";
+  if (r.time_basis === "time" || r.time_basis === "net" || r.time_basis === "from notam") return fmt(r.time, { year: true });
+  return fmt(r.time, { year: true, time: false }) + (r.time_basis === "month" ? " (month)" : "");
+}
+function list(rows) {
+  const box = $("h-list"); box.textContent = "";
+  const col = COLS.find((c) => c.k === state.sort) || COLS[0];
+  rows = rows.slice().sort((a, b) => { const x = col.sort(a), y = col.sort(b); return (x < y ? -1 : x > y ? 1 : 0) * state.dir || (a.time < b.time ? 1 : -1); });
+  const t = el("table", "h-table"), th = el("thead"), tr = el("tr");
+  COLS.forEach((c) => {
+    const h = el("th"); const b = el("button", "th-sort", c.label + (state.sort === c.k ? (state.dir < 0 ? " ▾" : " ▴") : "")); b.type = "button";
+    b.addEventListener("click", () => { if (state.sort === c.k) state.dir = -state.dir; else { state.sort = c.k; state.dir = c.k === "time" ? -1 : 1; } update(false); });
+    h.setAttribute("aria-sort", state.sort === c.k ? (state.dir < 0 ? "descending" : "ascending") : "none");
+    h.appendChild(b); tr.appendChild(h);
+  });
+  th.appendChild(tr); t.appendChild(th);
+  const tb = el("tbody");
+  rows.slice(0, state.shown).forEach((r) => {
+    const row = el("tr", "pickable" + (r.id === state.sel ? " sel" : "") + (r.status === "upcoming" ? " up" : ""));
+    row.tabIndex = 0; row.dataset.id = r.id;
+    const w = el("td"); w.appendChild(document.createTextNode(when(r)));
+    if (r.status === "upcoming") w.appendChild(el("span", "badge badge-up", r.net_passed ? "NET passed" : "Scheduled"));
+    if (r.provisional) w.appendChild(el("span", "badge badge-warn", "Provisional"));
+    if (r.status === "notice") w.appendChild(el("span", "badge", "Notice"));
+    if (r.cancelled) w.appendChild(el("span", "badge badge-warn", "Cancelled"));
+    if (r.outcome && r.outcome !== "success") w.appendChild(el("span", "badge badge-warn", r.outcome === "failure" ? "Failure" : r.outcome));
+    const c = el("td"); c.appendChild(mark(r.actor));
+    const pay = el("td", "", r.payload || (r.status === "notice" ? r.label : "") || (r.sources[0] === "nfc" ? "not given" : ""));
+    if ((r.programmes || []).length) pay.title = "Programme: " + r.programmes.join(", ");
+    row.append(w, c, el("td", "", r.vehicle || ""), pay, el("td", "", r.mtype), el("td", "", r.site || ""), el("td", "", r.orbit || ""));
+    row.addEventListener("click", () => select(r.id, true));
+    row.addEventListener("keydown", (e) => { if (e.key === "Enter") select(r.id, true); });
+    tb.appendChild(row);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  const more = $("h-more"); more.hidden = rows.length <= state.shown;
+  more.textContent = `Show ${Math.min(PAGE, rows.length - state.shown)} more of ${rows.length - state.shown}`;
+}
+
+/* ---------- the detail card ---------- */
+function fact(dl, k, v) { if (v === null || v === undefined || v === "") return; dl.append(el("dt", "", k), v instanceof Node ? (() => { const d = el("dd"); d.appendChild(v); return d; })() : el("dd", "", String(v))); }
+function quick(label, k, v) {
+  const b = el("button", "chip-btn", label); b.type = "button"; b.title = "Show only launches with this " + k;
+  b.addEventListener("click", () => { state.f[k] = [v]; state.sel = ""; update(true); });
+  return b;
+}
+function detail(r) {
+  const box = $("h-detail"); box.textContent = "";
+  if (!r) { box.hidden = true; return; }
+  box.hidden = false;
+  const head = el("div", "d-head");
+  head.appendChild(el("h3", "", r.payload && r.vehicle && r.vehicle !== NK ? `${r.vehicle} · ${r.payload}` : r.label || r.payload || "Launch"));
+  const x = el("button", "linkish d-close", "Close"); x.type = "button"; x.addEventListener("click", () => select("", false));
+  head.appendChild(x); box.appendChild(head);
+  const meta = el("p", "small who"); meta.appendChild(mark(r.actor));
+  meta.appendChild(document.createTextNode(`${countryName(r.actor)} · ${STATUS[r.status] || r.status}` + (r.provisional ? " · provisional: Launch Library 2 reports it flown; GCAT has not listed it yet" : "")));
+  box.appendChild(meta);
+  const dl = el("dl", "facts");
+  fact(dl, r.status === "upcoming" ? "NET" : "When", when(r) + (r.status === "upcoming" && r.net_precision ? ` (precision: ${r.net_precision})` : ""));
+  if (r.chart_time) fact(dl, "Charted time", `${fmt(r.chart_time, { year: true })}: the time in the charted name; GCAT's launch time is shown above`);
+  fact(dl, "Vehicle", [r.vehicle, r.gcat_vehicle && r.gcat_vehicle !== r.vehicle ? `(GCAT: ${r.gcat_vehicle})` : "", r.ll2_vehicle && r.ll2_vehicle !== r.vehicle ? `(LL2: ${r.ll2_vehicle})` : ""].filter(Boolean).join(" "));
+  fact(dl, "Site", [r.site, r.pad_name].filter(Boolean).join(" · ") + (r.pad ? ` (${r.pad[1].toFixed(2)}, ${r.pad[0].toFixed(2)}${r.pad_basis === "site" ? ", site position" : ""})` : ""));
+  fact(dl, "Payload", r.payload);
+  if (r.payloads && r.payloads.count) fact(dl, "Payloads (GCAT)", `${r.payloads.count}: ${r.payloads.names.join(", ")}${r.payloads.more ? ` and ${r.payloads.more} more` : ""}`);
+  const notes = (r.programmes || []).map((p) => IX.programme_notes[p] ? `${p} (${IX.programme_notes[p]})` : p);
+  fact(dl, "Type", r.mtype + (notes.length ? ` · ${notes.join(", ")}` : ""));
+  fact(dl, "Orbit", r.orbit + (r.inc ? ` · payload inclination ${r.inc}° (GCAT)` : ""));
+  if (r.outcome) fact(dl, "Outcome", r.outcome);
+  if (r.path) fact(dl, "Flight path", r.path.kind === "drawn" ? `as charted (azimuth about ${r.path.az}°)` : `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
+  else fact(dl, "Flight path", r.pad ? "none: no closure area, inclination or corridor history to infer an azimuth from" : "none: no pad position");
+  if (r.join && r.join.pass === 3) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat} by a NOTAM that NotamForChina lists for this launch (same number and FIR)` + (r.join.hours > 1 ? `; the charted time is ${r.join.hours >= 8000 ? "about a year" : r.join.hours + " h"} out` : ""));
+  else if (r.join) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat}: ${r.join.hours} h apart` + (r.join.nm !== null ? `, ${r.join.nm} NM apart` : "") + (r.join.same ? ", same vehicle or programme" : "") + (r.join.pass === 2 ? " (matched by vehicle and place; the map's time differs)" : ""));
+  else if (r.gcat) fact(dl, "GCAT", r.gcat);
+  if (r.ll2_url) { const a = el("a", "", "Launch Library 2 record (JSON)"); a.href = r.ll2_url; a.rel = "noopener"; fact(dl, "Schedule", a); }
+  fact(dl, "Sources", r.sources.map((s) => SOURCES[s] || s).join(" · "));
+  box.appendChild(dl);
+  const q = el("p", "quick small"); q.appendChild(document.createTextNode("Show only: "));
+  if (r.vehicle && r.vehicle !== NK) q.appendChild(quick(r.vehicle, "veh", r.vehicle));
+  if (r.site) q.appendChild(quick(r.site, "site", r.site));
+  (r.programmes || []).forEach((p) => q.appendChild(quick(p, "prog", p)));
+  if (r.actor) q.appendChild(quick(countryName(r.actor), "cc", r.actor));
+  box.appendChild(q);
+  (r.closures || []).forEach((c) => box.appendChild(el("p", "small", `Closure area ${c.area} coincided in ${c.level}` + (c.window ? ` (${fmt(c.window[0])} to ${fmt(c.window[1], { date: false })})` : "") + ". Coincidence, not proof the area was for this launch.")));
+  const evs = (r.chart || []).flatMap((id) => chartById.get(id) || []);
+  const nfcN = r.nfc_notices || [];
+  const nfcFor = (num) => nfcN.find((x) => x.chart && x.number === num);
+  if (evs.length) {
+    box.appendChild(el("h4", "", `Charted: ${r.areas} closure area${r.areas === 1 ? "" : "s"}, ${evs.reduce((n, e) => n + e.notams.length, 0)} notice(s)`));
+    if (r.chart_labels) box.appendChild(el("p", "small muted", "Also charted as: " + r.chart_labels.join("; ")));
+    const seen = new Set();
+    evs.forEach((e) => {
+      e.notams.forEach((n) => {
+        if (seen.has(n.number + n.text.slice(0, 40))) return; seen.add(n.number + n.text.slice(0, 40));
+        const d = el("details", "notam");
+        d.appendChild(el("summary", "", (n.number || "Notice") + (n.q ? ` · ${n.q.fir} · ${n.q.code}` : "") + (n.start ? ` · ${fmt(n.start)} to ${fmt(n.end)}` : "")));
+        if (n.relayed) d.appendChild(el("p", "small badge-warn", `Relayed: issued by ${countryName(n.issuing_state)} for ${n.named_states.map(countryName).join(", ")}.`));
+        (n.checks || []).forEach((c) => d.appendChild(el("p", "small muted", "Check: " + c)));
+        const x = n.number && nfcFor(n.number);
+        if (x) d.appendChild(el("p", "small muted", "Check: " + nfcCheck(x)));
+        d.appendChild(el("pre", "", n.text));
+        box.appendChild(d);
+      });
+      e.texts.forEach((t) => { const d = el("details", "notam"); d.append(el("summary", "", "Warning or note"), el("pre", "", t)); box.appendChild(d); });
+    });
+    const links = [...new Set(evs.flatMap((e) => e.links))];
+    if (links.length) {
+      const p = el("p", "small"); p.appendChild(document.createTextNode("Sources: "));
+      links.forEach((u, i) => { try { const a = el("a", "", new URL(u).hostname); a.href = u; a.rel = "noopener"; if (i) p.appendChild(document.createTextNode(" · ")); p.appendChild(a); } catch { /* bad link */ } });
+      box.appendChild(p);
+    }
+    const wh = evs.reduce((n, e) => n + (e.withheld_notes || 0), 0);
+    if (wh) box.appendChild(el("p", "muted small", `${wh} note(s) on the source map are not public notices and are not shown.`));
+  }
+  if (r.nfc) nfcSection(box, r, nfcN);
+}
+
+/* NotamForChina's notices on a record: numbers, FIRs, windows and charted areas (it carries no NOTAM text). Those
+   also charted are shown under the charted notice, as a check. */
+const NFC_JOIN = {
+  tag: (r) => `joined to GCAT ${r.gcat} by NotamForChina`,
+  vehicle: (r, j) => `joined to GCAT ${r.gcat}: same vehicle, ${j.hours} h apart`,
+  slip: (r, j) => `joined to GCAT ${r.gcat}: same vehicle and site, ${j.hours} h apart (NotamForChina's time may be the planned one)`,
+  notam: () => "joined by a NOTAM charted for this launch (same number and FIR)",
+  chart: (r, j) => `joined to a charted event: ${j.hours} h apart`,
+};
+function nfcCheck(x) {
+  if (x.gap_nm !== undefined) {
+    const agree = IX.nfc ? IX.nfc.agree_nm : 5;
+    return x.gap_nm <= agree ? `NotamForChina charts this notice too; its corners lie within ${x.gap_nm} NM of the charted area.`
+      : `NotamForChina charts this notice up to ${x.gap_nm} NM from the charted area: one of the two may be drawn for another notice.`;
+  }
+  if (x.ring) return "NotamForChina charts this notice; Launch has no charted area for it, so NotamForChina's is drawn.";
+  return "NotamForChina lists this notice" + (x.start ? ` (${fmt(x.start)} to ${fmt(x.end, { date: false })})` : "") + ".";
+}
+function nfcSection(box, r, all) {
+  const own = all.filter((x) => !x.chart);
+  const charted = own.filter((x) => x.ring).length;
+  box.appendChild(el("h4", "", `From NotamForChina: ${own.length} notice${own.length === 1 ? "" : "s"}, ${charted} charted` + (all.length > own.length ? ` (and ${all.length - own.length} charted above)` : "")));
+  const j = r.nfc_join;
+  if (j && NFC_JOIN[j.by]) box.appendChild(el("p", "small muted", "Its launch record is " + NFC_JOIN[j.by](r, j) + "."));
+  else if (r.nfc_unmatched) box.appendChild(el("p", "small badge-warn", "GCAT lists no launch of this vehicle near this time, so these notices have no identified launch: an attempt that was scrubbed or moved, or a sheet entry made ahead of a launch."));
+  else if (r.sources[0] === "nfc") box.appendChild(el("p", "small muted", `GCAT's list on this page starts in ${(IX.ledger_since || "2023").slice(0, 4)}, so this launch stands on NotamForChina's record: its time, vehicle and site.`));
+  if (own.length) {
+    const ul = el("ul", "plain nfc-list small");
+    own.forEach((x) => {
+      const li = el("li");
+      li.appendChild(el("b", "", x.number || "Notice"));
+      const bits = [x.fir, x.label, x.start ? `${fmt(x.start)} to ${fmt(x.end, { date: false })}` : "", x.ring ? "charted" : "no area"].filter(Boolean);
+      li.appendChild(document.createTextNode(" · " + bits.join(" · ") + (x.folded ? " (window from the sheet, area from the map)" : "")));
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+  }
+  box.appendChild(el("p", "small muted", "NotamForChina (Apache-2.0) gives numbers, FIRs, windows and the areas as charted; it carries no NOTAM text. Credit on the Sources tab."));
+}
+
+function select(id, fly) {
+  state.sel = id || "";
+  const r = byId.get(state.sel) || null;
+  if (map) map.select(r, (r && (r.chart || []).flatMap((x) => chartById.get(x) || [])) || [], fly);
+  document.querySelectorAll("#h-list tr.sel").forEach((t) => t.classList.remove("sel"));
+  if (r) { const row = document.querySelector(`#h-list tr[data-id="${CSS.escape(r.id)}"]`); if (row) row.classList.add("sel"); }
+  detail(r);
+  writeHash();
+  if (r && window.matchMedia("(max-width: 1099px)").matches) $("h-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/* ---------- one update for every change ---------- */
+let fitNext = true;
+function update(refit) {
+  const rows = filtered();
+  lastFiltered = rows;
+  const total = IX.records.length;
+  const up = rows.filter((r) => r.status === "upcoming").length;
+  $("h-count").textContent = `${rows.length} of ${total} shown` + (up ? ` (${up} scheduled)` : "") + (rows.length > state.shown ? `; the list shows ${state.shown}` : "");
+  renderFacets(); presets(); chips(); timeline(); list(rows);
+  if (map) map.show(rows, state.areas, refit || fitNext);
+  fitNext = false;
+  if (state.sel && !byId.get(state.sel)) state.sel = "";
+  detail(byId.get(state.sel) || null);
+  writeHash();
+}
+
+export async function initHistory(ix, hist) {
+  IX = ix; HIST = hist;
+  IX.records.forEach((r) => byId.set(r.id, r));
+  HIST.events.forEach((e) => { if (!chartById.has(e.id)) chartById.set(e.id, []); chartById.get(e.id).push(e); });
+  rekey();
+  state = readHash();
+  $("h-q").value = state.q; $("h-from").value = state.from; $("h-to").value = state.to; $("h-areas").checked = state.areas;
+  let qt = null;
+  $("h-q").addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { state.q = $("h-q").value.trim(); state.shown = PAGE; update(true); }, 200); });
+  $("h-from").addEventListener("change", () => setDates($("h-from").value, $("h-to").value));
+  $("h-to").addEventListener("change", () => setDates($("h-from").value, $("h-to").value));
+  $("h-areas").addEventListener("change", () => { state.areas = $("h-areas").checked; update(false); });
+  $("h-more").addEventListener("click", () => { state.shown += PAGE; list(lastFiltered); });
+  $("h-fit").addEventListener("click", () => map && map.show(lastFiltered, state.areas, true));
+  $("h-copy").addEventListener("click", async () => {
+    writeHash();
+    try { await navigator.clipboard.writeText(location.href); $("h-copy").textContent = "Link copied"; } catch { $("h-copy").textContent = "Copy the address bar"; }
+    setTimeout(() => { $("h-copy").textContent = "Copy link to this view"; }, 2500);
+  });
+  $("h-toggle").addEventListener("click", () => {
+    const side = $("h-side"); side.classList.toggle("open");
+    $("h-toggle").setAttribute("aria-expanded", side.classList.contains("open") ? "true" : "false");
+  });
+  const c = IX.counts;
+  FIRST_YEAR = Math.min(2023, ...IX.records.filter((r) => r.time).map((r) => Number(r.time.slice(0, 4))));
+  $("h-about").textContent = `${c.gcat} orbital launches GCAT lists since ${IX.ledger_since.slice(0, 4)}, ${c.chart} events in Launch's charted notices (${c.gcat_joined} GCAT launches joined to them), and Launch Library 2's schedule.`
+    + (c.nfc ? ` NotamForChina adds the notices of ${c.nfc.records - c.nfc.own_records} of those launches, and ${c.nfc.own_launched} Chinese launches from ${FIRST_YEAR} to ${Number((IX.ledger_since || "2023").slice(0, 4)) - 1}.` : "")
+    + ` Updated ${fmt(IX.generated_at)}.`;
+  update(true); // filters and list first; the map follows when its base has loaded
+  map = await createHistoryMap($("hmap"), IX, { onPick: (id) => select(id, false), onSite: (name) => { state.f.site = [name]; update(true); } });
+  map.setCharted(HIST.events);
+  map.show(lastFiltered, state.areas, true);
+  if (state.sel && byId.get(state.sel)) select(state.sel, true);
+  if (T && T.onChange) T.onChange(() => { rekey(); update(false); });
+  return {
+    resize: () => map && map.resize(), refresh: () => update(false),
+    // The address changed by hand or by a link (not by this page): take the view it names.
+    fromHash: () => {
+      const want = location.hash, before = state.sel;
+      writeHash();
+      if (location.hash === want) return;
+      history.replaceState(null, "", want);
+      state = readHash();
+      $("h-q").value = state.q; $("h-from").value = state.from; $("h-to").value = state.to; $("h-areas").checked = state.areas;
+      update(true);
+      if (state.sel && state.sel !== before && byId.get(state.sel)) select(state.sel, true);
+    },
+  };
+}
