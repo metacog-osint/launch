@@ -3,7 +3,7 @@
 // closure areas. The selected launch is drawn on top with its pad. Same base map as map.js. Colours come from the
 // style.css actor tokens through MapLibre paint (no inline styles, CSP).
 import * as ml from "./vendor/maplibre-gl/maplibre-gl.mjs";
-import { buildStyle } from "./map.js";
+import { buildStyle, addProjectionToggle, fitCoords, worldZoom } from "./map.js";
 import { geodesic } from "./notam.js";
 
 const dark = matchMedia("(prefers-color-scheme: dark)");
@@ -54,12 +54,13 @@ function pathLines(r, chartEvents) {
 export async function createHistoryMap(container, IX, { onPick, onSite }) {
   const first = await buildStyle();
   const map = new ml.Map({
-    container, style: first.style, center: [100, 30], zoom: Math.max(0, Math.log2(container.clientWidth / 512)),
+    container, style: first.style, center: [100, 30], zoom: worldZoom(container),
     dragRotate: false, pitchWithRotate: false, cooperativeGestures: true,
     attributionControl: { compact: true, customAttribution: "Land: Natural Earth · Launches: GCAT (J. McDowell, CC BY 4.0), Launch Library 2, Launch's charted notices · Chinese notices: NotamForChina (mikezang, Apache-2.0)" },
   });
   map.touchZoomRotate.disableRotation();
   map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
+  addProjectionToggle(map);
   map.getCanvas().setAttribute("aria-label", "Map of launch sites and flight paths for the launches in your filters. Every launch on it is also in the list below.");
   const chartById = new Map();
   const featCache = new Map(); // per launch: its path and area features, built once
@@ -161,12 +162,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
     const s = map.getSource("h_" + name);
     if (s) s.setData(data[name]);
   }
-  function fit(coords, maxZoom = 6, padding = 50) {
-    if (!coords.length) return;
-    const b = new ml.LngLatBounds();
-    coords.forEach((c) => b.extend(c));
-    map.fitBounds(b, { padding, maxZoom, duration: 600 });
-  }
+  const fit = (coords, maxZoom = 6, padding = 50) => fitCoords(map, coords, { padding, maxZoom, duration: 600 });
   // From 1100 px wide the detail card (style.css .h-detail: 380 px, 52 px from the right) lies over the map, so a
   // selected launch is fitted into the part of the map the card leaves clear.
   const besideCard = () => matchMedia("(min-width: 1100px)").matches && container.clientWidth - 482 >= 200
@@ -206,7 +202,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
     opacity = rows.length <= 40 ? 0.9 : rows.length <= 200 ? 0.6 : 0.32;
     ["h-paths-drawn", "h-paths-est"].forEach((l) => map.getLayer(l) && map.setPaintProperty(l, "line-opacity", opacity));
     if (refit) {
-      if (rows.length > 600 || !ends.length) map.easeTo({ center: [100, 30], zoom: Math.max(0, Math.log2(container.clientWidth / 512)), duration: 600 });
+      if (rows.length > 600 || !ends.length) map.easeTo({ center: [100, 30], zoom: worldZoom(container), duration: 600 });
       else fit(ends, rows.length === 1 ? 6 : 5);
     }
   }
