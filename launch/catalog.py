@@ -29,7 +29,7 @@ import math
 import re
 from datetime import datetime, timedelta, timezone
 
-from . import gcat, history, notam
+from . import gcat, history, notam, overfly
 from . import nfc as NFC
 from . import programs as P
 
@@ -934,7 +934,10 @@ def _bear(pad, areas: list[dict]) -> list[dict]:
 
 
 def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[dict], now: str,
-                nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None) -> dict:
+                nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None,
+                world: "overfly.World | None" = None) -> dict:
+    """The History tab's list (data/launches.json). `world` (overfly.World): when given, each record with a flight
+    path gets `over`, the countries its ground track crosses (overfly.py)."""
     sites = ledger.get("sites") or {}
     nowdt = _dt(now)
     events = [orient_paths(e, sites) for e in chart_events(hist)]
@@ -1255,6 +1258,10 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                           inc_note=note, orbit_code=orbit_code, orbit=r.get("orbit"))
         if path:
             r["path"] = path
+            if world is not None:
+                over = overfly.overflight(world, r, drawn or [])
+                if over is not None:
+                    r["over"] = over
         far = farthest_nm(r.get("pad"), areas)
         if far is not None:
             r["far_nm"] = far

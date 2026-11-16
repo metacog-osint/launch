@@ -121,6 +121,8 @@ export function properties(r, events, o) {
     path_azimuth_deg: r.path && r.path.az != null ? r.path.az : null, path_basis: (r.path && r.path.basis) || "",
     path_length_nm: (r.path && r.path.len_nm) ?? null, farthest_area_nm: r.far_nm ?? null,
     notams: notams(r, events).join("; "), sources: (r.sources || []).map((s) => SOURCE[s] || s).join("; "),
+    // One list per path ("|" between a charted event's paths, longest first).
+    overflies: r.over ? r.over.map((p) => p.map((x) => `${x.cc} ${x.from}-${x.to} NM`).join("; ") || "water only").join(" | ") : "",
     gcat: r.gcat || "", ll2: r.ll2_url || "", link: o.link(r.id),
   };
 }
@@ -160,7 +162,8 @@ const LABELS = { label: "Name", status: "Status", kind: "Launch kind", time_utc:
   vehicle: "Vehicle", payload: "Payload", programmes: "Programmes", mission_type: "Mission type", site: "Launch site",
   orbit: "Orbit", inclination_deg: "Inclination (deg)", outcome: "Outcome", flight_path: "Flight path",
   path_azimuth_deg: "Path azimuth (deg)", path_basis: "Path basis", path_length_nm: "Charted path length (NM)",
-  farthest_area_nm: "Farthest closure area (NM from the pad)", notams: "NOTAMs", sources: "Sources", gcat: "GCAT",
+  farthest_area_nm: "Farthest closure area (NM from the pad)",
+  overflies: "Path crosses (land, NM from start)", notams: "NOTAMs", sources: "Sources", gcat: "GCAT",
   ll2: "Launch Library 2", link: "On Launch" };
 
 export function toKML(rows, o) {
@@ -209,7 +212,7 @@ function cell(k, v) {
 export function toCSV(rows, o) {
   const cols = ["id", "status", "kind", "time_utc", "when_local", "time_precision", "country", "country_name", "label", "vehicle",
     "payload", "programmes", "mission_type", "site", "pad_lat", "pad_lon", "orbit", "inclination_deg", "outcome",
-    "flight_path", "path_azimuth_deg", "path_basis", "path_length_nm", "farthest_area_nm", "closure_areas", "notams", "sources", "gcat", "ll2", "link"];
+    "flight_path", "path_azimuth_deg", "path_basis", "path_length_nm", "farthest_area_nm", "overflies", "closure_areas", "notams", "sources", "gcat", "ll2", "link"];
   const head = cols.map((c) => (c === "when_local" ? `when (${o.zone})` : c));
   const lines = [head.map((h) => cell("", h)).join(",")];
   rows.forEach((r) => {

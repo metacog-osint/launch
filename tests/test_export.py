@@ -45,6 +45,7 @@ RECS = [
      "mtype": "Earth observation", "site": "Jiuquan", "pad": [170.0, 10.0], "orbit": "LEO", "inc": 97.4,
      "outcome": "success", "path": {"kind": "drawn", "az": 80, "nm": None, "basis": "path as charted"},
      "sources": ["chart", "gcat"], "chart": ["hist:a"], "gcat": "2026-001",
+     "over": [[{"cc": "CN", "from": 0, "to": 410}, {"cc": "MN", "from": 410, "to": 780}], []],
      "nfc_notices": [{"number": "A0002/26", "ring": [[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]}]},
     {"id": "gcat:b", "status": "upcoming", "time": "2026-12-01T00:00:00Z", "time_basis": "date", "actor": "US",
      "label": "B", "vehicle": "Falcon 9", "payload": "Starlink", "programmes": [], "mtype": "LEO broadband constellation",
@@ -131,6 +132,8 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(b["pad_lon"], "-80.5774")  # numbers are not prefixed
         self.assertEqual(c["when (America/Chicago)"], "")
         self.assertEqual(c["pad_lat"], "")
+        self.assertEqual(a["overflies"], "CN 0-410 NM; MN 410-780 NM | water only")
+        self.assertEqual(b["overflies"], "")  # no `over`: not read
 
     def test_kml(self):
         root = ET.fromstring(self.o["kml"].encode("utf-8"))
