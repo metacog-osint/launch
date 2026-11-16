@@ -15,6 +15,8 @@ python tools/launch.py history [KML]   # source map export -> history/history.js
 python tools/launch.py backfill DIR    # GCAT tables -> history/ledger.json (committed baseline)
 python tools/launch.py collect         # tfr + orbit lanes -> data/snapshot.json; ledger -> data/ledger.json
 python tools/launch.py nfc fetch|build # NotamForChina at the pinned commit -> history/nfc.json (committed)
+python tools/launch.py joey fetch|build # Joey0609/notams at the pinned commit -> history/joey.json (committed)
+python tools/launch.py wayback fetch|build # Internet Archive copies of FAA TFRs and NGA warnings -> history/wayback.json
 python tools/launch.py build           # site/ (incl. data/launches.json, the History tab's list); privacy check on site/
 python tools/launch.py check           # registers, feed lint, public gate, privacy check (site/ and tracked files)
 python -m unittest discover -s tests   # offline tests
@@ -27,7 +29,8 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
 - `launch/live.py` live lanes; `launch/feed.py` the feed; `launch/catalog.py` the History tab's list;
   `launch/programs.py` vehicle, site, programme and mission-type names; `launch/patterns.py` pad patterns.
 - `launch/history.py` import of the source map; `launch/public.py` the public gate; `launch/privacy.py` the
-  privacy check; `launch/nfc.py` NotamForChina.
+  privacy check; `launch/nfc.py` NotamForChina; `launch/joey.py` Joey0609/notams;
+  `launch/wayback.py` Internet Archive copies, `launch/ngawarn.py` Orbit's NGA warning rules (copied).
 - `site_src/` the page: tabs `#live`, `#history`, `#patterns`, `#paste`, `#sources`. `history.js` and `hmap.js`
   are the History tab. `tic-nav.*` and `tic-time.*` are copies from the hub and `doctrine/kit/` from the doctrine
   kit: fix those at their source and copy them in again.
@@ -35,8 +38,9 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
 ## History
 - **Sources, joined into one list** (`data/launches.json`): Launch's charted notices (a hand-built Google My Maps
   map of closure areas, NOTAM texts, flight paths and sites, 2022 onward, imported from an export), GCAT's orbital
-  launches since 2023, Launch Library 2's schedule, and NotamForChina (Chinese launches 2012-2026 and their
-  notices). A record's `sources` holds `chart`, `gcat`, `ll2`, `nfc`; `chart` lists the charted events joined into
+  launches since 2023, Launch Library 2's schedule, NotamForChina (Chinese launches 2012-2026 and their
+  notices) and Joey0609/notams (launch NOTAMs with their text, mostly China's, Dec 2020 onward). A record's
+  `sources` holds `chart`, `gcat`, `ll2`, `nfc`, `joey`, `wayback`; `chart` lists the charted events joined into
   it, `chart_time` keeps the time in the charted name, `chart_labels` its other names.
 - **Joins:** a charted event and a GCAT launch within 3 h and 200 NM or the same country (pass 1), or within 72 h,
   200 NM and the same vehicle or programme (pass 2); a charted event holding a NOTAM that NotamForChina lists for a
@@ -86,7 +90,28 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   waits for its map, so tab links and a pasted or hand-edited History address work before (or without) the maps
   loading. On a map 640 px wide or less the credit box starts closed (`map.js` `collapseAttribution()`).
 - **One notice per NOTAM:** where the charted notices and NotamForChina hold the same NOTAM (number and a shared
-  FIR), the charted text is shown and NotamForChina's ring is a check under it.
+  FIR), the charted text is shown and NotamForChina's ring is a check under it. Order: charted, then Joey0609/notams
+  (it carries the text), then NotamForChina.
+- **Joey0609/notams** (`launch/joey.py`, MIT, pinned `joey.SHA`): `joey fetch` copies the month files into
+  git-ignored `history/joey_source/`; `joey build` keeps launch-related notices only (`joey.launch_related`: the
+  parser's launch words or a WM Q-code, or a Chinese FIR's SFC-UNL danger/restricted/prohibited area open at most
+  6 h, or at most 4 days in periods of at most 2 h; never a cancellation, a window over 62 days or a
+  general-aviation or aerobatics notice) and drops the SOURCE line. Joins (`catalog.py`, Joey section): by NOTAM
+  (number and a shared FIR) to the record holding it; else a GCAT launch of the notice's state inside its window
+  (2 h either side) with its pad within 5,000 NM of the area (nearest pad; a window over 7 days only when one
+  launch qualifies); else counted in `counts.joey`, no record made. `build_site` refuses to build without
+  `history/JOEY-NOTAMS-LICENSE.txt` and publishes it beside the data.
+- **Internet Archive copies** (`launch/wayback.py`; NGA rules copied from Orbit into `launch/ngawarn.py`):
+  `wayback fetch [--since YYYY-MM-DD]` lists captures with the CDX API and fetches originals (`id_`), one request a
+  second at most, into git-ignored `history/wayback_source/` with `index.json` (a rerun fetches nothing twice):
+  every distinct capture of tfr.faa.gov's list page, the detail page of each SPACE OPERATIONS row (asked at the
+  list capture's time, since the FAA reuses page names every year; a page issued over 120 days from its list date is
+  refused), and every distinct capture of NGA's broadcast-warn API. `wayback build` -> `history/wayback.json`:
+  TFR number, window, location, areas, capture link (a TFR whose page was not read keeps its list row); NGA warnings
+  on Orbit's rule. Contacts, phones and emails on the pages are not kept. Joins (`catalog.py`): a TFR of at most 7
+  days holding a GCAT launch time (2 h either side) with the pad within 100 NM of its area; an NGA warning window
+  holding the launch time with the pad within 5,000 NM. Record key `archive_notices`, source `wayback`. The forum's
+  archived copies are never read.
 - **Address:** filter state is in the address (`#history?veh=LM-7A&site=Wenchang&...`). Addresses from before
   15 Nov 2026 used other words for the charted source and its flight-path value; `history.js` (`LEGACY`) reads them
   as the new ones. Record ids (`hist:`, `gcat:`, `nfc:`, `ll2:`) did not change, so `sel=` links still work.
@@ -138,5 +163,8 @@ anomaly, `baseline_ref` `faa-space-ops-tfrs-in-force`; everything else is routin
 Launch.
 
 ## Rules
+- Code: GNU AGPL-3.0 (`LICENSE`). Data keeps each source's licence (GCAT CC BY 4.0, NotamForChina Apache-2.0,
+  Joey0609/notams MIT, FAA and NGA works of the US Government); the vendored doctrine kit in `doctrine/kit/` keeps
+  its own.
 - Publicly available information only. Standard library only; tests offline. Times stored UTC.
 - Never `git add -A`; name the files. No key files. Never commit `history/source/`, `CLAUDE.local.md` or `.claude/`.

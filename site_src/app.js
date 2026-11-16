@@ -261,6 +261,15 @@ function sourcesBox() {
     p.append(el("b", "", "Chinese launches and their NOTAMs: "), a, document.createTextNode(` (commit ${n.commit.slice(0, 7)}) · ${n.licence} · `), lic, el("br"), document.createTextNode(n.attribution));
     box.appendChild(p);
   }
+  // Joey0609/notams' credit, from the data it came in (data/launches.json, from history/joey.json), with its licence.
+  const j = ix && ix.joey;
+  if (j) {
+    const p = el("p", "nfc-credit");
+    const a = el("a", "", "Joey0609/notams"); a.href = `https://${j.source}/tree/${j.commit}`; a.rel = "noopener";
+    const lic = el("a", "", "licence text"); lic.href = j.licence_file;
+    p.append(el("b", "", "Launch NOTAMs with their text, mostly China's, from December 2020: "), a, document.createTextNode(` (commit ${j.commit.slice(0, 7)}) · ${j.licence} · `), lic, el("br"), document.createTextNode(j.attribution));
+    box.appendChild(p);
+  }
   $("lane-list").textContent = "Lanes: " + Object.entries(snap.lanes || {}).map(([k, v]) => `${k} ${v.status}` + (v.fetched_at ? " (" + fmt(v.fetched_at) + ")" : "") + (v.from_previous ? ", last good copy" : "")).join("; ") + ".";
 }
 

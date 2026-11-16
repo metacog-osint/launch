@@ -201,7 +201,7 @@ const NUMERIC = new Set(["pad_lat", "pad_lon", "inclination_deg", "path_azimuth_
 function cell(k, v) {
   if (v === null || v === undefined) return "";
   let s = String(v);
-  // A text cell that starts like a formula is read as text by spreadsheet programs (CSV injection).
+  // Text that begins with = + - @ or a tab gets a leading apostrophe, so spreadsheets show it as text, not a formula.
   if (!NUMERIC.has(k) && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
