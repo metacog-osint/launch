@@ -64,6 +64,15 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   the great circle from the pad through the farthest area; one more than 25 NM outside it (beyond its own radius) or
   behind the pad is flagged, worded as a possible dog-leg or areas from different events. The map draws the great
   circle pad -> areas (dashed) and the pad. Not ported: the old tool's typed-in dog-leg azimuth.
+- **Downloads** (15 Nov 2026; third of the old launch mapper's features): CSV, GeoJSON and KML of the launches in the
+  current filters, built in the browser by `site_src/export.js` (pure, tested in Node by `tests/test_export.py`, on
+  made-up records and on the whole built list) from the data the page already holds, so a file holds nothing the
+  page does not publish. Each launch is its pad, its flight path (the map's lines) and, when "Draw closure areas" is
+  ticked, its closure areas, great-circle edges as drawn. Lines and areas crossing the antimeridian are cut there
+  (RFC 7946, KML's -180..180). Times UTC at the record's precision; the CSV adds a column in the viewer's zone, named
+  in its header, guards text cells against formulas and starts with a byte-order mark. GeoJSON and KML carry the
+  sources and licences in their header, the CSV per row. Unnumbered NotamForChina areas carry their FIR.
+  `greatCircle()` moved from `hmap.js` to `notam.js` so the export can use it without MapLibre.
 - **One notice per NOTAM:** where the charted notices and NotamForChina hold the same NOTAM (number and a shared
   FIR), the charted text is shown and NotamForChina's ring is a check under it.
 - **Address:** filter state is in the address (`#history?veh=LM-7A&site=Wenchang&...`). Addresses from before

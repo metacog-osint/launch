@@ -6,6 +6,7 @@
    notices, for the detail card).
    Times are stored UTC; dates and months are read in the viewer's zone (tic-time.js), like every time shown. */
 import { createHistoryMap } from "./hmap.js";
+import * as X from "./export.js";
 
 const T = window.TicTime;
 const BIG = { US: "us", CN: "cn", RU: "ru" };
@@ -496,6 +497,22 @@ function select(id, fly) {
   if (r && window.matchMedia("(max-width: 1099px)").matches) $("h-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+/* ---------- downloads (export.js): the launches in the current filters ---------- */
+const TYPES = { csv: "text/csv;charset=utf-8", geojson: "application/geo+json", kml: "application/vnd.google-earth.kml+xml" };
+function download(kind) {
+  writeHash();
+  const generated = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  const link = (id) => location.origin + location.pathname + "#history?" + new URLSearchParams({ st: "launched|upcoming|notice", sel: id }).toString();
+  const o = { eventsFor: (r) => (r.chart || []).flatMap((id) => chartById.get(id) || []), withAreas: state.areas, countryName,
+    link, view: location.href, generated, zone: T ? T.zone() : "UTC", when };
+  const text = kind === "csv" ? X.toCSV(lastFiltered, o) : kind === "geojson" ? JSON.stringify(X.toGeoJSON(lastFiltered, o)) : X.toKML(lastFiltered, o);
+  const url = URL.createObjectURL(new Blob([text], { type: TYPES[kind] }));
+  const a = document.createElement("a");
+  a.href = url; a.download = X.fileName(kind, generated); a.hidden = true;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 /* ---------- one update for every change ---------- */
 let fitNext = true;
 function update(refit) {
@@ -531,6 +548,7 @@ export async function initHistory(ix, hist) {
     try { await navigator.clipboard.writeText(location.href); $("h-copy").textContent = "Link copied"; } catch { $("h-copy").textContent = "Copy the address bar"; }
     setTimeout(() => { $("h-copy").textContent = "Copy link to this view"; }, 2500);
   });
+  document.querySelectorAll("[data-dl]").forEach((b) => b.addEventListener("click", () => download(b.dataset.dl)));
   $("h-toggle").addEventListener("click", () => {
     const side = $("h-side"); side.classList.toggle("open");
     $("h-toggle").setAttribute("aria-expanded", side.classList.contains("open") ? "true" : "false");

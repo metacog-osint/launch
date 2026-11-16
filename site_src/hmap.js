@@ -4,36 +4,13 @@
 // style.css actor tokens through MapLibre paint (no inline styles, CSP).
 import * as ml from "./vendor/maplibre-gl/maplibre-gl.mjs";
 import { buildStyle, addProjectionToggle, fitCoords, worldZoom } from "./map.js";
-import { geodesic } from "./notam.js";
+import { geodesic, greatCircle } from "./notam.js";
 
 const dark = matchMedia("(prefers-color-scheme: dark)");
 const EMPTY = { type: "FeatureCollection", features: [] };
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const BIG = { US: "us", CN: "cn", RU: "ru" };
 const group = (cc) => BIG[cc] || "other";
-const R_NM = 3440.065;
-const rad = (d) => (d * Math.PI) / 180, deg = (r) => (r * 180) / Math.PI;
-
-/* A great circle from (lon, lat) on azimuth `az` for `nm` nautical miles, a point every 25 NM. Longitudes run on
-   past 180 so a path that crosses the antimeridian stays one line. */
-export function greatCircle(lon, lat, az, nm) {
-  const out = [];
-  const p1 = rad(lat), l1 = rad(lon), th = rad(az);
-  let prev = lon;
-  for (let d = 0; d <= nm + 1e-6; d += Math.min(25, nm - d || 25)) {
-    const dl = d / R_NM;
-    const p2 = Math.asin(Math.sin(p1) * Math.cos(dl) + Math.cos(p1) * Math.sin(dl) * Math.cos(th));
-    const l2 = l1 + Math.atan2(Math.sin(th) * Math.sin(dl) * Math.cos(p1), Math.cos(dl) - Math.sin(p1) * Math.sin(p2));
-    let x = deg(l2);
-    while (x - prev > 180) x -= 360;
-    while (x - prev < -180) x += 360;
-    prev = x;
-    out.push([Math.round(x * 1000) / 1000, Math.round(deg(p2) * 1000) / 1000]);
-    if (d >= nm) break;
-  }
-  return out;
-}
-
 // NotamForChina's charted areas on a record (catalog.py leaves out the ring of a notice already charted).
 const nfcRings = (r) => (r.nfc_notices || []).filter((n) => n.ring && n.ring.length >= 3).map((n) => n.ring);
 
