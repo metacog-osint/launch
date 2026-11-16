@@ -167,7 +167,7 @@ const rad = (d) => (d * Math.PI) / 180, deg = (r) => (r * 180) / Math.PI;
    (great-circle azimuth about 352 deg, north over the pole) would head west-south-west across Eurasia, a leg over the
    antimeridian would run the wrong way round the world, and closure-area edges strayed up to 316 NM from the great
    circle (measured 15 Nov 2026 on the 1,026 charted areas). So each leg is drawn as a great circle, a point every 25 NM,
-   longitudes running on past 180 as in hmap.js greatCircle(). Near-antipodal legs (no single great circle) stay
+   longitudes running on past 180 as in greatCircle() below. Near-antipodal legs (no single great circle) stay
    straight. */
 export function geodesic(line) {
   const out = [];
@@ -193,6 +193,27 @@ export function geodesic(line) {
       }
     }
     push(lo2, la2);
+  }
+  return out;
+}
+
+/* A great circle from (lon, lat) on azimuth `az` for `nm` nautical miles, a point every 25 NM (the History tab's
+   estimated flight paths, drawn and exported). Longitudes run on past 180 so a path that crosses the antimeridian
+   stays one line. */
+export function greatCircle(lon, lat, az, nm) {
+  const out = [];
+  const p1 = rad(lat), l1 = rad(lon), th = rad(az);
+  let prev = lon;
+  for (let d = 0; d <= nm + 1e-6; d += Math.min(25, nm - d || 25)) {
+    const dl = d / R_NM;
+    const p2 = Math.asin(Math.sin(p1) * Math.cos(dl) + Math.cos(p1) * Math.sin(dl) * Math.cos(th));
+    const l2 = l1 + Math.atan2(Math.sin(th) * Math.sin(dl) * Math.cos(p1), Math.cos(dl) - Math.sin(p1) * Math.sin(p2));
+    let x = deg(l2);
+    while (x - prev > 180) x -= 360;
+    while (x - prev < -180) x += 360;
+    prev = x;
+    out.push([Math.round(x * 1000) / 1000, Math.round(deg(p2) * 1000) / 1000]);
+    if (d >= nm) break;
   }
   return out;
 }

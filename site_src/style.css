@@ -181,6 +181,7 @@ body[data-tab="history"] main.wrap, body[data-tab="history"] .top .wrap { max-wi
 .h-head h2 { margin: 0 0 4px; font-size: 1.2rem; }
 .h-head p { margin: 0 0 4px; max-width: 760px; }
 .h-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.h-dl { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .h-toggle { display: none; }
 .h-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
 .h-side { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;

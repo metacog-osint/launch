@@ -94,6 +94,12 @@
         <button type="button" id="h-toggle" class="chip-btn h-toggle" aria-controls="h-side" aria-expanded="false">Filters</button>
         <button type="button" id="h-fit" class="chip-btn">Fit map to results</button>
         <button type="button" id="h-copy" class="chip-btn">Copy link to this view</button>
+        <span class="h-dl" role="group" aria-labelledby="h-dl-h" title="The launches in your filters, with their flight paths and, when the map draws them, their closure areas. Times in UTC; each file names its sources and licences.">
+          <span id="h-dl-h" class="small muted">Download</span>
+          <button type="button" class="chip-btn" data-dl="csv">CSV</button>
+          <button type="button" class="chip-btn" data-dl="geojson">GeoJSON</button>
+          <button type="button" class="chip-btn" data-dl="kml">KML</button>
+        </span>
       </div>
     </div>
     <div class="h-layout">
