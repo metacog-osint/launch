@@ -77,18 +77,23 @@ def build_history(kml: Path, root: Path = ROOT) -> dict:
 
 
 def build_backfill(gdir: Path, root: Path = ROOT) -> dict:
-    """Every orbital launch GCAT lists since catalog.LEDGER_SINCE, from GCAT's own tables -> history/ledger.json."""
+    """Every launch GCAT lists since catalog.LEDGER_SINCE (orbital, suborbital and missiles: programs.GCAT_KIND),
+    from GCAT's own tables -> history/ledger.json."""
     t = gcat.read_dir(gdir)
     rows = {k: gcat.parse_tsv(v) for k, v in t.items()}
     sites = gcat.sites_table(rows["sites"])
     orgs = gcat.orgs_table(rows["orgs"])
     now = fetch.now_utc()
-    launches = catalog.from_gcat_tables(rows["launch"], rows["satcat"] + rows["satcat100k"], sites, orgs, now)
-    # Sites: every site with a launch of any kind since 2015 (missile ranges too, for the charted notices' tests).
-    used = {r.get("Launch_Site") for r in rows["launch"]
-            if (gcat.vague_date(r.get("Launch_Date", ""))["date"] or "") >= "2015"}
     stamp = {k: next((ln[len("# Updated"):].strip() for ln in v[:2000].decode("utf-8", "replace").splitlines()[1:3]
                       if ln.startswith("# Updated")), None) for k, v in t.items()}
+    # Each record is as of the satellite catalog's date, not today's run, so a later reading in Orbit's snapshot
+    # (more payloads catalogued since) wins the merge field by field.
+    as_of = min((x for x in (gcat.vague_date(stamp.get(k) or "")["time"] for k in ("launch", "satcat")) if x),
+                default=now)
+    launches = catalog.from_gcat_tables(rows["launch"], rows["satcat"] + rows["satcat100k"], sites, orgs, as_of)
+    # Sites: every site with a launch of any kind since 2015 (missile ranges too, for the charted notices' tests).
+    used = {(r.get("Launch_Site") or "").rstrip("?") for r in rows["launch"]
+            if (gcat.vague_date(r.get("Launch_Date", ""))["date"] or "") >= "2015"}
     doc = {"version": 1, "since": catalog.LEDGER_SINCE, "built_from": "GCAT tables " + ", ".join(gcat.TABLES),
            "gcat_updated": stamp, "citation": gcat.CITATION, "generated_at": now, "launches": launches, "closures": [],
            "sites": catalog.site_table(sites, used)}

@@ -114,7 +114,7 @@ export function notams(r, events) {
 
 export function properties(r, events, o) {
   return {
-    id: r.id, label: r.label || "", status: r.status, time_utc: utcTime(r), time_precision: r.time_basis,
+    id: r.id, label: r.label || "", status: r.status, kind: r.kind || "Not known", time_utc: utcTime(r), time_precision: r.time_basis,
     country: r.actor || "", country_name: o.countryName(r.actor), vehicle: r.vehicle || "", payload: r.payload || "",
     programmes: (r.programmes || []).join("; "), mission_type: r.mtype || "", site: r.site || "", orbit: r.orbit || "",
     inclination_deg: r.inc ?? null, outcome: outcome(r), flight_path: pathName(r),
@@ -156,7 +156,7 @@ const coordText = (pts) => pts.map(([x, y]) => `${r4(x)},${r4(y)}`).join(" ");
 // KML colours are aabbggrr. The light theme's actor colours (style.css --g-us, --g-cn, --g-ru, --g-other).
 const HEX = { us: "2a78d6", cn: "eb6834", ru: "1baf7a", other: "a7adb5" };
 const kmlColour = (hex, alpha) => alpha + hex.slice(4, 6) + hex.slice(2, 4) + hex.slice(0, 2);
-const LABELS = { label: "Name", status: "Status", time_utc: "Time (UTC)", time_precision: "Time precision", country_name: "Country",
+const LABELS = { label: "Name", status: "Status", kind: "Launch kind", time_utc: "Time (UTC)", time_precision: "Time precision", country_name: "Country",
   vehicle: "Vehicle", payload: "Payload", programmes: "Programmes", mission_type: "Mission type", site: "Launch site",
   orbit: "Orbit", inclination_deg: "Inclination (deg)", outcome: "Outcome", flight_path: "Flight path",
   path_azimuth_deg: "Path azimuth (deg)", path_basis: "Path basis", path_length_nm: "Charted path length (NM)",
@@ -207,7 +207,7 @@ function cell(k, v) {
 }
 
 export function toCSV(rows, o) {
-  const cols = ["id", "status", "time_utc", "when_local", "time_precision", "country", "country_name", "label", "vehicle",
+  const cols = ["id", "status", "kind", "time_utc", "when_local", "time_precision", "country", "country_name", "label", "vehicle",
     "payload", "programmes", "mission_type", "site", "pad_lat", "pad_lon", "orbit", "inclination_deg", "outcome",
     "flight_path", "path_azimuth_deg", "path_basis", "path_length_nm", "farthest_area_nm", "closure_areas", "notams", "sources", "gcat", "ll2", "link"];
   const head = cols.map((c) => (c === "when_local" ? `when (${o.zone})` : c));

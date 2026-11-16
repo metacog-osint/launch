@@ -89,7 +89,12 @@
           GCAT lists them. Scheduled launches (the next 14 days) show when you tick them under Show. Chinese
           launches carry the notices NotamForChina lists for them (number, FIR, window and charted area), and go
           back to 2012; pick a year before 2023 to see the earlier ones. From December 2020, launches also carry the
-          NOTAM texts Joey0609/notams keeps (mostly China's and its downrange FIRs').</p>
+          NOTAM texts Joey0609/notams keeps (mostly China's and its downrange FIRs'). Besides orbital launches the list holds
+          GCAT's suborbital launches and missile firings since 2023, each labelled by kind: sounding rockets and
+          other suborbital rockets, crewed suborbital flights, atmospheric tests, missile tests (lofted ones apart)
+          and missiles fired in combat. The buttons above the map show or hide each kind; the Launch kind filter
+          does the same. Suborbital launches and missiles are added when Launch's GCAT backfill is run again, not
+          every six hours.</p>
       </div>
       <div class="h-actions">
         <button type="button" id="h-toggle" class="chip-btn h-toggle" aria-controls="h-side" aria-expanded="false">Filters</button>
@@ -120,6 +125,7 @@
         <p class="small"><label><input type="checkbox" id="h-areas" checked> Draw closure areas of the launches shown</label></p>
       </aside>
       <div class="h-main">
+        <div class="h-kinds" id="h-kinds" role="group" aria-label="Launch kinds shown"></div>
         <div class="h-chips" id="h-chips" aria-live="polite"></div>
         <p class="small" id="h-count" aria-live="polite"></p>
         <div class="h-mapwrap">
@@ -142,6 +148,8 @@
           programme from the same site, with cos i = cos(latitude) &times; sin(azimuth) and the direction (north- or
           south-going) from the site's closure history; else the site's most-used corridor. It is a great circle
           from the pad, drawn to the farthest closure area or 1,500 NM; not a ground track, and it ignores dog-legs.
+          A suborbital launch or missile has no orbit to infer from: its path is drawn only as charted or towards its
+          farthest closure area.
           Mission type is Launch's reading of payload names; series the operator describes otherwise but public
           analysis assesses as military (Yaogan, TJS) say so.</p>
       </div>
@@ -199,7 +207,8 @@
       <div id="source-list" class="small"></div>
       <p class="small muted" id="lane-list"></p>
       <p class="small">Feed method <code>launch-1.0</code>. History: GCAT's launch list since 2023 (J. McDowell,
-        planet4589.org/space/gcat, CC BY 4.0), kept current through Orbit; Launch Library 2's schedule through Orbit;
+        planet4589.org/space/gcat, CC BY 4.0): orbital launches kept current through Orbit, and suborbital launches
+        and missile firings (GCAT launch codes S, Y, A, M and L) from GCAT's own tables; Launch Library 2's schedule through Orbit;
         Launch's charted notices; Chinese launches 2012-2026 and the NOTAMs that closed their drop zones from
         NotamForChina (credit above). Where Launch's charted notices and NotamForChina hold the same NOTAM (number and FIR), it is
         shown once, with the charted text, and NotamForChina's area is a check on the charted one. Launch-related NOTAMs

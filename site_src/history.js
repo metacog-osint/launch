@@ -37,10 +37,14 @@ const STATUS = { launched: "Launched", upcoming: "Scheduled (next 14 days)", not
 const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina", joey: "Joey0609/notams", wayback: "FAA and NGA notices (Internet Archive)" };
 const OUTCOME = { success: "Success", failure: "Failure", "": "Not known" };
 const NK = "Not known";
+/* Launch kinds (catalog.py, from GCAT's launch code): the page's own list until data/launches.json gives its own. */
+const KINDS = ["Orbital", "Suborbital rocket", "Crewed suborbital", "Atmospheric test", "Missile test", "Lofted missile test", "Combat launch", NK];
+const kindSlug = (k) => (k || NK).toLowerCase().replace(/[^a-z]+/g, "-");
 
 /* Facets: key in the address, label, how a record's values are read. */
 const FACETS = [
   { k: "st", label: "Show", get: (r) => r.status, name: (v) => STATUS[v] || v, open: true, fixed: ["launched", "upcoming", "notice"] },
+  { k: "kind", label: "Launch kind", get: (r) => r.kind || NK, open: true, fixed: KINDS, note: (v) => (IX.kind_notes || {})[v] },
   { k: "cc", label: "Country", get: (r) => r.actor || "", name: (v) => (v ? countryName(v) : NK), flag: true },
   { k: "veh", label: "Vehicle", get: (r) => r.vehicle || NK, search: true },
   { k: "site", label: "Launch site", get: (r) => r.site || NK, search: true },
@@ -203,6 +207,7 @@ function renderFacets() {
         if (f.flag && v) lab.appendChild(mark(v));
         lab.appendChild(el("span", "nm", f.name ? f.name(v) : v));
         lab.appendChild(el("span", "n", String(n)));
+        if (f.note && f.note(v)) lab.title = `${v}: ${f.note(v)}`;
         list.appendChild(lab);
       });
       if (show.length > limit) {
@@ -311,6 +316,13 @@ function chips() {
   FACETS.forEach((f) => {
     const sel = state.f[f.k] || [];
     if (f.k === "st") return;
+    if (f.k === "kind") {
+      if (!sel.length) return;
+      const hidden = KINDS.filter((k) => !sel.includes(k));
+      add(hidden.length <= sel.length ? `Launch kinds: hiding ${hidden.join(", ")}` : `Launch kinds: only ${sel.join(", ")}`,
+        () => { state.f.kind = []; update(true); });
+      return;
+    }
     sel.forEach((v) => add(`${f.label}: ${f.name ? f.name(v) : v}`, () => { state.f[f.k] = sel.filter((x) => x !== v); update(true); }));
   });
   RANGES.forEach((g) => { if (state.r[g.k]) add(`${g.label}: ${rangeText(g, state.r[g.k])}`, () => setRange(g.k, null, null)); });
@@ -320,6 +332,35 @@ function chips() {
     const c = el("button", "linkish small", "Clear all filters"); c.type = "button";
     c.addEventListener("click", () => { state.f = JSON.parse(JSON.stringify(DEFAULT)); state.r = {}; state.q = ""; $("h-q").value = ""; setDates("", ""); });
     box.appendChild(c);
+  }
+}
+
+/* Launch kinds as one-click toggles above the map: pressed = shown. With none hidden there is no kind filter. */
+function kindToggles() {
+  const box = $("h-kinds"); if (!box) return; box.textContent = "";
+  const counts = new Map();
+  filtered("kind").forEach((r) => counts.set(r.kind || NK, (counts.get(r.kind || NK) || 0) + 1));
+  const sel = state.f.kind || [];
+  const shown = (k) => !sel.length || sel.includes(k);
+  box.appendChild(el("span", "small muted", "Show kinds:"));
+  KINDS.forEach((k) => {
+    const n = counts.get(k) || 0;
+    const on = shown(k);
+    const b = el("button", "chip-btn kind-btn k-" + kindSlug(k) + (on ? " on" : ""));
+    b.type = "button"; b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.title = `${on ? "Hide" : "Show"} ${k.toLowerCase()} launches` + ((IX.kind_notes || {})[k] ? ` (${IX.kind_notes[k]})` : "");
+    b.append(el("span", "kind-sw"), document.createTextNode((k === NK ? "Kind not known" : k) + " "), el("span", "n", String(n)));
+    b.addEventListener("click", () => {
+      let next = KINDS.filter((x) => (x === k ? !on : shown(x)));
+      if (next.length === KINDS.length) next = [];
+      state.f.kind = next; state.shown = PAGE; update(true);
+    });
+    box.appendChild(b);
+  });
+  if (sel.length) {
+    const all = el("button", "linkish small", "Show all kinds"); all.type = "button";
+    all.addEventListener("click", () => { state.f.kind = []; update(true); });
+    box.appendChild(all);
   }
 }
 
@@ -406,6 +447,7 @@ const monthName = (k) => `${MON[Number(k.slice(5)) - 1]} ${k.slice(0, 4)}`;
 /* ---------- the list ---------- */
 const COLS = [
   { k: "time", label: "When", sort: (r) => r.time || "" },
+  { k: "kind", label: "Kind", sort: (r) => KINDS.indexOf(r.kind || NK) },
   { k: "actor", label: "Country", sort: (r) => r.actor || "" },
   { k: "vehicle", label: "Vehicle", sort: (r) => r.vehicle || "" },
   { k: "payload", label: "Payload or mission", sort: (r) => r.payload || r.label || "" },
@@ -443,7 +485,8 @@ function list(rows) {
     const c = el("td"); c.appendChild(mark(r.actor));
     const pay = el("td", "", r.payload || (r.status === "notice" ? r.label : "") || (r.sources[0] === "nfc" ? "not given" : ""));
     if ((r.programmes || []).length) pay.title = "Programme: " + r.programmes.join(", ");
-    row.append(w, c, el("td", "", r.vehicle || ""), pay, el("td", "", r.mtype), el("td", "", r.site || ""), el("td", "", r.orbit || ""));
+    const kd = el("td"); kd.appendChild(el("span", "kind-tag k-" + kindSlug(r.kind), r.kind || NK));
+    row.append(w, kd, c, el("td", "", r.vehicle || ""), pay, el("td", "", r.mtype), el("td", "", r.site || ""), el("td", "", r.orbit || ""));
     row.addEventListener("click", () => select(r.id, true));
     row.addEventListener("keydown", (e) => { if (e.key === "Enter") select(r.id, true); });
     tb.appendChild(row);
@@ -475,7 +518,10 @@ function detail(r) {
   fact(dl, r.status === "upcoming" ? "NET" : "When", when(r) + (r.status === "upcoming" && r.net_precision ? ` (precision: ${r.net_precision})` : ""));
   if (r.chart_time) fact(dl, "Charted time", `${fmt(r.chart_time, { year: true })}: the time in the charted name; GCAT's launch time is shown above`);
   fact(dl, "Vehicle", [r.vehicle, r.gcat_vehicle && r.gcat_vehicle !== r.vehicle ? `(GCAT: ${r.gcat_vehicle})` : "", r.ll2_vehicle && r.ll2_vehicle !== r.vehicle ? `(LL2: ${r.ll2_vehicle})` : ""].filter(Boolean).join(" "));
-  fact(dl, "Site", [r.site, r.pad_name].filter(Boolean).join(" · ") + (r.pad ? ` (${r.pad[1].toFixed(2)}, ${r.pad[0].toFixed(2)}${r.pad_basis === "site" ? ", site position" : ""})` : ""));
+  fact(dl, "Kind", (r.kind || NK) + ((IX.kind_notes || {})[r.kind || NK] ? `: ${IX.kind_notes[r.kind || NK]}` : "") + (r.gcat_category ? ` · GCAT category: ${r.gcat_category}` : ""));
+  fact(dl, "Site", [r.site, r.pad_name].filter(Boolean).join(" · ") + (r.pad ? ` (${r.pad[1].toFixed(2)}, ${r.pad[0].toFixed(2)}${r.pad_basis === "site" ? ", site position" : r.pad_basis === "region" ? ": a region GCAT gives, not a pad" : ""})` : "")
+    + (r.site_uncertain ? " · GCAT gives this site with a question mark" : ""));
+  if (r.apogee_km != null || r.range_km != null) fact(dl, "Apogee and range", [r.apogee_km != null ? `apogee about ${r.apogee_km.toLocaleString("en-US")} km` : "", r.range_km != null ? `range about ${r.range_km.toLocaleString("en-US")} km` : ""].filter(Boolean).join(", ") + " (GCAT)");
   fact(dl, "Payload", r.payload);
   if (r.payloads && r.payloads.count) fact(dl, "Payloads (GCAT)", `${r.payloads.count}: ${r.payloads.names.join(", ")}${r.payloads.more ? ` and ${r.payloads.more} more` : ""}`);
   const notes = (r.programmes || []).map((p) => IX.programme_notes[p] ? `${p} (${IX.programme_notes[p]})` : p);
@@ -484,6 +530,7 @@ function detail(r) {
   if (r.outcome) fact(dl, "Outcome", r.outcome);
   if (r.far_nm !== undefined) fact(dl, "Farthest closure area", `${r.far_nm.toLocaleString("en-US")} NM from the pad`);
   if (r.path) fact(dl, "Flight path", r.path.kind === "drawn" ? `as charted (azimuth about ${r.path.az}°` + (r.path.len_nm ? `, ${r.path.len_nm.toLocaleString("en-US")} NM long)` : ")") : `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
+  else if (r.kind && r.kind !== "Orbital" && r.kind !== NK) fact(dl, "Flight path", "none: a suborbital flight's path is drawn only as charted or towards its closure areas, and this one has neither");
   else fact(dl, "Flight path", r.pad ? "none: no closure area, inclination or corridor history to infer an azimuth from" : "none: no pad position");
   if (r.join && r.join.pass === 3) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat} by a NOTAM that NotamForChina lists for this launch (same number and FIR)` + (r.join.hours > 1 ? `; the charted time is ${r.join.hours >= 8000 ? "about a year" : r.join.hours + " h"} out` : ""));
   else if (r.join) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat}: ${r.join.hours} h apart` + (r.join.nm !== null ? `, ${r.join.nm} NM apart` : "") + (r.join.same ? ", same vehicle or programme" : "") + (r.join.pass === 2 ? " (matched by vehicle and place; the map's time differs)" : ""));
@@ -492,6 +539,7 @@ function detail(r) {
   fact(dl, "Sources", r.sources.map((s) => SOURCES[s] || s).join(" · "));
   box.appendChild(dl);
   const q = el("p", "quick small"); q.appendChild(document.createTextNode("Show only: "));
+  if (r.kind && r.kind !== NK) q.appendChild(quick(`Kind: ${r.kind}`, "kind", r.kind));
   if (r.vehicle && r.vehicle !== NK) q.appendChild(quick(r.vehicle, "veh", r.vehicle));
   if (r.site) q.appendChild(quick(r.site, "site", r.site));
   (r.programmes || []).forEach((p) => q.appendChild(quick(p, "prog", p)));
@@ -666,7 +714,7 @@ function update(refit) {
   const total = IX.records.length;
   const up = rows.filter((r) => r.status === "upcoming").length;
   $("h-count").textContent = `${rows.length} of ${total} shown` + (up ? ` (${up} scheduled)` : "") + (rows.length > state.shown ? `; the list shows ${state.shown}` : "");
-  renderFacets(); rangesShow(); presets(); chips(); timeline(); list(rows);
+  renderFacets(); rangesShow(); presets(); kindToggles(); chips(); timeline(); list(rows);
   if (map) map.show(rows, state.areas, refit || fitNext);
   fitNext = false;
   if (state.sel && !byId.get(state.sel)) state.sel = "";
@@ -676,6 +724,7 @@ function update(refit) {
 
 export async function initHistory(ix, hist) {
   IX = ix; HIST = hist;
+  if (Array.isArray(IX.kinds) && IX.kinds.length) KINDS.splice(0, KINDS.length, ...IX.kinds);
   IX.records.forEach((r) => byId.set(r.id, r));
   HIST.events.forEach((e) => { if (!chartById.has(e.id)) chartById.set(e.id, []); chartById.get(e.id).push(e); });
   rekey();
@@ -701,7 +750,12 @@ export async function initHistory(ix, hist) {
   });
   const c = IX.counts;
   FIRST_YEAR = Math.min(2023, ...IX.records.filter((r) => r.time).map((r) => Number(r.time.slice(0, 4))));
-  $("h-about").textContent = `${c.gcat} orbital launches GCAT lists since ${IX.ledger_since.slice(0, 4)}, ${c.chart} events in Launch's charted notices (${c.gcat_joined} GCAT launches joined to them), and Launch Library 2's schedule.`
+  const gk = c.gcat_kinds || {}, gn = (k) => (gk[k] || 0).toLocaleString("en-US");
+  const sub = ["Suborbital rocket", "Crewed suborbital", "Atmospheric test"].reduce((n, k) => n + (gk[k] || 0), 0);
+  $("h-about").textContent = (c.gcat_kinds
+    ? `${c.gcat.toLocaleString("en-US")} launches GCAT lists since ${IX.ledger_since.slice(0, 4)}: ${gn("Orbital")} orbital, ${sub.toLocaleString("en-US")} suborbital (sounding rockets, crewed flights, atmospheric tests), ${gn("Missile test")} missile tests, ${gn("Lofted missile test")} lofted missile tests and ${gn("Combat launch")} missiles fired in combat`
+    : `${c.gcat} orbital launches GCAT lists since ${IX.ledger_since.slice(0, 4)}`)
+    + `; ${c.chart} events in Launch's charted notices (${c.gcat_joined} GCAT launches joined to them), and Launch Library 2's schedule.`
     + (c.nfc ? ` NotamForChina adds the notices of ${c.nfc.records - c.nfc.own_records} of those launches, and ${c.nfc.own_launched} Chinese launches from ${FIRST_YEAR} to ${Number((IX.ledger_since || "2023").slice(0, 4)) - 1}.` : "")
     + (c.joey ? ` Joey0609/notams adds NOTAM texts to ${c.joey.records} launches (${c.joey.notices - c.joey.unjoined} of its ${c.joey.notices} launch-related notices; the rest match no launch here).` : "")
     + ` Updated ${fmt(IX.generated_at)}.`;

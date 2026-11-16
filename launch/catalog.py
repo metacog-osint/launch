@@ -1,8 +1,11 @@
 """The History tab's launch list: Launch's charted notices, GCAT's launch record and Launch Library 2's schedule, joined.
 
-  ledger   every orbital launch GCAT lists since LEDGER_SINCE. Backfilled once from GCAT's own tables
-           (`python tools/launch.py backfill`), then kept current on every run from the 30 days of GCAT launches
-           in Orbit's snapshot, so a launch joins the history without anyone touching it. A launch Launch Library 2
+  ledger   every launch GCAT lists since LEDGER_SINCE: orbital, suborbital (sounding rockets, crewed flights,
+           atmospheric tests) and military missiles, tests and combat use alike (programs.GCAT_KIND). Backfilled
+           from GCAT's own tables (`python tools/launch.py backfill`), then kept current on every run from the 30
+           days of GCAT launches in Orbit's snapshot (orbital only: Orbit publishes no others, so suborbital
+           launches join when the backfill is run again), so an orbital launch joins the history without anyone
+           touching it. A launch Launch Library 2
            reports as flown (status Success, Failure or Partial Failure) joins as "provisional" until GCAT lists it.
            Closure areas a scheduled launch coincided with in time and place are kept with it.
   index    one record per launch or notice for the page: each charted event, joined to its GCAT launch when
@@ -15,7 +18,9 @@ the bearing from the pad to the event's closure areas; the payloads' inclination
 inclination (sun-synchronous, a space station), with the direction (north- or south-going) taken from the pad's
 closure history; GTO and GEO launches go east; else the pad's most-used corridor. cos i = cos(latitude) x sin(az)
 holds for a launch without a dog-leg. An estimated path is a great circle from the pad on that azimuth, drawn to
-the farthest closure area or to DEFAULT_PATH_NM; it is not a ground track.
+the farthest closure area or to DEFAULT_PATH_NM; it is not a ground track. A suborbital launch or a missile has no
+orbit to infer an azimuth from: its path is as charted, or the bearing to its farthest closure area (drawn to that
+area, at any distance), else none.
 """
 from __future__ import annotations
 
@@ -34,7 +39,8 @@ AREA_NM = 2500        # closure areas farther than this from the pad do not set 
 SITE_NM = 60          # a pad belongs to the nearest GCAT site within this distance
 MATCH_HOURS = 3       # A charted event and a GCAT launch are one launch within this many hours ...
 MATCH_NM = 200        # ... and this far apart (pad to GCAT site), or of the same country
-ORBITAL = ("O", "D", "N")
+REGION_RE = re.compile(r"\?$|\bVarious\b|\bMobile\b|(?<!On-)\bSea\b|\bOcean\b|launch location|Launch Area|Barentsovo",
+                       re.I)  # a GCAT site that is a region, not a pad ("Mobile launchers in Iran?")
 LL2_FLOWN = {"Success", "Failure", "Partial Failure"}
 
 
@@ -77,8 +83,8 @@ def _payload_summary(pls: list[dict]) -> dict:
 
 
 def _gcat_record(tag, when, vehicle_raw, flight, mission, agency, country, outcome, kind, category, site_code,
-                 site, pad_name, payloads, inc, now) -> dict:
-    return {"id": "gcat:" + tag, "source": "gcat", "tag": tag, "time": when.get("time"), "date": when.get("date"),
+                 site, pad_name, payloads, inc, now, **extra) -> dict:
+    return {**extra, "id": "gcat:" + tag, "source": "gcat", "tag": tag, "time": when.get("time"), "date": when.get("date"),
             "time_uncertain": bool(when.get("uncertain")), "vehicle_raw": vehicle_raw, "flight": flight,
             "mission": mission, "agency": agency, "country": country, "outcome": outcome, "kind": kind,
             "category": category, "site_code": site_code, "site": site, "pad_name": pad_name,
@@ -87,9 +93,11 @@ def _gcat_record(tag, when, vehicle_raw, flight, mission, agency, country, outco
 
 def from_gcat_tables(launch_rows: list[dict], sat_rows: list[dict], sites: dict, orgs: dict, now: str,
                      since: str = LEDGER_SINCE) -> list[dict]:
-    """The backfill: GCAT launch.tsv rows (orbital, deep space, near-orbital) dated since `since`, with each
-    launch's payloads from the object catalogs (satcat, satcat100k). The launching country is the first launch
-    agency's state (GCAT orgs.tsv), else the site's."""
+    """The backfill: GCAT launch.tsv rows of every kind in programs.GCAT_KIND (orbital, deep space, near-orbital,
+    suborbital, crewed suborbital, atmospheric, missile, lofted missile) dated since `since`, with each launch's
+    payloads from the object catalogs (satcat, satcat100k). The launching country is the first launch agency's
+    state (GCAT orgs.tsv), else the site's. A site GCAT gives with a "?" is read as that site and marked uncertain;
+    a suborbital launch keeps its apogee and range (km, GCAT) and has no inclination."""
     pls: dict[str, list] = {}
     for o in sat_rows:
         if (o.get("Type") or "")[:1] != "P":
@@ -106,28 +114,42 @@ def from_gcat_tables(launch_rows: list[dict], sat_rows: list[dict], sites: dict,
     out = []
     for r in launch_rows:
         code = r.get("LaunchCode", "")
-        if not code or code[0] not in ORBITAL:
+        if not code or code[0] not in P.GCAT_KIND:
             continue
+        kind = P.GCAT_KIND[code[0]]
+        orbital = kind in P.ORBITAL_KINDS
         when = gcat.vague_date(r.get("Launch_Date", ""))
         if not when["date"] or when["date"] < since:
             continue
         tag = r.get("Launch_Tag", "")
         p = sorted(pls.get(tag, []), key=lambda x: x["jcat"])
         inc = _inc_of(p)
-        if inc is None:
+        if not orbital:
+            inc = None  # a payload's or a lofted test's inclination says nothing about a suborbital launch
+        elif inc is None:
             try:
                 inc = float(r.get("Inc") or "x")
             except ValueError:
                 inc = None
-        site = sites.get(r.get("Launch_Site", ""))
+        raw_site = r.get("Launch_Site", "")
+        site_code = raw_site.rstrip("?")
+        site = sites.get(site_code)
         variant = _dash(r.get("Variant"))
+        extra = {}
+        if raw_site.endswith("?"):
+            extra["site_uncertain"] = True
+        if not orbital:
+            for col, key in (("Apogee", "apogee_km"), ("Range", "range_km")):
+                try:
+                    extra[key] = float(r.get(col) or "x")
+                except ValueError:
+                    pass
         out.append(_gcat_record(
             tag, when, (r.get("LV_Type", "") + (" " + variant if variant else "")).strip(), _dash(r.get("Flight")),
             _dash(r.get("Mission")), r.get("Agency", ""),
             gcat.agency_country(r.get("Agency", ""), orgs) or (site or {}).get("country"),
             {"S": "success", "F": "failure", "U": "unknown", "E": "pad explosion"}.get(code[1:2], code[1:]),
-            {"O": "orbital", "D": "deep space", "N": "near-orbital"}[code[0]], r.get("Category", ""),
-            r.get("Launch_Site", ""), site, _dash(r.get("Launch_Pad")), p, inc, now))
+            kind, r.get("Category", ""), site_code, site, _dash(r.get("Launch_Pad")), p, inc, now, **extra))
     return out
 
 
@@ -185,13 +207,16 @@ def closures_from_matches(matches: list[dict], areas: list[dict], now: str) -> l
 
 
 def merge(*ledgers: dict | None) -> dict:
-    """Union of ledgers by record id; where both hold a record the later `updated` wins. Nothing is dropped."""
+    """Union of ledgers by record id; where both hold a record the later `updated` wins. Nothing is dropped. A site
+    keeps the first ledger's reading (the committed backfill, from GCAT's sites table with Launch's current names and
+    region flags); a later ledger adds sites it lacks and fields its reading lacks."""
     launches, closures, sites, since = {}, {}, {}, LEDGER_SINCE
     for lg in ledgers:
         if not lg:
             continue
         since = min(since, lg.get("since") or since)
-        sites.update(lg.get("sites") or {})
+        for code, st in (lg.get("sites") or {}).items():
+            sites[code] = {**st, **sites[code]} if code in sites else st
         for r in lg.get("launches") or []:
             old = launches.get(r["id"])
             if old is None:
@@ -217,6 +242,8 @@ def site_table(gcat_sites: dict, used_codes) -> dict:
         if s and s.get("lat") is not None:
             out[code] = {"name": P.site_name(s.get("name")) or code, "gcat_name": s.get("full_name") or s.get("name"),
                          "lat": s["lat"], "lon": s["lon"], "country": s.get("country")}
+            if REGION_RE.search(s.get("full_name") or ""):
+                out[code]["region"] = True
     return out
 
 
@@ -308,9 +335,11 @@ def farthest_nm(pad, areas: list[dict] | None) -> int | None:
 
 
 def infer_path(pad, site: str | None, bands: list[dict], *, drawn=None, areas=None, inc=None, inc_note=None,
-               orbit_code=None, orbit=None) -> dict | None:
+               orbit_code=None, orbit=None, suborbital=False) -> dict | None:
     """{kind, az, nm, basis} for a record, or None. `drawn`: the charted path lines; `areas`: [{azimuth, downrange_nm}];
-    `inc_note` says where an inclination came from when it is not the record's own payloads."""
+    `inc_note` says where an inclination came from when it is not the record's own payloads. A suborbital launch
+    (`suborbital`) takes the bearing to its farthest closure area at any distance (its impact or recovery area),
+    drawn to that area, and nothing else: no orbit sets its azimuth and the site's corridors are its orbital ones."""
     if drawn:
         line = max(drawn, key=len)
         a, b = line[0], line[-1]
@@ -319,6 +348,12 @@ def infer_path(pad, site: str | None, bands: list[dict], *, drawn=None, areas=No
     if not pad:
         return None
     ar = [x for x in (areas or []) if x.get("azimuth") is not None and x.get("downrange_nm")]
+    if suborbital:
+        if not ar:
+            return None
+        far = max(ar, key=lambda x: x["downrange_nm"])
+        return {"kind": "estimated", "az": far["azimuth"], "nm": round(far["downrange_nm"]),
+                "basis": "bearing from the pad to its farthest closure area, drawn to it (a suborbital flight)"}
     # Ascent areas (booster and fairing drops, second stage) lie within AREA_NM; a farther area (a splashdown
     # half a world away, a reentry box) can bear the other way round the globe, so it sets no azimuth.
     near = [x for x in ar if x["downrange_nm"] <= AREA_NM]
@@ -743,6 +778,9 @@ def wayback_targets(doc: dict | None, gcat_recs: list[dict], g_info: dict, chart
             counts["unjoined_why"][f"{kind}: {why}"] = counts["unjoined_why"].get(f"{kind}: {why}", 0) + 1
 
     timed = _timed(gcat_recs, g_info)
+    # NGA warnings join by the nearest pad within JOEY_NM, too loose to tell a missile or a sounding rocket from an
+    # orbital launch in the same window: they join orbital launches only. A TFR (WB_TFR_NM, nearest in time) joins any.
+    timed_orbital = _timed([g for g in gcat_recs if g_info[g["id"]].get("kind", P.ORBITAL) == P.ORBITAL], g_info)
     for t in doc.get("tfrs") or []:
         counts["tfrs"] += 1
         s, e = _dt(t.get("start")), _dt(t.get("end"))
@@ -762,7 +800,7 @@ def wayback_targets(doc: dict | None, gcat_recs: list[dict], g_info: dict, chart
         counts["nga"] += 1
         windows = [(_dt(x["start"]), _dt(x["end"])) for x in w.get("windows") or [] if _dt(x["start"]) and _dt(x["end"])]
         centres = [c for a in w.get("areas") or [] if (c := _centre_of(a["coords"]))]
-        tag, j = wayback_join(windows, centres, JOEY_NM, timed, g_info, by_time=False)
+        tag, j = wayback_join(windows, centres, JOEY_NM, timed_orbital, g_info, by_time=False)
         tally("nga", w.get("issued"), tag, j)
         if tag:
             counts["nga_joined"] += 1
@@ -869,26 +907,34 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     g_info = {}
     for g in gcat:
         progs, mtype = P.programmes(g.get("flight"), g.get("mission"), *g["payloads"]["names"])
-        g_info[g["id"]] = {"site": g_site(g), "pad": g_pad(g), "progs": progs, "mtype": mtype,
+        kind = P.launch_kind(g.get("kind"), g.get("category"))
+        g_info[g["id"]] = {"site": g_site(g), "pad": g_pad(g), "progs": progs, "kind": kind,
+                           "mtype": mtype if kind == P.ORBITAL else P.kind_mtype(kind, mtype, g.get("category")),
                            "vehicle": P.vehicle(g.get("vehicle_raw")),
                            "time": g.get("time") or (g["date"] + "T12:00:00Z")}
 
     # Charted events <-> GCAT launches. Pass 1: within MATCH_HOURS (a day when either has no time), near in place or
     # of the same country. Pass 2, for the rest: within 72 hours, near in place and of the same vehicle or programme
-    # (a charted name often carries the scheduled time: a day early, or before a slip).
+    # (a charted name often carries the scheduled time: a day early, or before a slip). A missile fired in combat
+    # joins no charted event; any other suborbital launch joins in pass 1 only when near in place (a country's
+    # missile firings are too many for "same country" to tell them apart).
     def candidates(e, second: bool):
         e_progs = set(P.programmes(e.get("payload"), e.get("label"))[0])
         e_veh = P.vehicle(e.get("vehicle"))
         for g in gcat:
             gi = g_info[g["id"]]
+            if gi["kind"] == P.COMBAT_LAUNCH:
+                continue
             h = _hours_apart(e["time"], gi["time"])
             if h is None:
                 continue
+            sub = gi["kind"] != P.ORBITAL
             d = notam.haversine_nm(e["pad"][1], e["pad"][0], gi["pad"][1], gi["pad"][0]) if (e.get("pad") and gi["pad"]) else None
             same = (e_veh != P.NOT_KNOWN and e_veh == gi["vehicle"]) or bool(e_progs & set(gi["progs"]))
             if not second:
                 tol = MATCH_HOURS if (e["time_basis"] == "time" and g.get("time")) else 30
-                if h > tol or not ((d is not None and d <= MATCH_NM) or (e.get("actor") and e["actor"] == g.get("country"))):
+                if h > tol or not ((d is not None and d <= MATCH_NM) or
+                                   (not sub and e.get("actor") and e["actor"] == g.get("country"))):
                     continue
             elif h > 72 or d is None or d > MATCH_NM or not same:
                 continue
@@ -984,7 +1030,12 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     for x in nfc_loose:
         for k in nfc_notice_keys(x):
             nfc_key_target.setdefault(k[0], {}).setdefault(k[1], set()).add("nfc:" + x["id"])
-    launching = {g.get("country") for g in gcat if g.get("country")}
+    launching = {g.get("country") for g in gcat if g.get("country") and g_info[g["id"]]["kind"] == P.ORBITAL}
+    # A missile fired in combat is announced by no notice: the archived TFRs and warnings join only the other GCAT
+    # launches. Joey's notices are launch NOTAMs joined by window and a pad within JOEY_NM, too loose to tell a
+    # missile or a sounding rocket from an orbital launch in the same window: by window they join orbital launches.
+    gcat_noticed = [g for g in gcat if g_info[g["id"]]["kind"] != P.COMBAT_LAUNCH]
+    gcat_orbital = [g for g in gcat if g_info[g["id"]]["kind"] == P.ORBITAL]
     joey_by: dict[str, list] = {}
     joey_counts = {"notices": 0, "by_notam_chart": 0, "by_notam_nfc": 0, "by_window": 0, "window_several": 0,
                    "unjoined": 0, "unjoined_by_year": {}, "unjoined_why": {}}
@@ -999,7 +1050,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             joey_by.setdefault(sorted(hits)[0], []).append({**n, "join": {"by": "notam"}})
             joey_counts[how] += 1
             continue
-        tag, j = joey_window_join(n, gcat, g_info, launching)
+        tag, j = joey_window_join(n, gcat_orbital, g_info, launching)
         if tag:
             joey_by.setdefault("gcat:" + tag, []).append({**n, "join": j})
             joey_counts["by_window"] += 1
@@ -1012,14 +1063,14 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
 
     # Internet Archive copies (see that section above): FAA space-operations TFRs and NGA warnings, by GCAT tag.
     chart_texts = " ".join(t for e in hist.get("events") or [] for t in e.get("texts") or [])
-    wb_by, wb_counts = wayback_targets(wayback_doc, gcat, g_info, chart_texts)
+    wb_by, wb_counts = wayback_targets(wayback_doc, gcat_noticed, g_info, chart_texts)
 
     # The inclination of the last launch of the same programme (else the same vehicle, when its recent launches
     # agree) from the same site: for a launch whose own payloads have none yet, and for scheduled launches.
     inc_hist: dict[tuple, list] = {}
     for g in gcat:
         gi = g_info[g["id"]]
-        if g.get("inc") and gi["site"]:
+        if g.get("inc") and gi["site"] and gi["kind"] == P.ORBITAL:
             for p in gi["progs"]:
                 inc_hist.setdefault(("p", gi["site"], p), []).append((gi["time"], g["inc"]))
             inc_hist.setdefault(("v", gi["site"], gi["vehicle"]), []).append((gi["time"], g["inc"]))
@@ -1049,6 +1100,22 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         return best[1] if best else None
 
     recs, used_ll2 = [], set()
+
+    def gcat_extra(r: dict, g: dict):
+        """What GCAT says of a suborbital launch: its category, apogee and range, and a site given with a "?"."""
+        if r["kind"] != P.ORBITAL:
+            r["gcat_category"] = _dash(g.get("category")) or None
+            for k in ("apogee_km", "range_km"):
+                if g.get(k) is not None:
+                    r[k] = g[k]
+        if g.get("site_uncertain"):
+            r["site_uncertain"] = True
+
+    def ll2_kind(u: dict) -> str:
+        """A Launch Library 2 launch's kind: suborbital by its orbit, crewed by its mission type."""
+        if P.orbit_class(None, u.get("orbit")) == "Suborbital":
+            return P.CREWED_SUB if u.get("mission_type") in ("Tourism", "Human Exploration") else P.SUBORBITAL
+        return P.ORBITAL
 
     def add_nfc(r: dict, xs: list[dict], evs: list[dict]) -> list[dict]:
         """NotamForChina's notices on the record; returns its charted areas to draw (for the path estimate)."""
@@ -1101,6 +1168,15 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                 and all(P.payload_unknown(n) for n in (r.get("payloads") or {}).get("names") or [])):
             r["mtype"] = P.NO_PAYLOAD  # nothing to read, as opposed to a name the table does not know
         site, inc, note = r.get("site"), r.get("inc"), None
+        r.setdefault("kind", P.NOT_KNOWN)
+        sub = r["kind"] not in (P.ORBITAL, P.NOT_KNOWN)
+        if sub:
+            r["orbit"] = "Suborbital"
+            path = infer_path(r.get("pad"), site, [], drawn=drawn, areas=areas, suborbital=True)
+            if path:
+                r["path"] = path
+            recs.append(r)
+            return
         if r.get("orbit") in ("GTO / GEO", "Deep space / lunar"):
             inc = None  # a payload's inclination there is its final orbit's, not the launch's
         known_class = r.get("orbit") in P.CLASS_INC or r.get("orbit") == "GTO / GEO" or orbit_code in P.STATION_INC
@@ -1125,6 +1201,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             r["mtype"] = P.LL2_MTYPE[link["mission_type"]]
         if r.get("orbit") == P.NOT_KNOWN:
             r["orbit"] = P.orbit_class(None, link.get("orbit"))
+        if r.get("kind") == P.NOT_KNOWN:
+            r["kind"] = ll2_kind(link)
         cl = closures_by_ll2.get(link["id"], [])
         if cl:
             r["closures"] = _closure_list(cl)
@@ -1142,6 +1220,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         progs, mtype = P.programmes(*texts)
         if any(P.MTYPE_OF[p] == P.MSL for p in chart_progs):  # a charted "ICBM" outranks a joined launch's payloads
             mtype = P.MSL
+        kind = gi["kind"] if g else P.NOT_KNOWN
+        if kind != P.ORBITAL and g:
+            mtype = P.kind_mtype(kind, mtype, g.get("category"))
         future = bool(nowdt and _dt(e.get("time")) and _dt(e["time"]) > nowdt)
         status = ("launched" if g else "notice" if e["kind"] == "unknown" or not e.get("time") else
                   "upcoming" if future else "launched")
@@ -1152,7 +1233,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
              "payload": e.get("payload") or ((g or {}).get("mission") or None),
              "programmes": progs, "mtype": mtype, "pad": e.get("pad") or (gi["pad"] if gi else None),
              "site": chart_site.get(e["id"]) or (gi["site"] if gi else None),
-             "orbit": P.orbit_class((g or {}).get("category")), "cancelled": e.get("cancelled"),
+             "orbit": P.orbit_class((g or {}).get("category")), "kind": kind, "cancelled": e.get("cancelled"),
              "sources": ["chart"] + (["gcat"] if g else []), "chart": [m["id"] for m in grp],
              "areas": sum(len(m.get("areas") or []) for m in grp)}
         if len(grp) > 1:
@@ -1160,6 +1241,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         if g:
             r.update({"gcat": g["tag"], "outcome": g.get("outcome"), "inc": g.get("inc"), "gcat_vehicle": g.get("vehicle_raw"),
                       "payloads": g.get("payloads"), "flight": g.get("flight"), "join": join.get(e["id"])})
+            gcat_extra(r, g)
             if g.get("time"):
                 h = _hours_apart(e.get("time"), g["time"])
                 r["time"], r["time_basis"] = g["time"], "time"
@@ -1186,9 +1268,11 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
              "label": " · ".join(x for x in (g.get("vehicle_raw"), g.get("flight") or g.get("mission")) if x),
              "vehicle": gi["vehicle"], "gcat_vehicle": g.get("vehicle_raw"), "payload": g.get("mission") or g.get("flight"),
              "flight": g.get("flight"), "programmes": gi["progs"], "mtype": gi["mtype"], "pad": gi["pad"],
-             "pad_basis": "site", "site": gi["site"], "orbit": P.orbit_class(g.get("category")),
+             "pad_basis": "region" if (sites.get(g.get("site_code") or "") or {}).get("region") else "site",
+             "site": gi["site"], "orbit": P.orbit_class(g.get("category")), "kind": gi["kind"],
              "outcome": g.get("outcome"), "inc": g.get("inc"), "payloads": g.get("payloads"), "sources": ["gcat"],
              "gcat": g["tag"], "areas": 0}
+        gcat_extra(r, g)
         link = ll2_link(g.get("time"), gi["pad"]) if g.get("time") else None
         cl = attach_ll2(r, link)
         if link and link.get("lat") is not None:
@@ -1212,7 +1296,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         r = {"id": x["id"], "status": status, "time": x["time"], "time_basis": "time", "actor": "CN",
              "label": f"{x['veh'] if x['veh'] != P.NOT_KNOWN else 'Launch'} from {where}", "vehicle": x["veh"],
              "payload": None, "programmes": [], "mtype": P.MTYPES[-1], "pad": pad, "pad_basis": "site", "site": name,
-             "orbit": P.NOT_KNOWN, "sources": [], "areas": 0}
+             "orbit": P.NOT_KNOWN, "kind": P.NOT_KNOWN if status == "notice" else P.ORBITAL, "sources": [], "areas": 0}
         if status == "notice":
             r["nfc_unmatched"] = True
         extra = add_nfc(r, [x], [])
@@ -1232,7 +1316,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
              "ll2_vehicle": u.get("vehicle") or u.get("vehicle_raw"), "payload": u.get("mission"), "programmes": progs,
              "mtype": mtype, "pad": pad, "pad_name": u.get("pad") or u.get("pad_name"),
              "site": site or (u.get("location") or "").split(",")[0] or None, "orbit": P.orbit_class(None, u.get("orbit")),
-             "ll2_status": u.get("status"), "provider": u.get("provider"), "sources": ["ll2"], "ll2": u["id"],
+             "ll2_status": u.get("status"), "provider": u.get("provider"), "kind": ll2_kind(u), "sources": ["ll2"], "ll2": u["id"],
              "ll2_url": u.get("ll2_url"), "areas": 0}
         if provisional:
             r["provisional"] = True
@@ -1256,7 +1340,10 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         finish(r, areas=cl)
 
     recs.sort(key=lambda r: (r.get("time") or "0000", r["id"]))
-    counts = {"chart": len(events), "gcat": len(gcat), "chart_joined": len(chart_to_g), "gcat_joined": len(g_to_chart),
+    kinds = {k: sum(1 for r in recs if r.get("kind") == k) for k in P.KINDS}
+    gcat_kinds = {k: sum(1 for gi in g_info.values() if gi["kind"] == k) for k in P.KINDS if k != P.NOT_KNOWN}
+    counts = {"chart": len(events), "gcat": len(gcat), "gcat_kinds": gcat_kinds, "kinds": kinds,
+              "chart_joined": len(chart_to_g), "gcat_joined": len(g_to_chart),
               "provisional": sum(1 for r in recs if r.get("provisional")),
               "upcoming": sum(1 for r in recs if r["status"] == "upcoming"),
               "paths": {k: sum(1 for r in recs if (r.get("path") or {}).get("kind") == k) for k in ("drawn", "estimated")}}
@@ -1283,13 +1370,15 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         if s["name"] in used_sites and s["name"] not in seen:
             seen.add(s["name"])
             p = reps.get(s["name"]) or [s["lon"], s["lat"]]
-            site_list.append({"name": s["name"], "lon": p[0], "lat": p[1], "country": s.get("country")})
+            site_list.append({"name": s["name"], "lon": p[0], "lat": p[1], "country": s.get("country")}
+                             | ({"region": True} if s.get("region") else {}))
     for r in recs:  # Launch Library 2 sites GCAT does not list
         if r.get("site") and r["site"] not in seen and r.get("pad") and "ll2" in r["sources"]:
             seen.add(r["site"])
             site_list.append({"name": r["site"], "lon": r["pad"][0], "lat": r["pad"][1], "country": r.get("actor")})
     out = {"generated_at": now, "ledger_since": ledger.get("since"), "counts": counts, "sites": site_list,
-           "mtypes": P.MTYPES, "orbits": P.ORBITS, "programme_notes": P.NOTES, "default_path_nm": DEFAULT_PATH_NM,
+           "mtypes": P.MTYPES, "orbits": P.ORBITS, "kinds": P.KINDS, "kind_notes": P.KIND_NOTES,
+           "programme_notes": P.NOTES, "default_path_nm": DEFAULT_PATH_NM,
            "records": recs}
     if nfc_doc:
         out["nfc"] = {k: nfc_doc.get(k) for k in ("source", "commit", "licence", "attribution")}

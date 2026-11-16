@@ -37,17 +37,42 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
 
 ## History
 - **Sources, joined into one list** (`data/launches.json`): Launch's charted notices (a hand-built Google My Maps
-  map of closure areas, NOTAM texts, flight paths and sites, 2022 onward, imported from an export), GCAT's orbital
-  launches since 2023, Launch Library 2's schedule, NotamForChina (Chinese launches 2012-2026 and their
-  notices) and Joey0609/notams (launch NOTAMs with their text, mostly China's, Dec 2020 onward). A record's
-  `sources` holds `chart`, `gcat`, `ll2`, `nfc`, `joey`, `wayback`; `chart` lists the charted events joined into
+  map of closure areas, NOTAM texts, flight paths and sites, 2022 onward, imported from an export), GCAT's launches
+  since 2023 (orbital, suborbital and missile firings; see Launch kinds), Launch Library 2's schedule, NotamForChina
+  (Chinese launches 2012-2026 and their notices) and Joey0609/notams (launch NOTAMs with their text, mostly China's,
+  Dec 2020 onward). A record's `sources` holds `chart`, `gcat`, `ll2`, `nfc`, `joey`, `wayback`; `chart` lists the charted events joined into
   it, `chart_time` keeps the time in the charted name, `chart_labels` its other names.
-- **Joins:** a charted event and a GCAT launch within 3 h and 200 NM or the same country (pass 1), or within 72 h,
+- **Joins:** a charted event and a GCAT launch within 3 h and 200 NM or the same country (pass 1; a suborbital
+  launch or missile needs the 200 NM, and a missile fired in combat joins no charted event), or within 72 h,
   200 NM and the same vehicle or programme (pass 2); a charted event holding a NOTAM that NotamForChina lists for a
   GCAT launch (pass 3). A joined record takes GCAT's launch time.
+- **Launch kinds** (16 Nov 2026: every one labelled, and each kind easy to show or hide on the map, the list and the
+  downloads): every record has a `kind` (`programs.KINDS`), read from GCAT's
+  LaunchCode first letter (planet4589.org/space/gcat/web/launch/lcols.html) and Category: Orbital (O, D, N),
+  Suborbital rocket (S: sounding rockets, uncrewed New Shepard, HASTE), Crewed suborbital (Y), Atmospheric test (A),
+  Missile test (M), Lofted missile test (L), Combat launch (M with category Weapon or Interceptor Weapon), and Not
+  known (a charted notice or notice set no GCAT launch is joined to). The backfill keeps all of them since 2023
+  (GCAT of 13 Nov 2026: 1,724 = 1,083 orbital + 140 S + 23 Y + 11 A + 153 M tests + 7 L + 307 combat); a
+  suborbital record has orbit "Suborbital", no inclination, GCAT's apogee and range (km) and category, and a mission
+  type by kind (combat: "Weapon (combat use)"; missiles: missile test; crewed: human spaceflight; others by payload
+  names, else science or technology by category). A GCAT site written with "?" is read as that site
+  (`site_uncertain`); a site that is a region (mobile launchers, a sea or test-range area) carries `region` and the
+  card says so. Orbit publishes orbital launches only, so new suborbital launches arrive when the backfill is run
+  again (`python tools/launch.py backfill ../orbit/data/raw` after an Orbit run). Backfill records are stamped
+  with GCAT's table date, so Orbit's later reading of a launch wins the merge; the merge keeps the committed
+  baseline's sites (names, region flags). The page: a "Show kinds" row of toggles above the map (pressed = shown;
+  hiding one writes `kind=` with the kinds still shown), a "Launch kind" filter with GCAT's meaning on each option,
+  a Kind column in the list, Kind, category, apogee and range on the card, and a `kind` column in every download.
+  Notices: a Joey0609 notice joined by window and an NGA warning join orbital launches only (their nearest-pad
+  rule within 5,000 NM cannot tell a missile from an orbital launch in the same window); an archived FAA TFR (100
+  NM, nearest in time) joins any launch but a combat one, which brings 10 Space Operations Area TFRs to Wallops,
+  Van Horn and Poker Flat flights.
+  First build: 2,235 records (1,594 + 641); the 25 Sep 2024 ICBM charted event now joins GCAT's DF-31AG test
+  2024-S55 (16 NM, 0 h) instead of the Wenchang orbital launch 2024-174 (1,393 NM).
 - **Flight paths:** a charted path is drawn as charted (a great circle per leg); otherwise it is estimated from the
   bearing to the closure areas, the payload's inclination, the orbit class's, or the site's most-used corridor.
-  Each record says its basis.
+  A suborbital launch or missile: as charted, or towards its farthest closure area (at any distance, drawn to it),
+  else none. Each record says its basis.
 - **Closure areas** are drawn with great-circle edges on every map and the Paste tab (`notam.js` `geodesic()`);
   circles are drawn on the sphere.
 - **Globe view** (15 Nov 2026): a globe button under the zoom buttons on both maps (`map.js`

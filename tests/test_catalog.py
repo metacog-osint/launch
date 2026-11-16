@@ -314,5 +314,102 @@ class NotamForChina(unittest.TestCase):
         self.assertIsNone(catalog.same_vehicle(P.NOT_KNOWN, "LM-2C"))
 
 
+class Suborbital(unittest.TestCase):
+    """GCAT's suborbital launches and missile firings (LaunchCode S, Y, A, M, L): kinds, orbit, paths and joins."""
+
+    def sub_rec(self, tag, time, kind, site_code, category="Test", vehicle="Black Brant IX", country="US"):
+        return dict(gcat_rec(tag, time, vehicle, tag, site_code, category=category, country=country, names=[]),
+                    kind=kind, apogee_km=300.0)
+
+    def build(self, events, launches):
+        return catalog.build_index({"events": events}, {"since": "2023-01-01", "sites": SITES, "launches": launches,
+                                                         "closures": []}, [], [], NOW)
+
+    def test_kinds_and_mission_types(self):
+        self.assertEqual(P.launch_kind("orbital"), P.ORBITAL)
+        self.assertEqual(P.launch_kind("near-orbital"), P.ORBITAL)
+        self.assertEqual(P.launch_kind("suborbital", "Auroral"), P.SUBORBITAL)
+        self.assertEqual(P.launch_kind("crewed suborbital", "Tourist Flight"), P.CREWED_SUB)
+        self.assertEqual(P.launch_kind("missile", "Weapon"), P.COMBAT_LAUNCH)
+        self.assertEqual(P.launch_kind("missile", "Interceptor Weapon"), P.COMBAT_LAUNCH)
+        self.assertEqual(P.launch_kind("missile", "Interceptor"), P.MISSILE)
+        self.assertEqual(P.launch_kind("lofted missile", "Sat LEO S"), P.LOFTED)
+        self.assertEqual(P.kind_mtype(P.COMBAT_LAUNCH, P.TEST), P.COMBAT)
+        self.assertEqual(P.kind_mtype(P.SUBORBITAL, "Not classified", "Auroral"), P.SCI)
+        self.assertEqual(P.kind_mtype(P.SUBORBITAL, "Not classified", "Hypersonic"), P.TECH)
+        self.assertEqual(P.kind_mtype(P.SUBORBITAL, P.MSL, "Hypersonic"), P.MSL)  # a programme's type stays
+        self.assertEqual(P.MTYPES[-1], "Not classified")
+        self.assertEqual(P.NO_PAYLOAD, "Payload not known")
+        self.assertEqual(set(P.KIND_NOTES), set(P.KINDS))
+
+    def test_backfill_reads_every_kind(self):
+        sites = {"WI": {"name": "Wallops I", "full_name": "Wallops Flight Facility", "lat": 37.8, "lon": -75.5, "country": "US"},
+                 "SUNAN": {"name": "Sunan", "full_name": "Sunan Airport", "lat": 39.3, "lon": 125.7, "country": "KP"}}
+        row = lambda tag, code, site, cat="Test", apo="129", inc="-": {
+            "Launch_Tag": tag, "Launch_Date": "2025 Feb  4 1600:07", "LaunchCode": code, "LV_Type": "X", "Variant": "-",
+            "Flight": "-", "Mission": "-", "Agency": "NASA", "Category": cat, "Launch_Site": site, "Launch_Pad": "-",
+            "Apogee": apo, "Range": "1000", "Inc": inc}
+        rows = [row("2025-S01", "SS", "WI"), row("2025-U01", "LS", "SUNAN?", "Sat LEO S", "6000", "40"),
+                row("2025-M01", "MS", "SUNAN", "Weapon"), row("2025-001", "OS", "WI", "Sat LEO O", "-", "51.6"),
+                row("2025-X01", "XS", "WI"), row("2025-Z01", "ZZ", "WI")]
+        out = {r["tag"]: r for r in catalog.from_gcat_tables(rows, [], sites, {}, NOW)}
+        self.assertEqual(set(out), {"2025-S01", "2025-U01", "2025-M01", "2025-001"})
+        self.assertEqual(out["2025-S01"]["kind"], "suborbital")
+        self.assertEqual(out["2025-S01"]["apogee_km"], 129.0)
+        u = out["2025-U01"]
+        self.assertEqual((u["kind"], u["site_code"], u["inc"], u.get("site_uncertain")), ("lofted missile", "SUNAN", None, True))
+        self.assertEqual(u["site"]["name"], "Sunan")
+        self.assertEqual(out["2025-001"]["inc"], 51.6)
+        self.assertNotIn("apogee_km", out["2025-001"])
+
+    def test_record_kind_orbit_and_no_borrowed_path(self):
+        # An orbital launch from the same site would lend its inclination to an orbital launch; not to a sounding rocket.
+        orb = gcat_rec("2026-010", "2026-01-01T00:00:00Z", "Falcon 9", "Starlink Group 1-1", "VSFBS", inc=53.0, country="US")
+        s = self.sub_rec("2026-S01", "2026-02-01T00:00:00Z", "suborbital", "VSFBS", category="Auroral")
+        m = self.sub_rec("2026-M01", "2026-02-02T00:00:00Z", "missile", "VSFBS", category="Weapon", vehicle="Minuteman 3")
+        recs = {r["id"]: r for r in self.build([], [orb, s, m])["records"]}
+        r = recs["gcat:2026-S01"]
+        self.assertEqual((r["kind"], r["orbit"], r["mtype"], r["apogee_km"]), (P.SUBORBITAL, "Suborbital", P.SCI, 300.0))
+        self.assertNotIn("path", r)
+        self.assertEqual((recs["gcat:2026-M01"]["kind"], recs["gcat:2026-M01"]["mtype"]), (P.COMBAT_LAUNCH, P.COMBAT))
+        self.assertEqual(recs["gcat:2026-010"]["kind"], P.ORBITAL)
+
+    def test_suborbital_path_to_its_farthest_area(self):
+        pad = [-120.61, 34.63]
+        area = {"ring": [[-110, 20], [-109, 20], [-109, 21], [-110, 20]], "centroid": [-109.5, 20.5]}
+        ev = chart_event("hist:m", "2026-03-01T10:00:00Z", "Minuteman", "GT 250", pad, areas=[area], actor="US")
+        g = self.sub_rec("2026-M02", "2026-03-01T10:05:00Z", "missile", "VSFBS", vehicle="Minuteman 3")
+        r = [x for x in self.build([ev], [g])["records"] if x["id"] == "hist:m"][0]
+        self.assertEqual((r["gcat"], r["kind"]), ("2026-M02", P.MISSILE))
+        self.assertEqual(r["path"]["kind"], "estimated")
+        self.assertIn("suborbital", r["path"]["basis"])
+        self.assertLess(r["path"]["nm"], 1100)  # drawn to the area (about 1,040 NM), not past it
+
+    def test_joins_combat_never_suborbital_by_place_only(self):
+        far_pad = [110.95, 19.61]  # Wenchang; the GCAT launches below are at Vandenberg
+        ev = chart_event("hist:x", "2026-04-01T10:00:00Z", "Unknown", "Unknown", far_pad, actor="US")
+        test = self.sub_rec("2026-M03", "2026-04-01T10:30:00Z", "missile", "VSFBS")
+        r = [x for x in self.build([ev], [test])["records"] if x["id"] == "hist:x"][0]
+        self.assertNotIn("gcat", r)  # same country, but 6,000 NM apart: a missile needs to be near in place
+        near = chart_event("hist:y", "2026-04-01T10:00:00Z", "Unknown", "Unknown", [-120.6, 34.6], actor="US")
+        combat = self.sub_rec("2026-M04", "2026-04-01T10:30:00Z", "missile", "VSFBS", category="Weapon")
+        r = [x for x in self.build([near], [combat])["records"] if x["id"] == "hist:y"][0]
+        self.assertNotIn("gcat", r)  # a missile fired in combat joins no charted event
+        self.assertEqual(r["kind"], P.NOT_KNOWN)
+
+    def test_counts_and_kinds_in_the_index(self):
+        ix = self.build([], [self.sub_rec("2026-S05", "2026-02-01T00:00:00Z", "crewed suborbital", "VSFBS")])
+        self.assertEqual(ix["kinds"], P.KINDS)
+        self.assertEqual(ix["counts"]["gcat_kinds"][P.CREWED_SUB], 1)
+        self.assertEqual(ix["records"][0]["mtype"], P.CREW)
+
+    def test_merge_keeps_the_baselines_sites(self):
+        base = {"sites": {"WI": {"name": "Wallops", "lat": 1, "lon": 2, "region": True}}}
+        old = {"sites": {"WI": {"name": "Wallops I", "lat": 1, "lon": 2, "country": "US"}, "X": {"name": "X"}}}
+        m = catalog.merge(base, old)
+        self.assertEqual(m["sites"]["WI"], {"name": "Wallops", "lat": 1, "lon": 2, "region": True, "country": "US"})
+        self.assertIn("X", m["sites"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -91,7 +91,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
     const p = s.length ? [] : near(e.point, PATHS.concat(["h-loose"]));
     map.getCanvas().style.cursor = s.length || p.length ? "pointer" : "";
     if (!s.length && !p.length) { tip.hidden = true; return; }
-    if (s.length) tip.textContent = `${s[0].properties.name}: ${s[0].properties.n} in your filters`;
+    if (s.length) tip.textContent = `${s[0].properties.name}${s[0].properties.region ? " (a region, not a pad)" : ""}: ${s[0].properties.n} in your filters`;
     else {
       const ids = [...new Set(p.map((f) => f.properties.id))];
       const r = byId.get(ids[0]);
@@ -107,7 +107,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
     const s = near(e.point, ["h-sites"], 4);
     if (s.length) {
       const pr = s[0].properties;
-      pop.append(Object.assign(document.createElement("b"), { textContent: pr.name }), document.createTextNode(` · ${pr.n} in your filters`));
+      pop.append(Object.assign(document.createElement("b"), { textContent: pr.name }), document.createTextNode(`${pr.region ? " (a region GCAT gives, not a pad)" : ""} · ${pr.n} in your filters`));
       const b = document.createElement("button"); b.type = "button"; b.className = "chip-btn"; b.textContent = "Show only this site";
       b.addEventListener("click", () => { closePop(); onSite(pr.name); });
       const c = document.createElement("button"); c.type = "button"; c.className = "linkish small"; c.textContent = "Close";
@@ -156,7 +156,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
     rows.forEach((r) => { if (r.site) counts.set(r.site, (counts.get(r.site) || 0) + 1); });
     const siteCC = new Map(IX.sites.map((s) => [s.name, s.country]));
     set("sites", { type: "FeatureCollection", features: IX.sites.map((s) => ({ type: "Feature",
-      properties: { name: s.name, n: counts.get(s.name) || 0, group: group(siteCC.get(s.name)) },
+      properties: { name: s.name, n: counts.get(s.name) || 0, group: group(siteCC.get(s.name)), region: !!s.region },
       geometry: { type: "Point", coordinates: [s.lon, s.lat] } })).sort((a, b) => b.properties.n - a.properties.n) });
     set("loose", { type: "FeatureCollection", features: rows.filter((r) => !r.site && r.pad).map((r) => ({ type: "Feature",
       properties: { id: r.id, group: group(r.actor) }, geometry: { type: "Point", coordinates: r.pad } })) });

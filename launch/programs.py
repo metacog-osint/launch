@@ -100,7 +100,8 @@ def vehicle(raw: str | None) -> str:
 SITE_NAMES = {
     "Canaveral": "Cape Canaveral", "Kennedy": "Kennedy (KSC)", "Baykonur": "Baikonur", "Vostochniy": "Vostochny",
     "Hainan CLS": "Hainan commercial (Wenchang)", "Huang Hai": "Yellow Sea (sea launch)", "Tonghae": "Sohae",
-    "Wallops MARS": "Wallops", "Andoya": "Andøya", "Alcantara": "Alcântara", "Kapustin Yar": "Kapustin Yar",
+    "Wallops MARS": "Wallops", "Wallops I": "Wallops", "ESRANGE": "Esrange", "Arabian Seaf": "Arabian Sea",
+    "Eastern Med.": "Eastern Mediterranean", "Andoya": "Andøya", "Alcantara": "Alcântara", "Kapustin Yar": "Kapustin Yar",
     "East China Sea": "East China Sea (sea launch)", "Yangjiang": "Yangjiang (sea launch)",
     "Jeju": "Jeju (sea launch)", "Svobodniy": "Vostochny", "Sriharikota": "Sriharikota",
 }
@@ -132,10 +133,10 @@ def site_name(gcat_short: str | None) -> str | None:
 
 MTYPES = ["LEO broadband constellation", "Communications", "Earth observation", "Military / intelligence",
           "Navigation", "Weather", "Science / exploration", "Technology / experimental", "Human spaceflight",
-          "Station cargo", "Rideshare", "Test flight", "Missile / suborbital test", "Reentry / landing",
-          "Payload not known", "Not classified"]
-COM, LEOBB, EO, MIL, NAV, WX, SCI, TECH, CREW, CARGO, RIDE, TEST, MSL, REENTRY = MTYPES[1], MTYPES[0], *MTYPES[2:14]
-NO_PAYLOAD = MTYPES[14]  # no payload name to read (the map's "Unk Payload", a blank); "Not classified" = a name, no rule
+          "Station cargo", "Rideshare", "Test flight", "Missile / suborbital test", "Weapon (combat use)",
+          "Reentry / landing", "Payload not known", "Not classified"]
+COM, LEOBB, EO, MIL, NAV, WX, SCI, TECH, CREW, CARGO, RIDE, TEST, MSL, COMBAT, REENTRY = MTYPES[1], MTYPES[0], *MTYPES[2:15]
+NO_PAYLOAD = MTYPES[15]  # no payload name to read (the map's "Unk Payload", a blank); "Not classified" = a name, no rule
 MIL_A = MIL  # assessed: the operator describes the series otherwise (marked in PROGRAMMES' notes)
 _NO_PAYLOAD = re.compile(r"\bUNK(?:NOWN)?\b|^[\s?\d:-]*$|^PAYLOADS?$")
 
@@ -289,6 +290,59 @@ LL2_ORBIT = {"LEO": "LEO", "VLEO": "LEO", "SSO": "SSO / polar", "PO": "SSO / pol
 # Inclination (degrees) typical of a class, for an azimuth when no payload inclination is known.
 CLASS_INC = {"SSO / polar": 97.6}
 STATION_INC = {"ISS": 51.64, "LSS": 41.47}
+
+
+# ---------- launch kinds ----------
+# GCAT's LaunchCode, first letter (planet4589.org/space/gcat/web/launch/lcols.html, read 15 Nov 2026): O orbital,
+# D deep space, N near-orbital (added 2026), S suborbital rocket other than a missile, Y suborbital flight with people
+# aboard, A atmospheric rocket, M military missile, L high-apogee lofted missile test (added 2026). GCAT's Category
+# "Weapon" and "Interceptor Weapon" mark a missile fired in combat (an attack, or an interception of one).
+GCAT_KIND = {"O": "orbital", "D": "deep space", "N": "near-orbital", "S": "suborbital", "Y": "crewed suborbital",
+             "A": "atmospheric", "M": "missile", "L": "lofted missile"}
+ORBITAL_KINDS = ("orbital", "deep space", "near-orbital")
+COMBAT_CATEGORIES = {"Weapon", "Interceptor Weapon"}
+KINDS = ["Orbital", "Suborbital rocket", "Crewed suborbital", "Atmospheric test", "Missile test",
+         "Lofted missile test", "Combat launch", NOT_KNOWN]
+ORBITAL, SUBORBITAL, CREWED_SUB, ATMOS, MISSILE, LOFTED, COMBAT_LAUNCH = KINDS[:7]
+KIND_NOTES = {
+    ORBITAL: "reaches orbit, or leaves Earth (GCAT codes O, D and N)",
+    SUBORBITAL: "a suborbital rocket other than a missile: sounding rockets, uncrewed New Shepard, hypersonic test "
+                "vehicles (GCAT code S)",
+    CREWED_SUB: "a suborbital flight with people aboard: New Shepard, SpaceShipTwo (GCAT code Y)",
+    ATMOS: "an atmospheric rocket: flights that stay low, such as hypersonic test aircraft and targets (GCAT code A)",
+    MISSILE: "a military missile fired in a test, an exercise or as a target (GCAT code M)",
+    LOFTED: "a missile test on a lofted, high-apogee path (GCAT code L)",
+    COMBAT_LAUNCH: "a missile fired in combat: an attack, or an interception of one (GCAT code M, category Weapon "
+                   "or Interceptor Weapon)",
+    NOT_KNOWN: "a charted notice or notice set that no GCAT launch is joined to",
+}
+# Mission type for a suborbital launch whose payload names give none (GCAT categories of sounding-rocket flights).
+_SUB_TECH = {"Test", "Tech", "Hypersonic", "Aeron", "Target", "Static Fail", "R&D"}
+
+
+def launch_kind(gcat_kind: str | None, category: str | None = None) -> str:
+    """Launch's kind for a GCAT launch (its ledger `kind`, from LaunchCode, and its Category)."""
+    k = (gcat_kind or "orbital").strip()
+    if k in ORBITAL_KINDS:
+        return ORBITAL
+    if k == "missile":
+        return COMBAT_LAUNCH if (category or "").strip() in COMBAT_CATEGORIES else MISSILE
+    return {"suborbital": SUBORBITAL, "crewed suborbital": CREWED_SUB, "atmospheric": ATMOS,
+            "lofted missile": LOFTED}.get(k, NOT_KNOWN)
+
+
+def kind_mtype(kind: str, mtype: str, category: str | None = None) -> str:
+    """The mission type of a suborbital launch: a missile's or a crewed flight's is its kind's; a suborbital
+    rocket's is what its payload names give, else science or technology by GCAT's category."""
+    if kind == COMBAT_LAUNCH:
+        return COMBAT
+    if kind in (MISSILE, LOFTED):
+        return MSL
+    if kind == CREWED_SUB:
+        return CREW
+    if kind in (SUBORBITAL, ATMOS) and mtype in (MTYPES[-1], NO_PAYLOAD):
+        return TECH if kind == ATMOS or (category or "").strip() in _SUB_TECH else SCI
+    return mtype
 
 
 def gcat_orbit_code(category: str | None) -> str | None:
