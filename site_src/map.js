@@ -160,7 +160,7 @@ export async function createMap(container, model, { onPick }) {
   map.addControl(new ml.NavigationControl({ showCompass: false }), "top-right");
   addProjectionToggle(map);
   map.getCanvas().setAttribute("aria-label", "Map of launch and reentry closure areas. Every item on it is also listed on this page.");
-  const data = { live: model.live, pads: model.pads, zones: EMPTY, paste: EMPTY };
+  const data = { live: model.live, pads: model.pads, zones: EMPTY, paste: EMPTY, traj: EMPTY, trajpad: EMPTY };
   const note = (on) => {
     container.parentElement.querySelectorAll(".fallback-note").forEach((e) => e.remove());
     if (on) { const p = document.createElement("p"); p.className = "fallback-note small muted"; p.textContent = "Detailed base map unavailable: showing outline land."; container.parentElement.append(p); }
@@ -179,6 +179,10 @@ export async function createMap(container, model, { onPick }) {
     map.addLayer({ id: "paste-fill", type: "fill", source: "la_paste", paint: { "fill-color": accent, "fill-opacity": 0.2 } });
     map.addLayer({ id: "paste-line", type: "line", source: "la_paste", paint: { "line-color": accent, "line-width": 2 } });
     map.addLayer({ id: "pads", type: "circle", source: "la_pads", paint: { "circle-radius": 5.5, "circle-color": panel, "circle-stroke-color": actor, "circle-stroke-width": 2.6 } });
+    // The Paste tab's trajectory: the great circle from the chosen pad through the pasted areas, and the pad.
+    map.addLayer({ id: "traj-casing", type: "line", source: "la_traj", layout: { "line-cap": "round" }, paint: { "line-color": panel, "line-width": 5 } });
+    map.addLayer({ id: "traj-line", type: "line", source: "la_traj", layout: { "line-cap": "round" }, paint: { "line-color": ink, "line-width": 2, "line-dasharray": [2, 1.5] } });
+    map.addLayer({ id: "traj-pad", type: "circle", source: "la_trajpad", paint: { "circle-radius": 6.5, "circle-color": panel, "circle-stroke-color": accent, "circle-stroke-width": 3.5 } });
   }
   map.on("style.load", addLayers);
   dark.addEventListener("change", async () => { const n = await buildStyle(); note(n.fellBack); map.setStyle(n.style, { diff: false }); });
@@ -187,8 +191,15 @@ export async function createMap(container, model, { onPick }) {
     const f = map.queryRenderedFeatures([[pt.x - 6, pt.y - 6], [pt.x + 6, pt.y + 6]], { layers: CLICK.filter((l) => map.getLayer(l)) });
     return f.length ? f[0].properties.key : null;
   };
-  map.on("click", (e) => { const k = pick(e.point); if (k) onPick(k); });
-  map.on("mousemove", (e) => { map.getCanvas().style.cursor = pick(e.point) ? "pointer" : ""; });
+  // pickPoint(): the next click on the map gives its position (the Paste tab's "click the map" for a pad) instead
+  // of picking an item; pickPoint(null) cancels.
+  let armed = null;
+  map.on("click", (e) => {
+    if (armed) { const f = armed; armed = null; map.getCanvas().style.cursor = ""; f([e.lngLat.wrap().lng, e.lngLat.lat]); return; }
+    const k = pick(e.point); if (k) onPick(k);
+  });
+  map.on("mousemove", (e) => { map.getCanvas().style.cursor = armed ? "crosshair" : pick(e.point) ? "pointer" : ""; });
+  const pickPoint = (cb) => { armed = cb; map.getCanvas().style.cursor = cb ? "crosshair" : ""; };
 
   function set(name, fc) {
     data[name] = fc || EMPTY;
@@ -201,5 +212,5 @@ export async function createMap(container, model, { onPick }) {
     (fc.features || []).forEach((f) => f.geometry && add(f.geometry.coordinates));
     fitCoords(map, pts, { padding: 40, maxZoom: 7, duration: 700 });
   }
-  return { set, fit, resize: () => map.resize() };
+  return { set, fit, pickPoint, resize: () => map.resize() };
 }

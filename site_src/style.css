@@ -276,3 +276,7 @@ tr.up td { border-bottom-style: dashed; }
 /* NotamForChina on the History card and the Sources tab */
 .nfc-list li { margin: 2px 0; }
 .nfc-credit { margin-top: 10px; }
+/* Paste tab: trajectory from a pad */
+.traj { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 4px; }
+.traj-pick select { max-width: 100%; }
+.traj-pick label { font-weight: 600; margin-right: 4px; }

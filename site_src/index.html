@@ -170,6 +170,18 @@
       <textarea id="paste-text" rows="8" spellcheck="false" aria-label="NOTAM text"></textarea>
       <p><button type="button" id="paste-go">Read and map</button> <button type="button" id="paste-clear" class="linkish">Clear</button></p>
       <div id="paste-out" aria-live="polite"></div>
+      <section id="traj" class="traj" aria-labelledby="traj-h" hidden>
+        <h3 class="sub-h" id="traj-h">Trajectory from a pad</h3>
+        <p class="traj-pick"><label for="traj-pad">Pad</label> <select id="traj-pad"></select>
+          <button type="button" id="traj-click" class="linkish">or click the map</button></p>
+        <div id="traj-out" aria-live="polite"></div>
+        <p class="small muted">Spherical Earth. The azimuth from the pad to each area's centre stands in for the launch
+          azimuth, and the inclination is what a direct ascent on it gives (cos i = cos latitude &times; sin azimuth),
+          leaving out Earth's rotation and any dog-leg: indicative, not a launch's orbit. The same inclination is also
+          reached on the mirrored azimuth (180&deg; minus the azimuth), the other branch from the same pad. Dog-leg
+          test: the areas should lie on the great circle from the pad through the farthest area; an area more than
+          25 NM outside it, or behind the pad, is flagged (a dog-leg, or areas from different events).</p>
+      </section>
     </section>
   </section>
 
