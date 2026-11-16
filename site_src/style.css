@@ -218,6 +218,16 @@ body[data-tab="history"] main.wrap, body[data-tab="history"] .top .wrap { max-wi
 .chip-btn:hover { border-color: var(--accent); }
 .chip-btn.on { background: var(--accent); color: var(--panel); border-color: var(--accent); }
 .h-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; min-height: 4px; }
+.h-kinds { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-bottom: 6px; }
+.kind-btn { display: inline-flex; align-items: center; gap: 5px; }
+.kind-btn .n { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.kind-btn:not(.on) { color: var(--muted); text-decoration: line-through; }
+.kind-sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; border: 1px solid currentColor; }
+.kind-btn.on .kind-sw { background: currentColor; }
+.kind-tag { white-space: nowrap; font-size: 0.78rem; }
+.kind-tag.k-combat-launch { color: var(--warn); font-weight: 600; }
+.kind-tag.k-missile-test, .kind-tag.k-lofted-missile-test { font-weight: 600; }
+.kind-tag.k-not-known { color: var(--muted); }
 .chip { font: inherit; font-size: 0.8rem; background: var(--panel); color: var(--text); border: 1px solid var(--accent);
   border-radius: 12px; padding: 2px 6px 2px 9px; cursor: pointer; }
 .chip .x { margin-left: 6px; color: var(--muted); }

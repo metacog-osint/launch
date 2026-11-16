@@ -160,6 +160,15 @@ class OnRecords(unittest.TestCase):
         self.assertEqual((c["by_window"], c["unjoined"]), (2, 2))  # 8 h too early (tolerance 2 h); 5,000 NM out
         self.assertEqual(ix["joey"]["licence_file"], catalog.JOEY_LICENCE_FILE)
 
+    def test_by_window_only_an_orbital_launch(self):
+        # A missile test nearer the area, in the same window, takes nothing from the orbital launch.
+        g = gcat_rec("2025-060", "2025-04-01T10:10:00Z", "Chang Zheng 7A", "Y", "WEN")
+        m = dict(gcat_rec("2025-M60", "2025-04-01T10:15:00Z", "DF-31", "Test", "WEN"), kind="missile", category="Test")
+        n = jn("joey:9", "A1009/25", "ZJSA", "2025-04-01T10:00:00Z", "2025-04-01T10:40:00Z", [ring(111, 19)])
+        ix, r = self.build([], [m, g], [n])
+        self.assertEqual([x["id"] for x in r["gcat:2025-060"].get("joey_notices") or []], ["joey:9"])
+        self.assertNotIn("joey_notices", r["gcat:2025-M60"])
+
     def test_a_long_window_joins_only_one_launch(self):
         a = gcat_rec("2025-060", "2025-04-02T10:00:00Z", "Chang Zheng 7A", "Y", "WEN")
         b = gcat_rec("2025-061", "2025-04-09T10:00:00Z", "Chang Zheng 8", "Y", "WEN")
