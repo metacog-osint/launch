@@ -46,6 +46,14 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   Each record says its basis.
 - **Closure areas** are drawn with great-circle edges on every map and the Paste tab (`notam.js` `geodesic()`);
   circles are drawn on the sphere.
+- **Globe view** (15 Nov 2026): a globe button under the zoom buttons on both maps (`map.js`
+  `addProjectionToggle`), one choice for both, saved in the browser (`localStorage` `launch.projection`, flat by
+  default); MapLibre 6.14's own globe projection, put in every style `buildStyle()` makes so the light/dark switch
+  keeps it. Fits go through `fitCoords()`: flat, the bounds; globe, the midpoint of the two points farthest apart
+  (not the mean: a curved ring's hundreds of vertices pull it), zoomed until all are in view; points no hemisphere
+  holds (the 4 Feb 2025 Soyuz-2.1v/Volga launch, Plesetsk to the South Pacific) centre on the pad with the whole
+  globe. The globe's scale follows the centre latitude (radius 512 * 2^z / (2pi cos lat)). A map made in a hidden
+  tab gets its world zoom when first shown, and a switch at world view goes to the other projection's world view.
 - **One notice per NOTAM:** where the charted notices and NotamForChina hold the same NOTAM (number and a shared
   FIR), the charted text is shown and NotamForChina's ring is a check under it.
 - **Address:** filter state is in the address (`#history?veh=LM-7A&site=Wenchang&...`). Addresses from before
