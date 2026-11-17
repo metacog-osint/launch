@@ -977,7 +977,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
 
     g_info = {}
     for g in gcat:
-        progs, mtype = P.programmes(g.get("flight"), g.get("mission"), *g["payloads"]["names"])
+        progs, mtype = P.programmes(g.get("flight"), g.get("mission"), *g["payloads"]["names"],
+                                    owners=g["payloads"].get("owners"))
         kind = P.launch_kind(g.get("kind"), g.get("category"))
         g_info[g["id"]] = {"site": g_site(g), "pad": g_pad(g), "progs": progs, "kind": kind,
                            "mtype": mtype if kind == P.ORBITAL else P.kind_mtype(kind, mtype, g.get("category")),
@@ -1301,8 +1302,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         chart_progs = P.programmes(*texts)[0]
         if g:
             texts += [g.get("flight"), g.get("mission"), *g["payloads"]["names"]]
-        progs, mtype = P.programmes(*texts)
-        if any(P.MTYPE_OF[p] == P.MSL for p in chart_progs):  # a charted "ICBM" outranks a joined launch's payloads
+        progs, mtype = P.programmes(*texts, owners=(g["payloads"].get("owners") if g else None))
+        if any(P.MTYPE_OF.get(p) == P.MSL for p in chart_progs):  # a charted "ICBM" outranks a joined launch's payloads
             mtype = P.MSL
         kind = gi["kind"] if g else P.NOT_KNOWN
         if kind != P.ORBITAL and g:

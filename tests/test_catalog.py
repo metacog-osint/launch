@@ -65,6 +65,43 @@ class Names(unittest.TestCase):
             self.assertEqual(P.programmes(text)[1], want, text)
         self.assertEqual(P.programmes("Jielong-3 Multiple Payloads Tech Demo")[1], "Technology / experimental")
 
+    def test_programmes_reviewed_16_nov(self):
+        # The eight names left "Not classified" (GCAT's flight, mission and payload names, or the charted label)
+        for texts, want in [(["Helusi 1", "Horus 1"], "Earth observation"),
+                            (["Lingxi-03/Sixiang", "Sixiang", "Yinhe-8", "Kuangda Nanhu"], "Earth observation"),
+                            (["Tianxing-1 02", "Chuangxin-15 02"], "Technology / experimental"),
+                            (["EXSQ", "Enshi Xidou Shanquan"], "Earth observation"),
+                            (["Enshi Xidu Shanquan"], "Earth observation"),
+                            (["Cosmos Will See You Now", "Open Cosmos", "MR 1"], "LEO broadband constellation"),
+                            (["ZK-14/15", "Jingan Mengxiang", "Muduo 1A", "Zhongke-1 15"], "Earth observation"),
+                            (["25 Aug 26_0321 UTC_LM-6C_Jingan Mengxiang"], "Earth observation"),
+                            (["Tanluzhe", "Tanluzhe A"], "Science / exploration"),
+                            (["Pengcheng #1, Diting 01A-C, Chaozhisuan-1, Yunxiao Tanluzhe", "Pujiang-4"],
+                             "Earth observation")]:
+            self.assertEqual(P.programmes(*texts)[1], want, texts)
+        # "Yaogan" is also the word for remote sensing: a customer's satellite is not the series
+        for texts in [["Alsat-3A", "Aerjiliya Yaogan-3A"], ["PRSC-HS1", "Bajistan Yaogan 02"],
+                      ["Aman Zhineng Yaogan-1"], ["Tianyi-51/52", "Caiyun SAR01", "Xinglianti Tianyuan YG01"]]:
+            self.assertNotIn("Yaogan", P.programmes(*texts)[0], texts)
+        for texts in [["Yaogan 39 05 zu 01 xing"], ["YG53/YG56"], ["9-20 Oct 26_1500-1459 UTC_LM-4B_Yaogan?"],
+                      ["11 Jan 24_0352 UTC_Yaogan-40"], ["Shiyan-37 and Yaogan-38"], ["YG-40"]]:
+            self.assertIn("Yaogan", P.programmes(*texts)[0], texts)
+        # "Shiyan" is also the word for experimental: the series carries its number
+        for text in ["Guanlan Shiyan Xing", "Dingzhihua Shiyan Zaihe", "Shutianyuxing-01 shiyan xing"]:
+            self.assertNotIn("Shiyan", P.programmes(text)[0], text)
+        for text in ["Shiyan 24C-01", "SY24A/B", "Shiyan-30 01 and 02", "Shi Yan 12"]:
+            self.assertIn("Shiyan", P.programmes(text)[0], text)
+        self.assertEqual(P.programmes("Chonfu Shiyong Shiyan HQ 4")[0], ["Reusable spacecraft (CSSHQ)"])
+
+    def test_pla_owner(self):
+        for owners in [["ZLZB"], ["ZZB/CAST"], ["ZLZB?"], ["CASC", "JHB"]]:
+            self.assertEqual(P.programmes("Gao Fen 12-05", owners=owners),
+                             (["Gaofen", P.PLA_OWNED], "Military / intelligence"), owners)
+        for owners in [None, [], ["CAST"], ["CMSEO"], ["ZXW"], ["PLABS"]]:  # Planet's code starts with PLA
+            self.assertEqual(P.programmes("Gao Fen 12-05", owners=owners), (["Gaofen"], "Earth observation"), owners)
+        self.assertEqual(P.programmes("Shenzhou-20 Return", owners=["ZZB"])[1], "Reentry / landing")
+        self.assertIn(P.PLA_OWNED, P.NOTES)
+
     def test_payload_unknown(self):
         for name in ["Unk Payload", "Unknown Payload DELAYED", "Payload Unk", "Payload", "UNK", "", None,
                      "2240-0320 ???", "Poss Zhuque-3 Unk Payload"]:
