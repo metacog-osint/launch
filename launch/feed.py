@@ -29,6 +29,10 @@ SRC_ORBIT = {"id": "orbit-snapshot", "publisher": "Orbit, The Intelligence Compa
              "title": "Scheduled launches (Launch Library 2), GCAT launches, launch-hazard navigational warnings",
              "url": "https://orbit.theintelligence.company", "licence": "Each item keeps its source's terms",
              "grade": "B2", "independence_group": "orbit", "source_type": "aggregator"}
+SRC_CORDON = {"id": "cordon-feed", "publisher": "Cordon, The Intelligence Company",
+              "title": "NGA navigational warnings (launch category), windows and hazard as parsed by Cordon",
+              "url": "https://cordon.theintelligence.company", "licence": "NGA: US public domain",
+              "grade": "A1", "independence_group": "nga", "source_type": "aggregator"}
 
 
 def _dt(iso: str) -> datetime:
@@ -92,7 +96,7 @@ def _tfr_item(t: dict, generated: str, accessed: str) -> dict:
     return {"type": "Feature", "geometry": _geom(t["rings"]), "properties": props}
 
 
-def _match_item(m: dict, area: dict, generated: str, accessed: str) -> dict:
+def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: str | None = None) -> dict:
     end = _dt(m["window"][1])
     lvl = m["level"]
     what = ("GCAT has since dated launch " + m["grouped_with"]["launch_tag"] + f" ({m['grouped_with']['vehicle']}) "
@@ -114,7 +118,9 @@ def _match_item(m: dict, area: dict, generated: str, accessed: str) -> dict:
         "coverage_fraction": 1.0,
         "precision_class": "area",
         "visual": {"type": "map", "url": f"{SITE}/#live"},
-        "sources": [{**SRC_ORBIT, "accessed_at": accessed}],
+        "sources": [{**SRC_ORBIT, "accessed_at": accessed}]
+                   + ([{**SRC_CORDON, "accessed_at": cordon_at or accessed}]
+                      if area.get("source") == "cordon-navwarn" else []),
     }
     return {"type": "Feature", "geometry": _geom([area["ring"]]), "properties": props}
 
@@ -124,6 +130,7 @@ def build_feed(snap: dict) -> dict:
     lanes = snap.get("lanes") or {}
     tfr_at = (lanes.get("tfr") or {}).get("fetched_at") or generated
     orb_at = (lanes.get("orbit") or {}).get("fetched_at") or generated
+    cor_at = (lanes.get("cordon") or {}).get("fetched_at") or generated
     features = [_tfr_item(t, generated, tfr_at) for t in snap.get("tfr") or []]
     areas = {(a.get("key") or a.get("id")): a for a in snap.get("areas") or []}
     now = _dt(generated)
@@ -131,12 +138,13 @@ def build_feed(snap: dict) -> dict:
         if m["level"] in ("time and place", "grouped") and _dt(m["window"][1]) >= now - timedelta(hours=24):
             a = areas.get(m["area"])
             if a:
-                features.append(_match_item(m, a, generated, orb_at))
+                features.append(_match_item(m, a, generated, orb_at, cor_at))
     return {
         "type": "FeatureCollection", "contract": CONTRACT, "program": "launch", "generated_at": generated,
         "method_version": METHOD,
-        "licence": "FAA TFRs: US Government work. Orbit's items keep their sources' terms (GCAT CC BY 4.0).",
-        "attribution": "Launch, The Intelligence Company. FAA TFRs; Orbit (Launch Library 2, GCAT by J. McDowell, "
-                       "NGA, Japan Coast Guard)",
+        "licence": "FAA TFRs and NGA warnings: US Government works. Orbit's items keep their sources' terms "
+                   "(GCAT CC BY 4.0).",
+        "attribution": "Launch, The Intelligence Company. FAA TFRs; NGA navigational warnings via Cordon; Orbit "
+                       "(Launch Library 2, GCAT by J. McDowell)",
         "language_key": LANGUAGE_KEY, "features": features,
     }

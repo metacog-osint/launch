@@ -26,10 +26,10 @@ from tic_doctrine import contract, registers  # noqa: E402
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
 # Not imported: the exercise layer holds scenario text, not public notices.
 EXCLUDED_LAYERS = {"Previous Exercise NOTAMs"}
-LANE_FIELDS = {"tfr": ["tfr"], "orbit": ["orbit"]}
+LANE_FIELDS = {"tfr": ["tfr"], "orbit": ["orbit"], "cordon": ["cordon"]}
 # The published ledger, read back on each run so a lost Actions cache loses no launch (merge is a union).
 LIVE_LEDGER = "https://launch.theintelligence.company/data/ledger.json"
-EMPTY = {"tfr": [], "orbit": {}}
+EMPTY = {"tfr": [], "orbit": {}, "cordon": {}}
 
 
 def dump(obj, compact: bool = False) -> str:
@@ -168,7 +168,12 @@ def _lane_orbit(raw_dir: Path, prev: dict, getter):
     return {"orbit": live.orbit_read(body)}, [rec]
 
 
-LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit}
+def _lane_cordon(raw_dir: Path, prev: dict, getter):
+    body, rec = fetch.fetch("cordon-feed", live.CORDON_FEED, raw_dir, "json", getter=getter)
+    return {"cordon": live.cordon_read(body)}, [rec]
+
+
+LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit, "cordon": _lane_cordon}
 
 
 def collect(root: Path = ROOT, getter=None, only=None) -> dict:
@@ -201,7 +206,10 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     pat_path = root / "history" / "patterns.json"
     corridors = json.loads(pat_path.read_text(encoding="utf-8"))["corridors"] if pat_path.exists() else []
     orb = snap.get("orbit") or {}
-    areas = list(orb.get("areas") or []) + live.tfr_areas(snap.get("tfr") or [], {})
+    # NGA warnings come from Cordon (decided 17 Nov 2026). Orbit's copy is used only until Cordon's lane has
+    # succeeded once, so a first run with Cordon down still has warnings.
+    nav = (snap.get("cordon") or {}).get("areas")
+    areas = list(nav if nav is not None else orb.get("areas") or []) + live.tfr_areas(snap.get("tfr") or [], {})
     snap["areas"] = [{k: v for k, v in a.items() if k != "detail"} for a in areas]
     snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [])
     data_dir.mkdir(parents=True, exist_ok=True)

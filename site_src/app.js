@@ -101,7 +101,7 @@ function liveTables() {
       lvlBadge(m.level), `${m.azimuth}° / ${m.distance_nm}`, m.level === "grouped" ? "GCAT launch " + m.grouped_with.launch_tag : m.place_basis] })),
     (r) => { const k = [...byKey.keys()].find((x) => x.startsWith("live:" + r.m.area + ":")); if (k) pickLive(k); }) : muted("No scheduled launch coincides with a live closure area."));
   const rows = (snap.areas || []).map((a, i) => ({ key: "live:" + (a.key || a.id) + ":" + i, cells: [
-    a.source === "faa-tfr" ? "FAA TFR" : "Navigational warning (via Orbit)", a.key || a.id, a.label || (a.regions || []).join(", ") || "",
+    a.source === "faa-tfr" ? "FAA TFR" : a.source === "cordon-navwarn" ? "NGA navigational warning (via Cordon)" : "Navigational warning (via Orbit)", a.key || a.id, a.label || (a.regions || []).join(", ") || "",
     (a.windows || []).slice(0, 2).map((w) => fmt(w.start) + " to " + fmt(w.end, { date: false })).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice"] }));
   put($("area-table"), rows.length ? table(["Source", "Notice", "Where", "Windows"], rows, (r) => pickLive(r.key)) : muted("No live areas."));
 }

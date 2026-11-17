@@ -13,7 +13,7 @@ on the machine that has it: read it too when it is there.
 python tools/launch.py history [KML]   # source map export -> history/history.json + history/patterns.json (committed);
                                        # needs the private history/source/terms.json and refuses without it
 python tools/launch.py backfill DIR    # GCAT tables -> history/ledger.json (committed baseline)
-python tools/launch.py collect         # tfr + orbit lanes -> data/snapshot.json; ledger -> data/ledger.json
+python tools/launch.py collect         # tfr, orbit, cordon lanes -> data/snapshot.json; ledger -> data/ledger.json
 python tools/launch.py nfc fetch|build # NotamForChina at the pinned commit -> history/nfc.json (committed)
 python tools/launch.py nfc links       # its list of forum thread links -> history/nsf_links.json (committed)
 python tools/launch.py joey fetch|build # Joey0609/notams at the pinned commit -> history/joey.json (committed)
@@ -225,7 +225,17 @@ Shared copies (`tic-nav.*`, `tic-time.*`, `doctrine/kit/`) are reported, not fai
   `dateExpire` read as UTC. `codeTimeZone` names the zone the FAA's page displays, not the zone of those fields
   (FDC 6/7113, 15 Nov: 17:01-18:50 with codeTimeZone EST, text "2611151701 UTC ... UNTIL 2611151850 UTC").
   Before this, TFRs had no window and were never time-matched.
-- `orbit`: Orbit's published `data/snapshot.json` (scheduled launches, GCAT launches, NGA navigational warnings).
+- `orbit`: Orbit's published `data/snapshot.json` (scheduled launches, GCAT launches). Its NGA warnings are used
+  only until the `cordon` lane has succeeded once.
+- `cordon` (17 Nov 2026): Cordon's published `data/feed.geojson`, the NGA warnings in its `launch` category with
+  the windows, hazard and cancels Cordon parses (method `cordon-feed-1.1`; Cordon is the suite's one NGA reader).
+  `live.cordon_read` keeps those with a launch, debris or reentry hazard (missile firings, hazard null, are left
+  out and counted), gives each polygon Orbit's key (`navarea-iv-1081-26`, so match ids did not change) and NGA's
+  number, takes area letters from the text when the areas have no windows of their own, and matches on the
+  message's windows as before. Checked on the 17 Nov 18:15 UTC feed: the same 12 warnings, polygons, windows,
+  hazards, letters and the same 11 matches as Orbit's copy (Orbit's 13th, HYDROPAC 3315/26, had already left
+  NGA's own list). Match items cite Cordon as a second source. `launch/ngawarn.py` stays for the Internet
+  Archive history only.
 - `nms`: `waiting` until the FAA grants NOTAM Management Service access.
 - NotamForChina (`launch/nfc.py`, Apache-2.0, pinned commit `nfc.SHA`): `nfc fetch` copies its workbook and
   drop-zone maps into git-ignored `history/nfc_source/`; `nfc build` writes `history/nfc.json`. `build_site`

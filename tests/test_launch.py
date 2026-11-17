@@ -165,6 +165,39 @@ class Matching(unittest.TestCase):
                  "site": {"lat": 38.85, "lon": 111.61}}]
         self.assertEqual(live.match(up, [area], corr, gcat)[0]["level"], "grouped")
 
+    def test_cordon_launch_warnings(self):
+        """NGA warnings come from Cordon's feed (decided 17 Nov 2026): launch hazards kept, missile firings left out,
+        Orbit's keys and NGA's numbers kept, letters from the text when areas have no windows of their own."""
+        win = [{"start": "2026-11-20T10:00:00Z", "end": "2026-11-20T13:00:00Z"}]
+        sq = [[120.0, 10.0], [120.5, 10.0], [120.5, 10.5], [120.0, 10.0]]
+        doc = {"generated_at": "2026-11-17T18:15:56Z", "health": {"nga-navwarnings": {"state": "fresh"}}, "features": [
+            {"type": "Feature", "geometry": {"type": "MultiPolygon", "coordinates": [[sq], [[[c[0] + 2, c[1]] for c in sq]]]},
+             "properties": {"id": "cordon:navwarn:P-3352-2026", "data_as_of": "2026-11-15T12:00:00Z",
+                            "valid_until": "2026-11-20T17:00:00Z",
+                            "measures": {"category": "launch", "sea": "South China Sea", "place": "Philippines",
+                                         "hazard": "space debris", "windows": win, "window_mode": "single",
+                                         "cancels": [], "text": "1. HAZARDOUS OPERATIONS, SPACE DEBRIS\n"
+                                         "   201000Z TO 201600Z NOV IN AREAS BOUND BY\n   A. 10-00N 120-00E.\n"
+                                         "   B. 10-00N 122-00E.",
+                                         "rebroadcasts": [{"id": "cordon:navwarn:12-800-2026", "number": "NAVAREA XII 800/2026",
+                                                           "issued": "2026-11-15T13:00:00Z"}]}}},
+            {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [sq]},
+             "properties": {"id": "cordon:navwarn:A-237-2026", "measures": {"category": "launch", "hazard": None}}},
+            {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [sq]},
+             "properties": {"id": "cordon:navwarn:4-5-2026", "measures": {"category": "military"}}}]}
+        got = live.cordon_read(json.dumps(doc).encode())
+        self.assertEqual((got["nga_state"], got["missile_firings_left_out"]), ("fresh", 1))
+        self.assertEqual([(a["key"], a["label"]) for a in got["areas"]],
+                         [("hydropac-3352-26", "A"), ("hydropac-3352-26", "B")])
+        a = got["areas"][0]
+        self.assertEqual((a["source"], a["hazard"], a["windows"], a["regions"], a["expires"]),
+                         ("cordon-navwarn", "space debris", win, ["SOUTH CHINA SEA", "PHILIPPINES"], "2026-11-20T17:00:00Z"))
+        self.assertEqual([b["id"] for b in a["broadcasts"]], ["HYDROPAC 3352/26", "NAVAREA XII 800/26"])
+        self.assertEqual(a["ring"][0], a["ring"][-1])
+        up = [{"id": "u1", "name": "LM-2C", "net": "2026-11-20T10:30:00Z", "lat": 19.6, "lon": 110.95}]
+        m = live.match(up, got["areas"], [], [])
+        self.assertEqual({r["area"] for r in m}, {"hydropac-3352-26"})
+
     def test_tfr_space_ops_only_and_stale_shapes_dropped(self):
         lst = json.dumps([{"notam_id": "6/7131", "type": "SPACE OPERATIONS", "facility": "ZHU", "state": "TX",
                            "description": "STARBASE", "creation_date": "11/12/2026"},
