@@ -2,7 +2,8 @@
 the old tool only guessed "likely crosses land" from the azimuth).
 
 A path is the line the History map draws: as charted (each leg a great circle) or estimated (a great circle from the
-pad on the inferred azimuth, to the farthest closure area or catalog.DEFAULT_PATH_NM). It is sampled every SAMPLE_NM
+pad on the inferred azimuth, to the farthest closure area or catalog.DEFAULT_PATH_NM; from the Cape, a south-going
+one first runs to the polar corridor's turn point, `via`, and takes its azimuth from there). It is sampled every SAMPLE_NM
 along the track and each sample is looked up in the doctrine kit's Natural Earth country outlines
 (doctrine/kit/geo/countries.json: admin 0, de facto borders, rings thinned to 0.05 deg, so a border is good to a few
 NM and a country narrower than SAMPLE_NM across the track can be missed). Land only: territorial waters and EEZs are
@@ -164,4 +165,15 @@ def overflight(world: World, record: dict, chart_paths: list[list]) -> list[list
     pad = record.get("pad")
     if not pad or path.get("az") is None or not path.get("nm"):
         return None
-    return [runs(world, track_samples(pad[0], pad[1], path["az"], path["nm"]))]
+    return [runs(world, estimated_samples(pad, path))]
+
+
+def estimated_samples(pad, path: dict, step=SAMPLE_NM):
+    """An estimated path: pad -> each `via` point (great circles), then on `az` for what is left of `nm`."""
+    via = path.get("via") or []
+    if not via:
+        return track_samples(pad[0], pad[1], path["az"], path["nm"], step)
+    legs = line_samples([list(pad)] + [list(v) for v in via], step)
+    done = legs[-1][1]
+    rest = track_samples(via[-1][0], via[-1][1], path["az"], max(path["nm"] - done, 0.0), step)
+    return legs + [(p, done + d) for p, d in rest[1:]]

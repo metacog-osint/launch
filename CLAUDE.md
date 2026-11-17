@@ -82,6 +82,12 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   its start to its farthest point within a quarter of the globe, else its first leg's heading (`drawn_heading`: the
   bearing to the end of a path drawn round half the world reads backwards); otherwise it is estimated from the
   bearing to the closure areas, the payload's inclination, the orbit class's, or the site's most-used corridor.
+  A south-going path from an inclination at Cape Canaveral or Kennedy (16 Nov 2026) follows the Cape's polar
+  corridor: offshore to a turn point off Boca Raton (`programs.POLAR_CORRIDOR`, approximate), then the
+  inclination's azimuth from there (`path.via`; `notam.js` `estimatedLine()` draws and exports it, `overfly.py`
+  samples it). From the pad, 189 deg crossed about 190 NM of the Florida peninsula, which these launches avoid
+  (south-east over the Atlantic, then south along the coast, then over Cuba: Spaceflight Now on OneWeb 16 and
+  SAOCOM 1B). Three records: OneWeb-2, PACE, gcat:2025-066.
   A suborbital launch or missile: as charted, or towards its farthest closure area (at any distance, drawn to it),
   else none. Each record says its basis.
 - **Closure areas** are drawn with great-circle edges on every map and the Paste tab (`notam.js` `geodesic()`);
