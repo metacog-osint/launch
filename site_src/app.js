@@ -92,6 +92,13 @@ function liveModel() {
   return { live, pads };
 }
 
+const SRC_LABEL = { "faa-tfr": "FAA TFR", "faa-nms": "NOTAM (FAA NMS-API)", "cordon-navwarn": "NGA navigational warning (via Cordon)" };
+const srcLabel = (a) => SRC_LABEL[a.source] || "Navigational warning (via Orbit)";
+const KEPT = { words: "launch words in the text", "cn-area": "China's surface-to-unlimited danger area, short window",
+  "unl-area": "surface-to-unlimited area, short window", "recurring-area": "near a closure area in Launch's history" };
+// "If a launch from <site>, around <time>": the site's median minutes from closure opening to launch (history/timing.json).
+const expectText = (x) => x ? `if a launch from ${x.site}, around ${fmt(x.at, { date: false })} (median ${x.median_min} min after opening, ${x.launches} launches; middle half ${x.q1_min}-${x.q3_min} min)` : "";
+
 function liveTables() {
   const ms = (snap.matches || []).slice().sort((a, b) => (a.net < b.net ? -1 : 1));
   const lvlBadge = (l) => el("span", "badge" + (l === "time" ? "" : " badge-warn"), l);
@@ -101,8 +108,9 @@ function liveTables() {
       lvlBadge(m.level), `${m.azimuth}° / ${m.distance_nm}`, m.level === "grouped" ? "GCAT launch " + m.grouped_with.launch_tag : m.place_basis] })),
     (r) => { const k = [...byKey.keys()].find((x) => x.startsWith("live:" + r.m.area + ":")); if (k) pickLive(k); }) : muted("No scheduled launch coincides with a live closure area."));
   const rows = (snap.areas || []).map((a, i) => ({ key: "live:" + (a.key || a.id) + ":" + i, cells: [
-    a.source === "faa-tfr" ? "FAA TFR" : a.source === "cordon-navwarn" ? "NGA navigational warning (via Cordon)" : "Navigational warning (via Orbit)", a.key || a.id, a.label || (a.regions || []).join(", ") || "",
-    (a.windows || []).slice(0, 2).map((w) => fmt(w.start) + " to " + fmt(w.end, { date: false })).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice"] }));
+    srcLabel(a), a.key || a.id, a.label || (a.regions || []).join(", ") || "",
+    ((a.windows || []).slice(0, 2).map((w) => fmt(w.start) + " to " + fmt(w.end, { date: false })).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
+      + (a.expect ? "; " + expectText(a.expect) : "")] }));
   put($("area-table"), rows.length ? table(["Source", "Notice", "Where", "Windows"], rows, (r) => pickLive(r.key)) : muted("No live areas."));
 }
 
@@ -115,7 +123,8 @@ function pickLive(key) {
     return;
   }
   const a = x.a;
-  box.append(el("b", "", (a.source === "faa-tfr" ? "FAA TFR " : "") + (a.key || a.id)), document.createTextNode(" · " + (a.hazard || a.label || "")));
+  box.append(el("b", "", (a.source === "faa-tfr" ? "FAA TFR " : a.source === "faa-nms" ? "NOTAM " : "") + (a.key || a.id)), document.createTextNode(" · " + (a.hazard || a.label || "")));
+  if (a.source === "faa-nms") box.append(el("br"), document.createTextNode("Kept: " + (KEPT[a.kept] || a.kept) + (a.expect ? "; " + expectText(a.expect) : "") + ". " + ((snap.nms || {}).source_note || "")));
   map.fit({ type: "FeatureCollection", features: [poly(a.ring, {})] });
 }
 

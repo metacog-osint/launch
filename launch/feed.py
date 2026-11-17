@@ -25,6 +25,10 @@ NEW_HOURS = 72  # a space operations TFR issued within this long is new, and new
 SRC_TFR = {"id": "faa-tfr", "publisher": "US Federal Aviation Administration", "title": "Temporary Flight Restrictions",
            "url": "https://tfr.faa.gov/", "licence": "US Government work", "grade": "A1",
            "independence_group": "faa", "source_type": "official"}
+SRC_NMS = {"id": "faa-nms", "publisher": "NOTAMs read through the FAA NOTAM Management Service API",
+           "title": "NOTAMs (NMS-API); not FAA data as published here, and not authoritative for non-US NOTAMs",
+           "url": "https://api-nms.aim.faa.gov/", "licence": "Redistribution allowed (FAA NMS-API terms of service)",
+           "grade": "A2", "independence_group": "faa", "source_type": "official"}
 SRC_ORBIT = {"id": "orbit-snapshot", "publisher": "Orbit, The Intelligence Company",
              "title": "Scheduled launches (Launch Library 2), GCAT launches, launch-hazard navigational warnings",
              "url": "https://orbit.theintelligence.company", "licence": "Each item keeps its source's terms",
@@ -120,7 +124,8 @@ def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: s
         "visual": {"type": "map", "url": f"{SITE}/#live"},
         "sources": [{**SRC_ORBIT, "accessed_at": accessed}]
                    + ([{**SRC_CORDON, "accessed_at": cordon_at or accessed}]
-                      if area.get("source") == "cordon-navwarn" else []),
+                      if area.get("source") == "cordon-navwarn" else [])
+                   + ([{**SRC_NMS, "accessed_at": accessed}] if area.get("source") == "faa-nms" else []),
     }
     return {"type": "Feature", "geometry": _geom([area["ring"]]), "properties": props}
 

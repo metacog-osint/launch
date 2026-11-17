@@ -19,6 +19,7 @@ python tools/launch.py nfc links       # its list of forum thread links -> histo
 python tools/launch.py joey fetch|build # Joey0609/notams at the pinned commit -> history/joey.json (committed)
 python tools/launch.py wayback fetch|build # Internet Archive copies of FAA TFRs and NGA warnings -> history/wayback.json
 python tools/launch.py build           # site/ (incl. data/launches.json, the History tab's list); privacy check on site/
+python tools/launch.py timing          # closure opening to launch by site, from the built list -> history/timing.json
 python tools/launch.py check           # registers, feed lint, public gate, privacy check (site/ and tracked files)
 python -m unittest discover -s tests   # offline tests
 python tools/serve.py                  # http://127.0.0.1:8771 with _headers (CSP)
@@ -236,7 +237,28 @@ Shared copies (`tic-nav.*`, `tic-time.*`, `doctrine/kit/`) are reported, not fai
   hazards, letters and the same 11 matches as Orbit's copy (Orbit's 13th, HYDROPAC 3315/26, had already left
   NGA's own list). Match items cite Cordon as a second source. `launch/ngawarn.py` stays for the Internet
   Archive history only.
-- `nms`: `waiting` until the FAA grants NOTAM Management Service access.
+- `nms` (`launch/nms.py`, 17 Nov 2026): the FAA NOTAM Management Service API, OAuth2 keys from the environment
+  (`NMS_CLIENT_ID`, `NMS_CLIENT_SECRET`; `NMS_ENV` staging or prod, the workflow's default prod); without keys the
+  lane says `waiting`. Within the FAA's limits (production: one bulk pull a day, one delta pull every 3 minutes):
+  a bulk pull of every active NOTAM (classifications INTERNATIONAL, FDC, MILITARY, DOMESTIC; about 80,000, 9
+  requests) when the last is over 24 h old, else one delta (`lastUpdatedDate`, a minute's overlap) applied to the
+  notices kept from the last run (in `data/snapshot.json`, so in the Actions cache). Every NOTAM is filtered by
+  Launch (`nms.keep`): never a cancellation, a permanent notice, a window over 62 days, an upper limit under FL100,
+  or text naming model rockets, gun, mortar or flare firing, lasers, fireworks, displays, balloons, drones,
+  detonations; kept for launch words (`WORDS`: `notam.LAUNCH_WORDS` with "stage" only as a rocket's stage, and a
+  Q-code of an area, a warning or "other"), China's SFC-UNL rule (`cn-area`, from `joey.py`), any state's
+  surface-to-unlimited area or warning with a short window (`unl-area`, the "-UNL" search), or an area from the
+  surface, open at most 7 days, centred within 25 NM of a closure area in the history (`recurring-area`). First
+  staging pull (17 Nov): 80,134 NOTAMs, 62 kept (words 42, unl-area 10, recurring 6, cn-area 4). An FDC notice the
+  tfr lane holds is left to it. The page and the feed say the FAA's terms: redistribution allowed, not called FAA
+  data, NMS not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`).
+- **Timing** (`launch/timing.py`, `python tools/launch.py timing` -> committed `history/timing.json`, from the
+  built `site/data/launches.json`): for each launch with a GCAT time, the notice nearest the pad (within 450 NM,
+  window of 6 h or less) whose window holds the launch; minutes from its opening to the launch, by site (5+
+  launches). First table (17 Nov 2026): Jiuquan 40 launches, median 9 min; Xichang 25, 10; Taiyuan 18, 9; Wenchang
+  12, 10.1; Cape Canaveral 75, 38.6; Kennedy 35, 39; Wallops 9, 36.8. A live area within 450 NM of such a site,
+  window 6 h or less, carries `expect`: "if a launch from <site>, around <opening + median>". History, not a
+  forecast.
 - NotamForChina (`launch/nfc.py`, Apache-2.0, pinned commit `nfc.SHA`): `nfc fetch` copies its workbook and
   drop-zone maps into git-ignored `history/nfc_source/`; `nfc build` writes `history/nfc.json`. `build_site`
   refuses to build without `history/NOTAMFORCHINA-LICENSE.txt`, which it publishes beside the data.
