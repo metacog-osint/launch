@@ -1,7 +1,7 @@
 """Launch CLI.
 
     python tools/launch.py history [KML]   # the charted notices -> history/history.json and history/patterns.json
-    python tools/launch.py backfill DIR    # GCAT tables in DIR -> history/ledger.json (every launch since 2023)
+    python tools/launch.py backfill DIR    # GCAT tables in DIR -> history/ledger.json (every launch since 2012)
     python tools/launch.py collect         # live lanes -> data/snapshot.json; new launches -> data/ledger.json
     python tools/launch.py build           # site/ from history/ and data/snapshot.json
     python tools/launch.py check           # registers + feed lint + public gate + privacy check
@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
-from launch import catalog, feed, fetch, gcat, history, joey, live, nfc, overfly, patterns, privacy, public, wayback  # noqa: E402
+from launch import catalog, feed, fetch, gcat, history, joey, live, nfc, nsf, overfly, patterns, privacy, public, wayback  # noqa: E402
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
@@ -91,9 +91,11 @@ def build_backfill(gdir: Path, root: Path = ROOT) -> dict:
     as_of = min((x for x in (gcat.vague_date(stamp.get(k) or "")["time"] for k in ("launch", "satcat")) if x),
                 default=now)
     launches = catalog.from_gcat_tables(rows["launch"], rows["satcat"] + rows["satcat100k"], sites, orgs, as_of)
-    # Sites: every site with a launch of any kind since 2015 (missile ranges too, for the charted notices' tests).
+    # Sites: every site with a launch of any kind since the ledger starts or 2015, whichever is earlier (missile
+    # ranges too, for the charted notices' tests).
+    floor = min(catalog.LEDGER_SINCE, "2015")
     used = {(r.get("Launch_Site") or "").rstrip("?") for r in rows["launch"]
-            if (gcat.vague_date(r.get("Launch_Date", ""))["date"] or "") >= "2015"}
+            if (gcat.vague_date(r.get("Launch_Date", ""))["date"] or "") >= floor}
     doc = {"version": 1, "since": catalog.LEDGER_SINCE, "built_from": "GCAT tables " + ", ".join(gcat.TABLES),
            "gcat_updated": stamp, "citation": gcat.CITATION, "generated_at": now, "launches": launches, "closures": [],
            "sites": catalog.site_table(sites, used)}
@@ -271,9 +273,13 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     # Internet Archive copies of FAA space-operations TFRs and NGA warnings (history/wayback.json, `launch.py wayback build`).
     wb_path = root / "history" / "wayback.json"
     wb_doc = json.loads(wb_path.read_text(encoding="utf-8")) if wb_path.exists() else None
+    # Forum thread links from NotamForChina's list (history/nsf_links.json, `launch.py nfc links`; same licence).
+    nsf_path = root / "history" / "nsf_links.json"
+    nsf_doc = json.loads(nsf_path.read_text(encoding="utf-8")) if nsf_path.exists() and nfc_doc else None
     countries = json.loads((root / "doctrine" / "kit" / "geo" / "countries.json").read_text(encoding="utf-8"))
     index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
-                                snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries))
+                                snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries),
+                                nsf_doc=nsf_doc)
     files = {"data/snapshot.json": dump(snap), "data/feed.geojson": dump(feed.build_feed(snap)),
              "data/sources.json": dump(sources_doc(root)),
              "data/history.json": dump(hist, compact=True),
@@ -341,7 +347,8 @@ def main(argv=None) -> int:
     sub.add_parser("build")
     sub.add_parser("check")
     n = sub.add_parser("nfc", help="NotamForChina: fetch its files at the pinned commit, or build history/nfc.json")
-    n.add_argument("step", choices=["fetch", "build"])
+    n.add_argument("step", choices=["fetch", "build", "links"],
+                   help="links: its list of forum thread links -> history/nsf_links.json")
     j = sub.add_parser("joey", help="Joey0609/notams: fetch its month files at the pinned commit, or build history/joey.json")
     j.add_argument("step", choices=["fetch", "build"])
     w = sub.add_parser("wayback", help="Internet Archive copies of FAA space-operations TFRs and NGA warnings")
@@ -371,6 +378,12 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "nfc":
         src = ROOT / "history" / "nfc_source"
+        if a.step == "links":
+            nsf.fetch(src)
+            doc = nsf.build(src)
+            print("NotamForChina forum links:", nsf.summary(doc))
+            (ROOT / "history" / "nsf_links.json").write_text(dump(doc), encoding="utf-8", newline="\n")
+            return 0
         if a.step == "fetch":
             print("NotamForChina fetch:", nfc.fetch(src))
             return 0

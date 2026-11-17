@@ -1,7 +1,7 @@
 # Launch
 
 Launch and reentry closure areas (NOTAMs, navigational warnings): live areas, which scheduled launches coincide
-with them, a launch history since 2023 (Chinese launches since 2012), and each pad's closure patterns.
+with them, a launch history since 2012, and each pad's closure patterns.
 `tic-feed/2`, program id `launch`, prefix `LA`, method `launch-1.0`. Observations only. Site:
 https://launch.theintelligence.company (Cloudflare Pages project `launch`).
 
@@ -15,6 +15,7 @@ python tools/launch.py history [KML]   # source map export -> history/history.js
 python tools/launch.py backfill DIR    # GCAT tables -> history/ledger.json (committed baseline)
 python tools/launch.py collect         # tfr + orbit lanes -> data/snapshot.json; ledger -> data/ledger.json
 python tools/launch.py nfc fetch|build # NotamForChina at the pinned commit -> history/nfc.json (committed)
+python tools/launch.py nfc links       # its list of forum thread links -> history/nsf_links.json (committed)
 python tools/launch.py joey fetch|build # Joey0609/notams at the pinned commit -> history/joey.json (committed)
 python tools/launch.py wayback fetch|build # Internet Archive copies of FAA TFRs and NGA warnings -> history/wayback.json
 python tools/launch.py build           # site/ (incl. data/launches.json, the History tab's list); privacy check on site/
@@ -30,7 +31,8 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   `launch/programs.py` vehicle, site, programme and mission-type names; `launch/patterns.py` pad patterns.
 - `launch/history.py` import of the source map; `launch/public.py` the public gate; `launch/privacy.py` the
   privacy check; `launch/nfc.py` NotamForChina; `launch/joey.py` Joey0609/notams;
-  `launch/wayback.py` Internet Archive copies, `launch/ngawarn.py` Orbit's NGA warning rules (copied).
+  `launch/wayback.py` Internet Archive copies, `launch/ngawarn.py` Orbit's NGA warning rules (copied),
+  `launch/nsf.py` NotamForChina's forum thread links; `site_src/saved.js` notices saved from the Paste tab.
 - `site_src/` the page: tabs `#live`, `#history`, `#patterns`, `#paste`, `#sources`. `history.js` and `hmap.js`
   are the History tab. `tic-nav.*` and `tic-time.*` are copies from the hub and `doctrine/kit/` from the doctrine
   kit: fix those at their source and copy them in again.
@@ -38,7 +40,7 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
 ## History
 - **Sources, joined into one list** (`data/launches.json`): Launch's charted notices (a hand-built Google My Maps
   map of closure areas, NOTAM texts, flight paths and sites, 2022 onward, imported from an export), GCAT's launches
-  since 2023 (orbital, suborbital and missile firings; see Launch kinds), Launch Library 2's schedule, NotamForChina
+  since 2012 (orbital, suborbital and missile firings; see Launch kinds and GCAT from 2012), Launch Library 2's schedule, NotamForChina
   (Chinese launches 2012-2026 and their notices) and Joey0609/notams (launch NOTAMs with their text, mostly China's,
   Dec 2020 onward). A record's `sources` holds `chart`, `gcat`, `ll2`, `nfc`, `joey`, `wayback`; `chart` lists the charted events joined into
   it, `chart_time` keeps the time in the charted name, `chart_labels` its other names.
@@ -54,8 +56,9 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   LaunchCode first letter (planet4589.org/space/gcat/web/launch/lcols.html) and Category: Orbital (O, D, N),
   Suborbital rocket (S: sounding rockets, uncrewed New Shepard, HASTE), Crewed suborbital (Y), Atmospheric test (A),
   Missile test (M), Lofted missile test (L), Combat launch (M with category Weapon or Interceptor Weapon), and Not
-  known (a charted notice or notice set no GCAT launch is joined to). The backfill keeps all of them since 2023
-  (GCAT of 13 Nov 2026: 1,724 = 1,083 orbital + 140 S + 23 Y + 11 A + 153 M tests + 7 L + 307 combat); a
+  known (a charted notice or notice set no GCAT launch is joined to). The backfill keeps all of them since 2012
+  (GCAT of 13 Nov 2026: 4,914; the build of 16 Nov holds 4,917 = 2,263 orbital + 568 S + 69 Y + 91 A + 958 M tests
+  + 12 L + 956 combat); a
   suborbital record has orbit "Suborbital", no inclination, GCAT's apogee and range (km) and category, and a mission
   type by kind (combat: "Weapon (combat use)"; missiles: missile test; crewed: human spaceflight; others by payload
   names, else science or technology by category). A GCAT site written with "?" is read as that site
@@ -72,6 +75,13 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   Van Horn and Poker Flat flights.
   First build: 2,235 records (1,594 + 641); the 25 Sep 2024 ICBM charted event now joins GCAT's DF-31AG test
   2024-S55 (16 NM, 0 h) instead of the Wenchang orbital launch 2024-174 (1,393 NM).
+- **GCAT from 2012** (16 Nov 2026; was 2023): `catalog.LEDGER_SINCE` is 2012-01-01, the year NotamForChina starts,
+  and the backfill's site table takes every site used since then. Every NotamForChina launch now joins a GCAT launch
+  (its own launched records went 304 -> 0), and the archived NGA warnings and FAA TFRs before 2023 have launches to
+  join (NGA +82 in 2022). Build: 5,118 records, `launches.json` 4.8 MB (0.62 MB gzipped), about 32 s. In headless
+  Chrome the History tab's main thread blocks about 2.2 s in its first 12 s (live, 2,233 records: 1.8-3.9 s),
+  longest block 0.8 s, a filter change 0.6 s. Site names: GCAT's GIK-2 (Svobodniy, to 2006) is Svobodny, not
+  Vostochny; KLA (Sea Launch) is Kiritimati (sea launch).
 - **Pads and site names** (16 Nov 2026): some charted paths were drawn from the far end back to the pad, and the
   import takes the first point of the first path as the pad. `catalog.orient_paths()` turns a line round when its
   last point is a launch site (within `SITE_NM`) and its first is not, and moves a pad at no site to the first line
@@ -162,6 +172,22 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   days holding a GCAT launch time (2 h either side) with the pad within 100 NM of its area; an NGA warning window
   holding the launch time with the pad within 5,000 NM. Record key `archive_notices`, source `wayback`. The forum's
   archived copies are never read.
+- **Forum threads** (`launch/nsf.py`, 16 Nov 2026): NotamForChina's `data/nsfLinkList.html` at its pinned commit
+  (read from GitHub; the forum is never fetched) lists 878 NASASpaceflight threads with their titles; `nfc links`
+  writes `history/nsf_links.json` with the date, UTC time and vehicle each title gives (446 dated). `catalog.nsf_join`
+  puts a dated thread on a Chinese launch: with a time, the nearest launch within `NSF_HOURS` (3) whose vehicle does
+  not differ (LM-11H is LM-11); without one, the only launch of that vehicle that day (a day either side) that also
+  shares a payload word with the title (untimed titles often carry a planned date that slipped). A thread the charted
+  notices already link is not repeated. First build: 387 threads on 387 launches (9 already charted);
+  undated threads (rumours, plans, discussion) join nothing. The card shows each as "Forum thread", linked.
+- **Saved notices** (`site_src/saved.js`, the Paste tab, 16 Nov 2026): each pasted notice can be saved to the
+  History tab in that browser only (`localStorage` `launch.saved`, at most 500; no server, nothing leaves the
+  browser), exported to a JSON file and imported back. On the History tab a saved notice joins, first that applies:
+  a launch holding the same NOTAM (number and a shared FIR), else a launched record (not a combat launch) inside its
+  window, 2 h either side, with its pad within 5,000 NM of the area (nearest pad, then nearest time; a window over 7
+  days only when one launch qualifies), else a record of its own with status "notice". Source `saved`, "Saved in
+  this browser"; its areas are drawn; the card shows its text and can remove it. Tested in Node
+  (`tests/test_saved.py`).
 - **Address:** filter state is in the address (`#history?veh=LM-7A&site=Wenchang&...`). Addresses from before
   15 Nov 2026 used other words for the charted source and its flight-path value; `history.js` (`LEGACY`) reads them
   as the new ones. Record ids (`hist:`, `gcat:`, `nfc:`, `ll2:`) did not change, so `sel=` links still work.
@@ -204,7 +230,7 @@ Shared copies (`tic-nav.*`, `tic-time.*`, `doctrine/kit/`) are reported, not fai
 - NotamForChina (`launch/nfc.py`, Apache-2.0, pinned commit `nfc.SHA`): `nfc fetch` copies its workbook and
   drop-zone maps into git-ignored `history/nfc_source/`; `nfc build` writes `history/nfc.json`. `build_site`
   refuses to build without `history/NOTAMFORCHINA-LICENSE.txt`, which it publishes beside the data.
-- NASASpaceflight forum: linked from history entries, not collected.
+- NASASpaceflight forum: linked from history entries (the charted notices' links and NotamForChina's thread list), not collected.
 
 ## Matching (three levels, all shown; none says an area is for a launch)
 time (Orbit's rule) / time and place (azimuth band +-5 deg and downrange 0.5x-50 to 1.25x+100 NM of the pad's

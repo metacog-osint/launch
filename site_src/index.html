@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Launch · The Intelligence Company</title>
-<meta name="description" content="Launch and reentry closure areas from NOTAMs and navigational warnings: live areas, which scheduled launches coincide with them, every launch since 2023 on a map with flight paths and filters, and each pad's closure patterns.">
+<meta name="description" content="Launch and reentry closure areas from NOTAMs and navigational warnings: live areas, which scheduled launches coincide with them, every launch since 2012 on a map with flight paths and filters, and each pad's closure patterns.">
 <link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="tic-time.css">
@@ -41,7 +41,7 @@
     <div class="hero">
       <h1>Where states close the sky and sea for launches.</h1>
       <p class="lede">Launch and reentry closure areas from NOTAMs and navigational warnings: what is announced now,
-        which scheduled launches coincide with it, every launch since 2023, and where each pad's closures fall.
+        which scheduled launches coincide with it, every launch since 2012, and where each pad's closures fall.
         Every area shows the issuer's own text. A closure announces intent: some are cancelled, some are never
         used. <span id="asof"></span></p>
       <div class="tiles" id="tiles" aria-live="polite"></div>
@@ -87,10 +87,10 @@
         <p class="small muted">A launch joins this list on its own: every six hours Launch reads the launches GCAT has
           listed (through Orbit), and those Launch Library 2 reports as flown join sooner, marked provisional, until
           GCAT lists them. Scheduled launches (the next 14 days) show when you tick them under Show. Chinese
-          launches carry the notices NotamForChina lists for them (number, FIR, window and charted area), and go
-          back to 2012; pick a year before 2023 to see the earlier ones. From December 2020, launches also carry the
+          launches carry the notices NotamForChina lists for them (number, FIR, window and charted area) from 2012.
+          From December 2020, launches also carry the
           NOTAM texts Joey0609/notams keeps (mostly China's and its downrange FIRs'). Besides orbital launches the list holds
-          GCAT's suborbital launches and missile firings since 2023, each labelled by kind: sounding rockets and
+          GCAT's suborbital launches and missile firings since 2012, each labelled by kind: sounding rockets and
           other suborbital rockets, crewed suborbital flights, atmospheric tests, missile tests (lofted ones apart)
           and missiles fired in combat. The buttons above the map show or hide each kind; the Launch kind filter
           does the same. Suborbital launches and missiles are added when Launch's GCAT backfill is run again, not
@@ -181,11 +181,24 @@
       <div class="card-head">
         <h2 id="paste-h">Paste a NOTAM</h2>
         <p class="muted small">Paste one or more ICAO-format NOTAMs and they are read and drawn on the map above, in
-          your browser; nothing you paste leaves this page. Coordinates that fit no known form are listed, not guessed.</p>
+          your browser; nothing you paste leaves this page. Coordinates that fit no known form are listed, not guessed.
+          A notice you save goes into the History tab in this browser only.</p>
       </div>
       <textarea id="paste-text" rows="8" spellcheck="false" aria-label="NOTAM text"></textarea>
       <p><button type="button" id="paste-go">Read and map</button> <button type="button" id="paste-clear" class="linkish">Clear</button></p>
       <div id="paste-out" aria-live="polite"></div>
+      <section id="saved-box" class="saved-box" aria-labelledby="saved-h">
+        <h3 class="sub-h" id="saved-h">Saved in this browser</h3>
+        <p class="small muted">Saved notices appear on the History tab: on the launch they belong to (the same NOTAM
+          on its notices, or a launch inside the notice's window, two hours either side, with its pad within 5,000 NM of
+          the area), else under Show: Notices with no identified launch. They stay in this browser's storage only;
+          nobody else sees them, and clearing site data or a private window loses them, so export them to keep them.</p>
+        <ul id="saved-list" class="plain small"></ul>
+        <p class="small"><button type="button" id="saved-export" class="linkish">Export to a file</button> ·
+          <label class="linkish" for="saved-import">Import a file</label><input type="file" id="saved-import" accept=".json,application/json" class="visually-hidden"> ·
+          <button type="button" id="saved-clear" class="linkish">Remove all</button></p>
+        <p class="small" id="saved-msg" aria-live="polite"></p>
+      </section>
       <section id="traj" class="traj" aria-labelledby="traj-h" hidden>
         <h3 class="sub-h" id="traj-h">Trajectory from a pad</h3>
         <p class="traj-pick"><label for="traj-pad">Pad</label> <select id="traj-pad"></select>
@@ -206,7 +219,7 @@
       <div class="card-head"><h2 id="src-h">Sources and method</h2></div>
       <div id="source-list" class="small"></div>
       <p class="small muted" id="lane-list"></p>
-      <p class="small">Feed method <code>launch-1.0</code>. History: GCAT's launch list since 2023 (J. McDowell,
+      <p class="small">Feed method <code>launch-1.0</code>. History: GCAT's launch list since 2012 (J. McDowell,
         planet4589.org/space/gcat, CC BY 4.0): orbital launches kept current through Orbit, and suborbital launches
         and missile firings (GCAT launch codes S, Y, A, M and L) from GCAT's own tables; Launch Library 2's schedule through Orbit;
         Launch's charted notices; Chinese launches 2012-2026 and the NOTAMs that closed their drop zones from
@@ -218,7 +231,8 @@
         space-operations TFRs and NGA launch, debris and reentry warnings read from the Internet Archive's copies of
         tfr.faa.gov and msi.nga.mil join a GCAT launch the same way (a TFR within 100 NM of the pad and a window of at
         most 7 days); each links to its archived copy. The NASASpaceflight forum's
-        "Chinese NOTAMs thread" and Russian launch discussion are linked from history entries, not collected. Notes on
+        "Chinese NOTAMs thread" and Russian launch discussion are linked from history entries, and Chinese launches
+        link their forum threads from NotamForChina's list of them; the forum itself is not read or collected. Notes on
         the source map that are not public notices are not shown.</p>
     </section>
   </section>

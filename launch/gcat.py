@@ -1,7 +1,7 @@
 """Reading GCAT tables for the history backfill (J. McDowell, planet4589.org/space/gcat, CC BY 4.0).
 
 Launch reads GCAT through Orbit's snapshot on every run. The backfill is the one exception: once, from GCAT's own
-tables (launch.tsv, satcat.tsv, satcat100k.tsv, sites.tsv, orgs.tsv), it lists every orbital launch since 2023 so
+tables (launch.tsv, satcat.tsv, satcat100k.tsv, sites.tsv, orgs.tsv), it lists every launch since 2012 (orbital, suborbital and missile firings) so
 the history does not start on the day Launch began. The readers follow Orbit's (orbit/gcat.py, read 14 Nov 2026).
 """
 from __future__ import annotations

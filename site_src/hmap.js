@@ -16,7 +16,9 @@ const nfcRings = (r) => (r.nfc_notices || []).filter((n) => n.ring && n.ring.len
   // Joey0609/notams' areas (catalog.py leaves out those already charted)
   .concat((r.joey_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)))
   // FAA TFRs and NGA warnings from Internet Archive copies
-  .concat((r.archive_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)));
+  .concat((r.archive_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)))
+  // notices saved in this browser from the Paste tab (saved.js)
+  .concat((r.saved_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)));
 
 const lineCache = new Map();
 const drawnCache = new WeakMap(); // a charted path or a closure ring (an array from the data) -> its great-circle line
@@ -202,6 +204,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
 
   return {
     show, select, resize: () => map.resize(),
+    forget: (ids) => ids.forEach((id) => featCache.delete(id)), // records whose areas changed (saved notices)
     setCharted: (events) => { events.forEach((e) => { if (!chartById.has(e.id)) chartById.set(e.id, []); chartById.get(e.id).push(e); }); },
   };
 }

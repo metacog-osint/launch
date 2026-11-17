@@ -104,7 +104,9 @@ SITE_NAMES = {
     "Wallops MARS": "Wallops", "Wallops I": "Wallops", "ESRANGE": "Esrange", "Arabian Seaf": "Arabian Sea",
     "Eastern Med.": "Eastern Mediterranean", "Andoya": "Andøya", "Alcantara": "Alcântara", "Kapustin Yar": "Kapustin Yar",
     "East China Sea": "East China Sea (sea launch)", "Yangjiang": "Yangjiang (sea launch)",
-    "Jeju": "Jeju (sea launch)", "Svobodniy": "Vostochny", "Sriharikota": "Sriharikota",
+    "Jeju": "Jeju (sea launch)", "Sriharikota": "Sriharikota",
+    # GCAT's GIK-2 (Svobodniy, launches to 2006) is the old Svobodny cosmodrome, not Vostochny (VOST, "Vostochniy").
+    "Svobodniy": "Svobodny", "Kirimati": "Kiritimati (sea launch)",
 }
 # Where a site has no closure history to choose between the two azimuths of an inclination: the way its
 # launches go (geography and range safety: Vandenberg only south, Plesetsk only north), and, for sites that fly

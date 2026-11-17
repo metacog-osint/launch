@@ -1,4 +1,4 @@
-/* Launch's History tab: every launch since 2023 (Launch's charted notices, GCAT, Launch Library 2) and Chinese launches from 2012
+/* Launch's History tab: every launch since 2012 (Launch's charted notices, GCAT, Launch Library 2) and Chinese launches from 2012
    with their notices (NotamForChina) on a map with flight paths,
    filters that combine (AND across filters, OR within one), a month timeline that sets the date range, a list and
    a detail card. State lives in the address (#history?...), so a view can be bookmarked or sent.
@@ -7,6 +7,7 @@
    Times are stored UTC; dates and months are read in the viewer's zone (tic-time.js), like every time shown. */
 import { createHistoryMap } from "./hmap.js";
 import * as X from "./export.js";
+import * as SV from "./saved.js";
 
 const T = window.TicTime;
 const BIG = { US: "us", CN: "cn", RU: "ru" };
@@ -34,7 +35,7 @@ function mark(cc) {
 }
 
 const STATUS = { launched: "Launched", upcoming: "Scheduled (next 14 days)", notice: "Notices with no identified launch" };
-const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina", joey: "Joey0609/notams", wayback: "FAA and NGA notices (Internet Archive)" };
+const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina", joey: "Joey0609/notams", wayback: "FAA and NGA notices (Internet Archive)", saved: "Saved in this browser" };
 const OUTCOME = { success: "Success", failure: "Failure", "": "Not known" };
 const NK = "Not known";
 /* Launch kinds (catalog.py, from GCAT's launch code): the page's own list until data/launches.json gives its own. */
@@ -76,7 +77,7 @@ const rangeText = (g, [lo, hi]) => (lo !== null && hi !== null ? `${lo} to ${hi}
 const DEFAULT = { st: ["launched"] };
 const PAGE = 100;
 
-let IX, HIST, map, byId = new Map(), chartById = new Map(), FIRST_YEAR = 2023;
+let IX, HIST, map, byId = new Map(), chartById = new Map(), FIRST_YEAR = 2012;
 let state = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
 let lastFiltered = [];
 
@@ -142,7 +143,8 @@ function hay(r) {
     ...charted.flatMap((e) => [e.extra, ...e.notams.map((n) => (n.number || "") + " " + ((n.q || {}).fir || ""))]),
     ...(r.nfc_notices || []).map((n) => (n.number || "") + " " + (n.fir || "") + " " + (n.label || "")),
     ...(r.joey_notices || []).map((n) => (n.number || "") + " " + (n.fir || "") + " " + (n.locations || []).join(" ")),
-    ...(r.archive_notices || []).map((n) => (n.number || n.id || "") + " " + (n.location || ""))]
+    ...(r.archive_notices || []).map((n) => (n.number || n.id || "") + " " + (n.location || "")),
+    ...(r.saved_notices || []).map((n) => (n.number || "") + " " + n.firs.join(" "))]
     .filter(Boolean).join(" ").toUpperCase();
   return r._hay;
 }
@@ -375,8 +377,9 @@ function timeline() {
   const box = $("h-timeline"); box.textContent = "";
   const recs = filtered("date").filter((r) => r._month);
   const now = zoneDay(new Date().toISOString()).slice(0, 7);
-  // From 2023 (GCAT's list here); earlier months only when the dates reach back (NotamForChina's Chinese launches).
-  let first = state.from && state.from.slice(0, 7) < "2023-01" ? state.from.slice(0, 7) : "2023-01", last = now;
+  // From the month GCAT's list here starts; earlier months only when the dates reach back.
+  const since = (IX.ledger_since || "2012-01").slice(0, 7);
+  let first = state.from && state.from.slice(0, 7) < since ? state.from.slice(0, 7) : since, last = now;
   recs.forEach((r) => { if (r._month > last) last = r._month; });
   const months = [];
   for (let y = Number(first.slice(0, 4)), m = Number(first.slice(5)); `${y}-${String(m).padStart(2, "0")}` <= last; m++) {
@@ -588,10 +591,58 @@ function detail(r) {
     const wh = evs.reduce((n, e) => n + (e.withheld_notes || 0), 0);
     if (wh) box.appendChild(el("p", "muted small", `${wh} note(s) on the source map are not public notices and are not shown.`));
   }
+  if ((r.forum || []).length) {
+    const p = el("p", "small"); p.appendChild(document.createTextNode(`Forum thread${r.forum.length > 1 ? "s" : ""}: `));
+    r.forum.forEach((f, i) => { const a = el("a", "", f.title); a.href = f.url; a.rel = "noopener"; if (i) p.appendChild(document.createTextNode(" · ")); p.appendChild(a); });
+    p.appendChild(document.createTextNode(" (NASASpaceflight forum, from NotamForChina's list of its threads; linked, not read)"));
+    box.appendChild(p);
+  }
   if (joeyN.some((x) => !x.chart)) joeySection(box, r, joeyN, nfcN);
   if ((r.archive_notices || []).length) archiveSection(box, r.archive_notices);
   if (r.nfc) nfcSection(box, r, nfcN);
+  if ((r.saved_notices || []).length) savedSection(box, r);
 }
+
+/* Notices pasted on the Paste tab and saved in this browser (saved.js). Only this browser has them. */
+function savedSection(box, r) {
+  const all = r.saved_notices;
+  box.appendChild(el("h4", "", `Saved in this browser: ${all.length} notice${all.length === 1 ? "" : "s"}`));
+  all.forEach((n) => {
+    const d = el("details", "notam");
+    d.appendChild(el("summary", "", (n.number || "Notice") + (n.firs.length ? ` · ${n.firs.join(" ")}` : "") + (n.q_code ? ` · ${n.q_code}` : "") + (n.start ? ` · ${fmt(n.start)} to ${n.end ? fmt(n.end) : "?"}` : "")));
+    if (n.join) d.appendChild(el("p", "small muted", "Its launch: " + joeyJoin(n.join) + "."));
+    else d.appendChild(el("p", "small muted", "No launch here fits its window and area: a notice with no identified launch."));
+    if (!n.rings.length && !n.points.length) d.appendChild(el("p", "small muted", "No area read from its text."));
+    d.appendChild(el("pre", "", n.text));
+    const p = el("p", "small"); const b = el("button", "linkish", "Remove from this browser"); b.type = "button";
+    b.addEventListener("click", () => { SV.store(SV.load().filter((x) => x.id !== n.id)); savedChanged(); window.dispatchEvent(new Event("launch:saved")); });
+    p.appendChild(b); d.appendChild(p);
+    box.appendChild(d);
+  });
+  box.appendChild(el("p", "small muted", "Saved from the Paste tab, kept in this browser's storage only: nobody else sees them, and clearing site data removes them. The Paste tab can export them to a file."));
+}
+
+/* Saved notices: undo the last application, then join the current ones (saved.js). Returns the join counts. */
+let savedOwn = [], savedOn = [];
+const recNumbers = (r) => [
+  ...(r.chart || []).flatMap((id) => chartById.get(id) || []).flatMap((e) => e.notams.map((n) => ({ number: n.number, firs: [(n.q || {}).fir].filter(Boolean) }))),
+  ...(r.joey_notices || []).map((n) => ({ number: n.number, firs: [n.fir, ...(n.locations || [])].filter(Boolean) })),
+  ...(r.nfc_notices || []).map((n) => ({ number: n.number, firs: (n.fir || "").split("/").filter(Boolean) })),
+];
+function applySaved() {
+  const touched = savedOwn.map((r) => r.id).concat(savedOn.map((r) => r.id));
+  if (savedOwn.length) { const gone = new Set(savedOwn.map((r) => r.id)); IX.records = IX.records.filter((r) => !gone.has(r.id)); gone.forEach((id) => byId.delete(id)); }
+  savedOn.forEach((r) => { delete r.saved_notices; r.sources = r.sources.filter((s) => s !== "saved"); r._hay = null; });
+  const notices = SV.load().map(SV.read).filter(Boolean);
+  const { byRecord, own } = SV.join(notices, IX.records, recNumbers);
+  savedOn = [];
+  byRecord.forEach((xs, id) => { const r = byId.get(id); if (!r) return; r.saved_notices = xs; if (!r.sources.includes("saved")) r.sources.push("saved"); r._hay = null; savedOn.push(r); });
+  savedOwn = own;
+  own.forEach((r) => { r._day = zoneDay(r.time); r._month = r._day.slice(0, 7); IX.records.push(r); byId.set(r.id, r); });
+  if (map) map.forget(touched.concat(savedOn.map((r) => r.id), own.map((r) => r.id)));
+  return { saved: notices.length, joined: notices.length - own.length, own: own.length };
+}
+function savedChanged() { const c = applySaved(); update(false); return c; }
 
 /* Joey0609/notams' notices on a record: the NOTAM's own text, FIRs, window and area. One also charted is a check
    under the charted notice; NotamForChina's copy of one is a check under it. */
@@ -672,7 +723,7 @@ function nfcSection(box, r, all) {
   const j = r.nfc_join;
   if (j && NFC_JOIN[j.by]) box.appendChild(el("p", "small muted", "Its launch record is " + NFC_JOIN[j.by](r, j) + "."));
   else if (r.nfc_unmatched) box.appendChild(el("p", "small badge-warn", "GCAT lists no launch of this vehicle near this time, so these notices have no identified launch: an attempt that was scrubbed or moved, or a sheet entry made ahead of a launch."));
-  else if (r.sources[0] === "nfc") box.appendChild(el("p", "small muted", `GCAT's list on this page starts in ${(IX.ledger_since || "2023").slice(0, 4)}, so this launch stands on NotamForChina's record: its time, vehicle and site.`));
+  else if (r.sources[0] === "nfc") box.appendChild(el("p", "small muted", `GCAT's list on this page starts in ${(IX.ledger_since || "2012").slice(0, 4)}, so this launch stands on NotamForChina's record: its time, vehicle and site.`));
   if (own.length) {
     const ul = el("ul", "plain nfc-list small");
     own.forEach((x) => {
@@ -736,6 +787,7 @@ export async function initHistory(ix, hist) {
   IX.records.forEach((r) => byId.set(r.id, r));
   HIST.events.forEach((e) => { if (!chartById.has(e.id)) chartById.set(e.id, []); chartById.get(e.id).push(e); });
   rekey();
+  applySaved();
   state = readHash();
   buildRanges();
   $("h-q").value = state.q; $("h-from").value = state.from; $("h-to").value = state.to; $("h-areas").checked = state.areas;
@@ -757,14 +809,14 @@ export async function initHistory(ix, hist) {
     $("h-toggle").setAttribute("aria-expanded", side.classList.contains("open") ? "true" : "false");
   });
   const c = IX.counts;
-  FIRST_YEAR = Math.min(2023, ...IX.records.filter((r) => r.time).map((r) => Number(r.time.slice(0, 4))));
+  FIRST_YEAR = Math.min(Number((IX.ledger_since || "2012").slice(0, 4)), ...IX.records.filter((r) => r.time).map((r) => Number(r.time.slice(0, 4))));
   const gk = c.gcat_kinds || {}, gn = (k) => (gk[k] || 0).toLocaleString("en-US");
   const sub = ["Suborbital rocket", "Crewed suborbital", "Atmospheric test"].reduce((n, k) => n + (gk[k] || 0), 0);
   $("h-about").textContent = (c.gcat_kinds
     ? `${c.gcat.toLocaleString("en-US")} launches GCAT lists since ${IX.ledger_since.slice(0, 4)}: ${gn("Orbital")} orbital, ${sub.toLocaleString("en-US")} suborbital (sounding rockets, crewed flights, atmospheric tests), ${gn("Missile test")} missile tests, ${gn("Lofted missile test")} lofted missile tests and ${gn("Combat launch")} missiles fired in combat`
     : `${c.gcat} orbital launches GCAT lists since ${IX.ledger_since.slice(0, 4)}`)
     + `; ${c.chart} events in Launch's charted notices (${c.gcat_joined} GCAT launches joined to them), and Launch Library 2's schedule.`
-    + (c.nfc ? ` NotamForChina adds the notices of ${c.nfc.records - c.nfc.own_records} of those launches, and ${c.nfc.own_launched} Chinese launches from ${FIRST_YEAR} to ${Number((IX.ledger_since || "2023").slice(0, 4)) - 1}.` : "")
+    + (c.nfc ? ` NotamForChina adds the notices of ${c.nfc.records - c.nfc.own_records} of those launches` + (c.nfc.own_launched ? `, and ${c.nfc.own_launched} Chinese launches from ${FIRST_YEAR} to ${Number((IX.ledger_since || "2012").slice(0, 4)) - 1}.` : ".") : "")
     + (c.joey ? ` Joey0609/notams adds NOTAM texts to ${c.joey.records} launches (${c.joey.notices - c.joey.unjoined} of its ${c.joey.notices} launch-related notices; the rest match no launch here).` : "")
     + ` Updated ${fmt(IX.generated_at)}.`;
   update(true); // filters and list first; the map follows when its base has loaded
@@ -778,7 +830,7 @@ export async function initHistory(ix, hist) {
     .catch((err) => { $("hmap").textContent = "The map could not load: " + err.message + ". The filters and the list still work."; });
   if (T && T.onChange) T.onChange(() => { rekey(); update(false); });
   return {
-    resize: () => map && map.resize(), refresh: () => update(false),
+    resize: () => map && map.resize(), refresh: () => update(false), savedChanged,
     // The address changed by hand or by a link (not by this page): take the view it names.
     fromHash: () => {
       const want = location.hash, before = state.sel;
