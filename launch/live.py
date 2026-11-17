@@ -5,6 +5,11 @@
   orbit   Orbit's published snapshot (orbit.theintelligence.company/data/snapshot.json, one request): its
           scheduled launches, its launch-hazard navigational warnings (NGA, NAVAREA XI) and GCAT's launches of
           the last 30 days. Launch reads them rather than fetching those sources a second time.
+  cordon  Cordon's published feed (cordon.theintelligence.company/data/feed.geojson, one request): NGA's
+          navigational warnings in its `launch` category, with the windows, hazard and cancels Cordon parses
+          (method cordon-feed-1.1). Cordon is the suite's one NGA reader (decided 17 Nov 2026); Launch takes the
+          warnings with a launch, debris or reentry hazard and leaves the missile firings. Orbit's own copy of
+          them is no longer used.
   nms     FAA NOTAM Management Service: waits for API access (requested 13 Nov 2026).
 
 Matching, three levels, each named on the page:
@@ -31,6 +36,10 @@ TFR_SHAPES = ("https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&r
 TFR_XML = "https://tfr.faa.gov/download/detail_{a}_{b}.xml"
 TFR_PAGE = "https://tfr.faa.gov/tfr3/?page=detail_{a}_{b}"
 ORBIT_SNAPSHOT = "https://orbit.theintelligence.company/data/snapshot.json"
+CORDON_FEED = "https://cordon.theintelligence.company/data/feed.geojson"
+NGA_PAGE = "https://msi.nga.mil/NavWarnings"
+NGA_SERIES = {"4": ("navarea-iv", "NAVAREA IV"), "12": ("navarea-xii", "NAVAREA XII"), "A": ("hydrolant", "HYDROLANT"),
+              "P": ("hydropac", "HYDROPAC"), "C": ("hydroarc", "HYDROARC")}
 WINDOW_MAX_H = 4
 BEFORE_H = 1
 PLACE_NM = 1500
@@ -153,6 +162,75 @@ def orbit_read(body: bytes) -> dict:
                                 for p in l.get("payloads") or []]}
                 for l in s.get("launches") or []]
     return {"generated_at": s.get("generated_at"), "upcoming": up, "areas": areas, "launches": launches}
+
+
+# ---------- Cordon ----------
+
+def _nga_names(cordon_id: str) -> tuple[str, str] | None:
+    """'cordon:navwarn:4-1081-2026' -> ('navarea-iv-1081-26', 'NAVAREA IV 1081/26'): the key Orbit used, so match
+    ids stay the same across the switch, and NGA's own way of writing the number."""
+    m = re.match(r"cordon:navwarn:([A-Z0-9]+)-(\d+)-(\d{4})$", cordon_id or "")
+    if not m or m.group(1) not in NGA_SERIES:
+        return None
+    slug, name = NGA_SERIES[m.group(1)]
+    yy = m.group(3)[2:]
+    return f"{slug}-{m.group(2)}-{yy}", f"{name} {m.group(2)}/{yy}"
+
+
+AREA_LETTER = re.compile(r"(?m)^\s*([A-Z])\.\s+")
+
+
+def _rings(geom: dict | None) -> list[list[list[float]]]:
+    if not geom:
+        return []
+    if geom.get("type") == "Polygon":
+        return [geom["coordinates"][0]]
+    if geom.get("type") == "MultiPolygon":
+        return [p[0] for p in geom["coordinates"]]
+    return []
+
+
+def cordon_read(body: bytes) -> dict:
+    """NGA launch, debris and reentry warnings from Cordon's feed, as areas for matching. A warning whose
+    `measures.hazard` is null (a missile firing, which Cordon also files under `launch`) is left out."""
+    doc = json.loads(body)
+    nga = (doc.get("health") or {}).get("nga-navwarnings") or {}
+    areas, skipped = [], 0
+    for f in doc.get("features") or []:
+        p = f.get("properties") or {}
+        m = p.get("measures") or {}
+        if not p.get("id", "").startswith("cordon:navwarn:") or m.get("category") != "launch":
+            continue
+        names = _nga_names(p["id"])
+        if not m.get("hazard") or not names:
+            skipped += 1
+            continue
+        key, number = names
+        broadcasts = [{"id": number, "issuer": "nga", "issued": p.get("data_as_of"), "url": NGA_PAGE,
+                       "cordon_id": p["id"]}]
+        for r in m.get("rebroadcasts") or []:
+            rn = _nga_names(r.get("id") or "")
+            broadcasts.append({"id": rn[1] if rn else r.get("number"), "issuer": "nga", "issued": r.get("issued"),
+                               "url": NGA_PAGE, "cordon_id": r.get("id")})
+        rings = _rings(f.get("geometry"))
+        labels = [a.get("label") or "" for a in m.get("area_windows") or []]
+        if len(labels) != len(rings):  # lettered areas without windows of their own: the letters from the text
+            labels = AREA_LETTER.findall(m.get("text") or "")
+        if len(labels) != len(rings):
+            labels = [""] * len(rings)
+        regions = [x.upper() for x in (m.get("sea"), m.get("place")) if x]
+        for ring, label in zip(rings, labels):
+            ring = [list(c[:2]) for c in ring]
+            if len(ring) < 3:
+                continue
+            if ring[0] != ring[-1]:
+                ring.append(list(ring[0]))
+            areas.append({"source": "cordon-navwarn", "key": key, "label": label, "hazard": m.get("hazard"),
+                          "regions": regions, "ring": notam.unwrap(ring), "windows": m.get("windows") or [],
+                          "window_mode": m.get("window_mode"), "expires": p.get("valid_until"),
+                          "cancels": m.get("cancels") or [], "broadcasts": broadcasts, "cordon_id": p["id"]})
+    return {"generated_at": doc.get("generated_at"), "nga_state": nga.get("state"),
+            "missile_firings_left_out": skipped, "areas": areas}
 
 
 # ---------- Matching ----------

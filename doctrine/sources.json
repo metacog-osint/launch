@@ -14,13 +14,23 @@
     },
     {
       "id": "orbit-snapshot",
-      "name": "Orbit (The Intelligence Company): scheduled launches (Launch Library 2), GCAT launches, NGA and NAVAREA XI launch-hazard warnings",
+      "name": "Orbit (The Intelligence Company): scheduled launches (Launch Library 2) and GCAT launches; its NGA warnings only until Cordon's lane has run",
       "url": "https://orbit.theintelligence.company/data/snapshot.json",
       "licence": "Each item keeps its source's terms: GCAT CC BY 4.0; Launch Library 2 free access, no licence stated; NGA US Government work; Japan Coast Guard Government Standard Terms of Use 2.0",
       "use": "ingest",
       "grade": "B2",
       "independence_group": "orbit",
       "commercial_ok": "unknown"
+    },
+    {
+      "id": "cordon-feed",
+      "name": "Cordon (The Intelligence Company): NGA navigational warnings in its launch category, with windows, hazard and cancels (method cordon-feed-1.1)",
+      "url": "https://cordon.theintelligence.company/data/feed.geojson",
+      "licence": "NGA navigational warnings: US public domain",
+      "use": "ingest",
+      "grade": "A1",
+      "independence_group": "nga",
+      "commercial_ok": true
     },
     {
       "id": "gcat-mcdowell",
