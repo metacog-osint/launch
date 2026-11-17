@@ -4,7 +4,7 @@
 // style.css actor tokens through MapLibre paint (no inline styles, CSP).
 import * as ml from "./vendor/maplibre-gl/maplibre-gl.mjs";
 import { buildStyle, addProjectionToggle, collapseAttribution, fitCoords, worldZoom } from "./map.js";
-import { geodesic, greatCircle } from "./notam.js";
+import { estimatedLine, geodesic } from "./notam.js";
 
 const dark = matchMedia("(prefers-color-scheme: dark)");
 const EMPTY = { type: "FeatureCollection", features: [] };
@@ -28,7 +28,7 @@ function pathLines(r, chartEvents) {
     return drawnCache.get(p);
   });
   if (!r.pad) return [];
-  if (!lineCache.has(r.id)) lineCache.set(r.id, [greatCircle(r.pad[0], r.pad[1], r.path.az, r.path.nm)]);
+  if (!lineCache.has(r.id)) lineCache.set(r.id, [estimatedLine(r.pad, r.path)]);
   return lineCache.get(r.id);
 }
 

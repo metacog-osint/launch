@@ -10,7 +10,7 @@
    KML's -180..180), so lines and areas that cross the antimeridian are cut there into two parts. Times are UTC in
    every file; the CSV adds a column in the viewer's zone, named in its header. Each file names its sources and
    their licences (GeoJSON and KML in their header; the CSV per row, in its sources column). */
-import { geodesic, greatCircle } from "./notam.js";
+import { estimatedLine, geodesic } from "./notam.js";
 
 export const ATTRIBUTION = "Launch (The Intelligence Company), launch.theintelligence.company. Launches: GCAT "
   + "(J. McDowell, planet4589.org/space/gcat), CC BY 4.0; Launch Library 2 (The Space Devs); Launch's charted notices. "
@@ -37,7 +37,7 @@ export function utcTime(r) {
 export function geometry(r, events, withAreas) {
   const paths = !r.path ? [] : r.path.kind === "drawn"
     ? events.flatMap((e) => e.paths || []).filter((p) => p.length >= 2).map(geodesic)
-    : r.pad ? [greatCircle(r.pad[0], r.pad[1], r.path.az, r.path.nm)] : [];
+    : r.pad ? [estimatedLine(r.pad, r.path)] : [];
   const areas = !withAreas ? [] : [
     ...events.flatMap((e) => (e.areas || []).map((a) => ({ ring: a.ring, notam: a.notam || "", source: "chart" }))),
     ...(r.closures || []).map((c) => ({ ring: c.ring, notam: c.notam || "", source: "closure" })),

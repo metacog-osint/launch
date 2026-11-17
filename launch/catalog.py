@@ -386,6 +386,8 @@ def orient_paths(e: dict, sites: dict) -> dict:
 def infer_path(pad, site: str | None, bands: list[dict], *, drawn=None, areas=None, inc=None, inc_note=None,
                orbit_code=None, orbit=None, suborbital=False) -> dict | None:
     """{kind, az, nm, basis} for a record, or None. `drawn`: the charted path lines; `areas`: [{azimuth, downrange_nm}];
+    an estimated south-going path from a site in P.POLAR_CORRIDOR also has `via` ([[lon, lat]]): it runs from the pad
+    to that turn point and on from there on `az` (the inclination's azimuth at the turn point), `nm` in all.
     `inc_note` says where an inclination came from when it is not the record's own payloads. A suborbital launch
     (`suborbital`) takes the bearing to its farthest closure area at any distance (its impact or recovery area),
     drawn to that area, and nothing else: no orbit sets its azimuth and the site's corridors are its orbital ones."""
@@ -420,6 +422,12 @@ def infer_path(pad, site: str | None, bands: list[dict], *, drawn=None, areas=No
         opts, direct = branches(pad[1], target)
         az, how = choose(opts, bands, site, polar=target >= 80)
         note = "" if direct else "; not reachable directly from this latitude, so due east (a dog-leg or plane change follows)"
+        turn = P.POLAR_CORRIDOR.get(site or "")
+        if turn and direct and _adiff(az, 180) <= 45:
+            t_opts, _ = branches(turn[1], target)
+            t_az = min(t_opts, key=lambda o: _adiff(o, az))
+            return {"kind": "estimated", "az": t_az, "nm": DEFAULT_PATH_NM, "via": [list(turn)],
+                    "basis": f"{what} from the turn point's latitude; {how}; {P.CORRIDOR_NOTE}"}
         return {"kind": "estimated", "az": az, "nm": DEFAULT_PATH_NM,
                 "basis": f"{what} from the pad's latitude; {how}{note}"}
     if orbit == "GTO / GEO":

@@ -197,6 +197,27 @@ export function geodesic(line) {
   return out;
 }
 
+/* An estimated flight path as the History map draws and the downloads export it: from the pad on `path.az` for
+   `path.nm`; with `path.via` (the Cape's polar corridor), great circles from the pad to each turn point, then on
+   `path.az` from the last for what is left of `path.nm`. */
+export function estimatedLine(pad, path) {
+  const via = path.via || [];
+  if (!via.length) return greatCircle(pad[0], pad[1], path.az, path.nm);
+  const pts = [pad, ...via];
+  let done = 0;
+  for (let i = 1; i < pts.length; i++) done += gcNm(pts[i - 1], pts[i]);
+  const legs = geodesic(pts);
+  const last = legs[legs.length - 1];
+  const rest = greatCircle(last[0], last[1], path.az, Math.max(path.nm - done, 0)).slice(1);
+  return legs.concat(rest);
+}
+
+function gcNm(a, b) {
+  const p1 = rad(a[1]), p2 = rad(b[1]), dl = rad(b[0] - a[0]);
+  const c = Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl);
+  return Math.acos(Math.max(-1, Math.min(1, c))) * R_NM;
+}
+
 /* A great circle from (lon, lat) on azimuth `az` for `nm` nautical miles, a point every 25 NM (the History tab's
    estimated flight paths, drawn and exported). Longitudes run on past 180 so a path that crosses the antimeridian
    stays one line. */

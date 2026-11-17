@@ -115,6 +115,14 @@ SITE_DIRECTION = {
     "Vostochny": "N", "Baikonur": "N", "Andøya": "N",
 }
 POLAR_DIRECTION = {"Cape Canaveral": "S", "Kennedy (KSC)": "S", "Mahia": "S", "Kourou": "N"}
+# A south-going polar launch from the Cape does not fly its orbit's azimuth from the pad, which would cross the
+# Florida peninsula: it heads south-east over the Atlantic, turns south and runs parallel to the east coast, close
+# off Miami, then over Cuba (Spaceflight Now on OneWeb 16, 10 Jan 2023: "Southeast, then south from Cape
+# Canaveral"; on SAOCOM 1B, 30 Aug 2020, the first such launch). An estimated path from these sites goes to this
+# turn point ([lon, lat], about 20 NM off Boca Raton, approximate: the dog-leg's real place is not published) and
+# takes the inclination's azimuth from there.
+POLAR_CORRIDOR = {"Cape Canaveral": [-79.7, 26.3], "Kennedy (KSC)": [-79.7, 26.3]}
+CORRIDOR_NOTE = "dog-leg: offshore along Florida's east coast to a turn point off Boca Raton (approximate), as the Cape's polar corridor flies"
 # Other names for a site in Launch Library 2's pad and location text (lower case).
 SITE_ALIASES = {"Hainan commercial (Wenchang)": ["commercial lc", "hainan commercial"], "Kourou": ["guiana"],
                 "Andøya": ["andoya", "and�ya"], "Vandenberg": ["vandenberg"], "Kennedy (KSC)": ["kennedy"]}

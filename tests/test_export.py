@@ -149,6 +149,26 @@ class ExportTest(unittest.TestCase):
 
 
 @unittest.skipUnless(NODE, "Node is not installed")
+class EstimatedLineTest(unittest.TestCase):
+    def test_turn_point(self):
+        # notam.js estimatedLine(): pad -> turn point -> on the azimuth, the same line hmap.js draws.
+        script = ("import { estimatedLine } from %s;"
+                  "const p = { kind: 'estimated', az: 189, nm: 1500, via: [[-79.7, 26.3]] };"
+                  "console.log(JSON.stringify([estimatedLine([-80.5774, 28.5619], p),"
+                  "estimatedLine([-80.5774, 28.5619], { kind: 'estimated', az: 189, nm: 1500 })]));")
+        r = subprocess.run([NODE, "--input-type=module", "-e", script % json.dumps((ROOT / "site_src" / "notam.js").as_uri())],
+                           capture_output=True, text=True, timeout=60, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        turned, straight = json.loads(r.stdout)
+        self.assertEqual(turned[0], [-80.577, 28.562])  # geodesic() rounds to 0.001 deg
+        self.assertIn([-79.7, 26.3], [[round(x, 3), round(y, 3)] for x, y in turned])
+        # Offshore down Florida's east coast (the shore runs about 80.2 W at Stuart to 80.1 W at Boca Raton and Miami).
+        self.assertTrue(all(x > -80.15 for x, y in turned if 25.5 < y < 27.3))
+        self.assertTrue(any(x < -81 for x, y in straight if 26 < y < 27))  # the old line, across the peninsula
+        self.assertAlmostEqual(turned[-1][1], 3.8, delta=1.0)  # about where 1,500 NM ends
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
 @unittest.skipUnless((ROOT / "site" / "data" / "launches.json").exists(), "site/ not built")
 class ExportBuiltDataTest(unittest.TestCase):
     """The whole built list exports, every coordinate within range."""

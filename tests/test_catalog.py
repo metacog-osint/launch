@@ -121,6 +121,22 @@ class Azimuths(unittest.TestCase):
         self.assertIsNone(catalog.infer_path(pad, "Wenchang", [{"from": 100, "to": 105, "events": 2}]))  # too few to use
         self.assertIsNone(catalog.infer_path(None, None, [], inc=50))
 
+    def test_cape_polar_corridor(self):
+        # PACE (8 Feb 2024, GCAT inclination 98.07): offshore to the turn point, then the inclination's azimuth from
+        # there, not 189 deg from the pad across the Florida peninsula.
+        slc40 = [-80.5774, 28.5619]
+        p = catalog.infer_path(slc40, "Cape Canaveral", [], inc=98.07)
+        self.assertEqual(p["via"], [[-79.7, 26.3]])
+        self.assertTrue(185 < p["az"] < 192)
+        self.assertIn("dog-leg", p["basis"])
+        self.assertIn("via", catalog.infer_path([-80.6041, 28.6082], "Kennedy (KSC)", [], inc=86.5))
+        # North-going (a space station) and other sites keep a single great circle from the pad.
+        self.assertNotIn("via", catalog.infer_path(slc40, "Cape Canaveral", [], inc=51.6))
+        self.assertNotIn("via", catalog.infer_path([-120.61, 34.63], "Vandenberg", [], inc=97.6))
+        # A measured bearing (a closure area) is never turned.
+        area = catalog.infer_path(slc40, "Cape Canaveral", [], areas=[{"azimuth": 170.0, "downrange_nm": 300}], inc=98.07)
+        self.assertNotIn("via", area)
+
     def test_paths_drawn_back_to_the_pad_are_turned_round(self):
         wen = [110.95, 19.61]
         sites = {"WEN": SITES["WEN"]}
