@@ -8,7 +8,8 @@ Everything here is Launch's own reading of names, kept in tables so it can be ch
                  Vandenberg codes -> "Vandenberg").
   programmes()   payload programmes from payload, flight and mission names ("Yaogan-40 04A-C" -> Yaogan), each
                  with a mission type. Mission types of series the operator describes otherwise but public analysis
-                 assesses as military (Yaogan, TJS) say "assessed".
+                 assesses as military (Yaogan, TJS) say "assessed". A payload GCAT files under a PLA body
+                 (PLA_OWNERS) makes the launch "Military / intelligence" whatever its name.
   orbit_class()  GCAT's launch category ("Sat SSO D" -> SSO) or Launch Library 2's orbit ("PO" -> SSO / polar).
 """
 from __future__ import annotations
@@ -158,7 +159,11 @@ def payload_unknown(payload: str | None) -> bool:
 PROGRAMMES = [
     (r"RE-?ENTRY|\bLANDING\b|\bSPLASHDOWN|\bDEORBIT|\bRETURN\b", "Reentry or landing", REENTRY, ""),
     # China
-    (r"\bYAO ?GAN|\bYG-?\d", "Yaogan", MIL_A, "assessed military; described as remote sensing"),
+    # "Yaogan" is the Chinese word for remote sensing: after a word of three or more letters it names a customer's
+    # satellite ("Aerjiliya Yaogan-3A" is Algeria's Alsat-3A, "Bajistan Yaogan" Pakistan's), not the series.
+    # "UTC " and "AND " are the charted labels' own words. YG with a one-digit number ("Tianyuan YG01") is not it.
+    (r"(?:(?<=UTC |AND )|(?<![A-Z]{3} ))\bYAO ?GAN|\bYG-?[1-9]\d", "Yaogan", MIL_A,
+     "assessed military; described as remote sensing"),
     (r"\bTJS\b|\bTJS-?\d|TONGXIN JISHU SHIYAN", "TJS", MIL_A, "assessed military; described as communications tests"),
     # Reviewed 15 Nov 2026 (names from records that were "Not classified"); facts not all verified.
     (r"\bWHG-?\d|HULIANWANG GAOGUI", "Satellite internet (GEO)", COM, "high-orbit satellite internet"),
@@ -166,13 +171,15 @@ PROGRAMMES = [
     (r"GUOWANG|XINGWANG|SATNET|HULIANWANG|\bWHDW|\bWHJSW|\bDIGUI\b", "Guowang (SatNet)", LEOBB, ""),
     (r"QIANFAN|\bG60\b|SPACESAIL|THOUSAND SAILS", "Qianfan", LEOBB, ""),
     (r"HONGHU", "Honghu-3", LEOBB, ""),
-    (r"(?<!JISHU )\bSHI ?YAN\b|(?<!JISHU )\bSHIYAN|\bSY-?\d", "Shiyan", TECH, "some assessed military"),
+    (r"\bCSSHQ|\bCHONG?FU SHIYONG|\bSPACEPLANE|\bEXPERIMENTAL SPACESHIP", "Reusable spacecraft (CSSHQ)", TECH, ""),
+    # "Shiyan" is also the word for experimental ("Guanlan Shiyan Xing"): the series has its number after it.
+    (r"(?<!JISHU )\bSHI ?YAN[ -]?\d|\bSY-?\d", "Shiyan", TECH, "some assessed military"),
     (r"\bSHI ?JIAN|\bSJ-?\d", "Shijian", TECH, "some assessed military"),
     (r"\bBEI ?DOU|\bBDS\b", "BeiDou", NAV, ""),
     (r"\bCENTISPACE|\bWEILI KONGJIAN", "CentiSpace", NAV, "navigation augmentation"),
     (r"\bFENG ?YUN|\bFY-?\d", "Fengyun", WX, ""),
     (r"\bTIANMU", "Tianmu-1", WX, "radio occultation"),
-    (r"\bYUNHAI", "Yunhai", WX, "some assessed military"),
+    (r"\bYUNHAI", "Yunhai", WX, "assessed military weather"),
     (r"\bYUNYAO", "Yunyao", WX, ""),
     (r"\bGAO ?FEN|\bGF-?\d", "Gaofen", EO, ""),
     (r"\bXINGSHIDAI|\bXSD\b|\bXSD-", "Xingshidai", EO, ""),
@@ -181,7 +188,7 @@ PROGRAMMES = [
     (r"\bHUANJING|\bHJ-?\d", "Huanjing", EO, ""),
     (r"\bZIYUAN|\bZY-?\d", "Ziyuan", EO, ""),
     (r"\bLUDI TANCE|\bLT-?\d", "Ludi Tance", EO, ""),
-    (r"\bTIANHUI", "Tianhui", EO, ""),
+    (r"\bTIANHUI", "Tianhui", EO, "mapping; some assessed military"),
     (r"\bSUPERVIEW|\bSIWEI", "SuperView", EO, ""),
     (r"\bPIESAT|\bTAIJING|\bXIGUANG|\bTIANYAN|\bKAIYUN|\bGEESPACE|\bGEELY", "Chinese commercial", EO, ""),
     (r"\bTIANQI", "Tianqi", COM, ""),
@@ -261,10 +268,27 @@ PROGRAMMES = [
      r"\bTANKI UCHAIGEGATA|\bSOLARAS|\bGOING FULL SPECTRUM|\bONWARD AND UPWARD|\b6 X SATS\b(?=.*CERES-2)",
      "Test flight", TEST, "maiden flights, mass models"),
     (r"\bMULTIPLE PAYLOADS", "Rideshare", RIDE, ""),
+    # Reviewed 16 Nov 2026: the eight names left "Not classified". Last in the table, so
+    # they give the mission type only where no other row matched.
+    (r"\bHORUS\b|\bHELUSI", "Earth observation (other)", EO, ""),
+    (r"\bSIXIANG|\bSKYSIGHT|\bKUANGDA NANHU|\bHONGKOU FUXING|\bZHONGDIAN NONGCHUANG|\bENSHI\b|\bKUNPENG",
+     "Chinese commercial", EO, ""),
+    (r"\bZHONGKE\b|\bZHONGKE-1\b|\bAIRSAT|\bBEIBUWAN|\bMUDUO|\bJINGAN MENGXIANG|\bZK-1[45]\b", "Zhongke-1 (AIRSAT)",
+     EO, ""),
+    (r"\bTIANXING|\bCHUANGXIN-?\d", "Chinese technology", TECH, ""),
+    (r"(?<!YUNXIAO )\bTANLUO?ZHE", "Chinese science", SCI, ""),  # Tanluzhe-1, not the Yunxiao Tanluzhe of 2026-220
+    (r"COSMOS WILL SEE YOU NOW", "Open Cosmos telecom", LEOBB, "Ka-band LEO telecom constellation"),
+    (r"\bLINGXI|\bYINHE-\d", "GalaxySpace", TECH, "communications tests"),
 ]
+# GCAT's organisation codes for PLA bodies (gcat-orgs: ZZB General Armaments Dept, ZLZB Strategic Support Force,
+# JHB Military Aerospace Force; GCAT keeps filing payloads under ZZB and ZLZB after the 2016 and 2024 reorganisations).
+PLA_OWNERS = {"PLA", "ZZB", "ZLZB", "JHB", "PLAAF", "PLANS", "PLARF", "PLA2AC"}
+PLA_OWNED = "PLA owner (GCAT)"
 PROGRAMMES = [(re.compile(p), name, mt, note) for p, name, mt, note in PROGRAMMES]
 NOTES = {name: note for _, name, _, note in PROGRAMMES if note}
+NOTES[PLA_OWNED] = "a payload GCAT files under a PLA body"
 MTYPE_OF = {name: mt for _, name, mt, _ in PROGRAMMES}
+MTYPE_OF[PLA_OWNED] = MIL
 
 LL2_MTYPE = {"Communications": COM, "Earth Science": EO, "Government/Top Secret": MIL, "Navigation": NAV,
              "Resupply": CARGO, "Human Exploration": CREW, "Tourism": CREW, "Planetary Science": SCI,
@@ -272,14 +296,25 @@ LL2_MTYPE = {"Communications": COM, "Earth Science": EO, "Government/Top Secret"
              "Technology": TECH, "Test Flight": TEST, "Dedicated Rideshare": RIDE, "Meteorology": WX}
 
 
-def programmes(*texts: str | None) -> tuple[list[str], str]:
-    """Programmes found in the texts and the mission type of the first, or ([], 'Not classified')."""
-    u = " ".join(t for t in texts if t).upper().replace("_", " ")  # the map's labels join words with "_"
+def pla_owned(owners) -> bool:
+    """True when GCAT files a payload under a PLA body ("ZLZB", "ZZB/CAST", "ZLZB?")."""
+    return any(c.strip().rstrip("?") in PLA_OWNERS for o in owners or () for c in o.split("/"))
+
+
+def programmes(*texts: str | None, owners=None) -> tuple[list[str], str]:
+    """Programmes found in the texts and the mission type of the first, or ([], 'Not classified'). A payload owner
+    GCAT names as a PLA body adds PLA_OWNED and makes the type military (a reentry or landing stays one)."""
+    # The map's labels join words with "_"; texts are kept apart so no pattern reads across two of them.
+    u = " | ".join(t for t in texts if t).upper().replace("_", " ")
     found, mtype = [], None
     for rx, name, mt, _ in PROGRAMMES:
         if rx.search(u) and name not in found:
             found.append(name)
             mtype = mtype or mt
+    if pla_owned(owners):
+        found.append(PLA_OWNED)
+        if mtype != REENTRY:
+            mtype = MIL
     return found, mtype or MTYPES[-1]
 
 
