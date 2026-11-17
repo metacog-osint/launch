@@ -15,8 +15,9 @@ name: update
 # The privacy check (launch/privacy.py) runs in the tests and in `launch.py check`: it fails the run on a
 # listed term in site/ or in any tracked file.
 #
-# Secrets: CLOUDFLARE_PAGES_TOKEN and repo variable CLOUDFLARE_ACCOUNT_ID. No source needs a key. FAA NMS
-# credentials, once granted, go in as secrets set by hand.
+# Secrets: CLOUDFLARE_PAGES_TOKEN and repo variable CLOUDFLARE_ACCOUNT_ID. FAA NMS-API: secrets NMS_CLIENT_ID and
+# NMS_CLIENT_SECRET (production keys, set by hand), optional repo variable NMS_ENV (default prod). The nms lane's
+# state (last bulk pull, kept notices) rides in data/snapshot.json, so the cache below also keeps the FAA's limits.
 on:
   push:
     branches: [main]
@@ -53,6 +54,12 @@ jobs:
         if: steps.state.outputs.cache-matched-key == ''
         run: echo "::warning::No state in the Actions cache, so this run has no last good copy to fall back on."
       - name: Live collection (a failed lane keeps its last good copy and says so on the page)
+        env:
+          # FAA NMS-API keys, set by hand once the FAA moves the account to production; without them the nms
+          # lane says "waiting". One bulk pull a day, else one delta pull a run (launch/nms.py).
+          NMS_CLIENT_ID: ${{ secrets.NMS_CLIENT_ID }}
+          NMS_CLIENT_SECRET: ${{ secrets.NMS_CLIENT_SECRET }}
+          NMS_ENV: ${{ vars.NMS_ENV || 'prod' }}
         run: python tools/launch.py collect
       - name: Build site/
         run: python tools/launch.py build

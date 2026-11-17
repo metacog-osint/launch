@@ -14,22 +14,23 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
-from launch import catalog, feed, fetch, gcat, history, joey, live, nfc, nsf, overfly, patterns, privacy, public, wayback  # noqa: E402
+from launch import catalog, feed, fetch, gcat, history, joey, live, nfc, nms, nsf, overfly, patterns, privacy, public, timing, wayback  # noqa: E402
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
 # Not imported: the exercise layer holds scenario text, not public notices.
 EXCLUDED_LAYERS = {"Previous Exercise NOTAMs"}
-LANE_FIELDS = {"tfr": ["tfr"], "orbit": ["orbit"], "cordon": ["cordon"]}
+LANE_FIELDS = {"tfr": ["tfr"], "orbit": ["orbit"], "cordon": ["cordon"], "nms": ["nms"]}
 # The published ledger, read back on each run so a lost Actions cache loses no launch (merge is a union).
 LIVE_LEDGER = "https://launch.theintelligence.company/data/ledger.json"
-EMPTY = {"tfr": [], "orbit": {}, "cordon": {}}
+EMPTY = {"tfr": [], "orbit": {}, "cordon": {}, "nms": {}}
 
 
 def dump(obj, compact: bool = False) -> str:
@@ -173,7 +174,15 @@ def _lane_cordon(raw_dir: Path, prev: dict, getter):
     return {"cordon": live.cordon_read(body)}, [rec]
 
 
-LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit, "cordon": _lane_cordon}
+def _lane_nms(raw_dir: Path, prev: dict, getter):
+    """FAA NMS-API: one bulk pull a day, else a delta (launch/nms.py). Raises nms.Waiting without keys."""
+    client = nms.Client()
+    state = nms.pull(client, prev.get("nms") or {}, nms.past_areas(ROOT), datetime.now(timezone.utc))
+    rec = {"url": client.host + "/nmsapi/v1/notams", "sha256": None, "bytes": None}
+    return {"nms": state}, [rec]
+
+
+LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit, "cordon": _lane_cordon, "nms": _lane_nms}
 
 
 def collect(root: Path = ROOT, getter=None, only=None) -> dict:
@@ -195,21 +204,25 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
             snap.update(result)
             snap["lanes"][lane] = {"status": "ok", "fetched_at": now, "from_previous": False,
                                    "fetches": [{k: r[k] for k in ("url", "sha256", "bytes")} for r in recs]}
+        except nms.Waiting as exc:
+            snap["nms"] = {}
+            snap["lanes"][lane] = {"status": "waiting", "note": f"FAA NMS-API: {exc}; nothing is read."}
         except Exception as exc:
             had = bool(prev_lane.get("fetched_at"))
             for k in LANE_FIELDS[lane]:
                 snap[k] = prev.get(k, EMPTY[k]) if had else EMPTY[k]
             snap["lanes"][lane] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:300],
                                    "failed_at": now, "from_previous": had, "fetched_at": prev_lane.get("fetched_at")}
-    snap["lanes"]["nms"] = {"status": "waiting", "note": "FAA NOTAM Management Service API: access requested "
-                                                          "13 Nov 2026; nothing is read until it is granted."}
     pat_path = root / "history" / "patterns.json"
     corridors = json.loads(pat_path.read_text(encoding="utf-8"))["corridors"] if pat_path.exists() else []
     orb = snap.get("orbit") or {}
     # NGA warnings come from Cordon (decided 17 Nov 2026). Orbit's copy is used only until Cordon's lane has
     # succeeded once, so a first run with Cordon down still has warnings.
     nav = (snap.get("cordon") or {}).get("areas")
-    areas = list(nav if nav is not None else orb.get("areas") or []) + live.tfr_areas(snap.get("tfr") or [], {})
+    tim_path = root / "history" / "timing.json"
+    tim = json.loads(tim_path.read_text(encoding="utf-8"))["sites"] if tim_path.exists() else {}
+    areas = (list(nav if nav is not None else orb.get("areas") or []) + live.tfr_areas(snap.get("tfr") or [], {})
+             + nms.areas(snap.get("nms") or {}, {t["id"] for t in snap.get("tfr") or []}, tim))
     snap["areas"] = [{k: v for k, v in a.items() if k != "detail"} for a in areas]
     snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [])
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -354,6 +367,8 @@ def main(argv=None) -> int:
     c.add_argument("--only", nargs="*", choices=sorted(LANES))
     sub.add_parser("build")
     sub.add_parser("check")
+    sub.add_parser("timing", help="closure opening to launch, by site, from the built site/data/launches.json "
+                                  "-> history/timing.json")
     n = sub.add_parser("nfc", help="NotamForChina: fetch its files at the pinned commit, or build history/nfc.json")
     n.add_argument("step", choices=["fetch", "build", "links"],
                    help="links: its list of forum thread links -> history/nsf_links.json")
@@ -371,6 +386,12 @@ def main(argv=None) -> int:
         doc = wayback.build(src)
         print("Wayback build:", wayback.summary(doc))
         (ROOT / "history" / "wayback.json").write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
+        return 0
+    if a.cmd == "timing":
+        recs = json.loads((ROOT / "site" / "data" / "launches.json").read_text(encoding="utf-8"))["records"]
+        doc = {"rule": " ".join(timing.__doc__.split()), "sites": timing.by_site(recs)}
+        print("Timing:", {k: (v["launches"], v["median_min"]) for k, v in doc["sites"].items()})
+        (ROOT / "history" / "timing.json").write_text(dump(doc), encoding="utf-8", newline="\n")
         return 0
     if a.cmd == "joey":
         src = ROOT / "history" / "joey_source"

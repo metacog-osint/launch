@@ -1,0 +1,89 @@
+{
+ "rule": "When launches come inside their closure windows: from closure opening to launch, by launch site. For each launch in the History list with a launch time to the minute (GCAT's) and a pad, the notice taken is the one nearest the pad whose window holds the launch time (NotamForChina's, Joey0609/notams', the archived FAA TFRs); with the pad inside or near it, it is the first-stage or pad closure. The offset is launch time minus that window's opening, in minutes; the window's length is kept too. A site's figures (count, median, quartiles) say how its launches have sat in their windows, e.g. \"Jiuquan: median 8 min after the nearest closure opened\". They describe the history; they are not a forecast of any one launch.",
+ "sites": {
+  "Cape Canaveral": {
+   "pad": [
+    -80.577,
+    28.562
+   ],
+   "launches": 75,
+   "median_min": 38.6,
+   "q1_min": 30.0,
+   "q3_min": 105.0,
+   "within_15_min": 7,
+   "median_window_min": 177.0
+  },
+  "Jiuquan": {
+   "pad": [
+    100.291,
+    40.958
+   ],
+   "launches": 40,
+   "median_min": 9.0,
+   "q1_min": 8.0,
+   "q3_min": 10.0,
+   "within_15_min": 37,
+   "median_window_min": 24.5
+  },
+  "Kennedy (KSC)": {
+   "pad": [
+    -80.604,
+    28.608
+   ],
+   "launches": 35,
+   "median_min": 39.0,
+   "q1_min": 35.0,
+   "q3_min": 70.3,
+   "within_15_min": 2,
+   "median_window_min": 145.0
+  },
+  "Xichang": {
+   "pad": [
+    102.026,
+    28.246
+   ],
+   "launches": 25,
+   "median_min": 10.0,
+   "q1_min": 8.0,
+   "q3_min": 10.5,
+   "within_15_min": 22,
+   "median_window_min": 27.0
+  },
+  "Taiyuan": {
+   "pad": [
+    111.608,
+    38.849
+   ],
+   "launches": 18,
+   "median_min": 9.0,
+   "q1_min": 8.0,
+   "q3_min": 9.1,
+   "within_15_min": 18,
+   "median_window_min": 29.5
+  },
+  "Wenchang": {
+   "pad": [
+    110.951,
+    19.614
+   ],
+   "launches": 12,
+   "median_min": 10.1,
+   "q1_min": 9.0,
+   "q3_min": 10.6,
+   "within_15_min": 12,
+   "median_window_min": 20.0
+  },
+  "Wallops": {
+   "pad": [
+    -75.48,
+    37.83
+   ],
+   "launches": 9,
+   "median_min": 36.8,
+   "q1_min": 22.1,
+   "q3_min": 57.5,
+   "within_15_min": 2,
+   "median_window_min": 210.0
+  }
+ }
+}
