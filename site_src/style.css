@@ -165,6 +165,9 @@ textarea#paste-text { width: 100%; font: 0.82rem ui-monospace, Consolas, monospa
 button { font: inherit; }
 .paste-item { border-top: 1px solid var(--border); padding-top: 6px; }
 .paste-item p { margin: 2px 0; }
+.saved-box { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 4px; }
+.saved-box li { margin: 2px 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 #map-info { min-height: 1.4em; margin: 6px 0 0; }
 
 /* Tabs (the header links; one panel shows at a time). */

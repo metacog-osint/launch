@@ -33,7 +33,7 @@ from . import gcat, history, notam, overfly
 from . import nfc as NFC
 from . import programs as P
 
-LEDGER_SINCE = "2023-01-01"
+LEDGER_SINCE = "2012-01-01"
 DEFAULT_PATH_NM = 1500
 AREA_NM = 2500        # closure areas farther than this from the pad do not set an azimuth
 SITE_NM = 60          # a pad belongs to the nearest GCAT site within this distance
@@ -941,9 +941,64 @@ def _bear(pad, areas: list[dict]) -> list[dict]:
             for a in areas]
 
 
+# ---------- NASASpaceflight forum threads (nsf.py: NotamForChina's link list; the forum is never read) ----------
+# A thread whose title gives a date joins a Chinese launch (record actor CN, launched): with a UTC time, the nearest
+# launch within NSF_HOURS of it whose vehicle does not differ (LM-11H is LM-11); without one, the only launch that
+# day (UTC, a day either side for the title's local date) of that vehicle that also shares a payload word with the
+# title (an untimed title often carries a planned date that slipped: "Zhongxing-26 - CZ-7A - January 9, 2023" is not
+# Shijian-23 on CZ-7A that night). A thread already linked from the launch's charted notices is not repeated.
+# Undated threads (rumours, plans, general discussion) join nothing.
+NSF_HOURS = 3
+_NSF_GENERIC = {"and", "others", "other", "launch", "sat", "sats", "satellite", "satellites", "the", "with", "test",
+                "long", "march", "maiden", "flight", "live", "failure", "mission", "net", "rideshare"}
+
+
+def _words(*texts) -> set:
+    return {w for t in texts for w in re.findall(r"[a-z]{3,}", (t or "").lower())} - _NSF_GENERIC
+
+
+def _payload_words(r: dict) -> set:
+    return _words(r.get("payload"), r.get("label"), *((r.get("payloads") or {}).get("names") or []))
+
+
+def nsf_join(recs: list[dict], doc: dict | None, chart_topics: dict[str, set]) -> dict:
+    if not doc:
+        return {}
+    cn = [(r, _dt(r["time"])) for r in recs if r.get("actor") == "CN" and r.get("status") == "launched" and r.get("time")]
+    cn = [(r, t) for r, t in cn if t]
+    counts = {"links": len(doc.get("links") or []), "dated": 0, "joined": 0, "already_charted": 0}
+    for x in doc.get("links") or []:
+        if not x.get("date"):
+            continue
+        counts["dated"] += 1
+        day = datetime.fromisoformat(x["date"]).replace(tzinfo=timezone.utc)
+        best = None
+        if x.get("time"):
+            at = day + timedelta(hours=int(x["time"][:2]), minutes=int(x["time"][3:]))
+            c = [(abs((t - at).total_seconds()) / 3600, r) for r, t in cn
+                 if not _other_vehicle(x.get("vehicle"), P.vehicle(r.get("vehicle")))]
+            c = sorted((h, r["id"], r) for h, r in c if h <= NSF_HOURS)
+            best = c[0][2] if c else None
+        elif x.get("vehicle"):
+            words = _words(re.split(r"\s+-\s+|,", x["title"])[0])
+            c = [r for r, t in cn if abs((t.date() - day.date()).days) <= 1 and r.get("vehicle")
+                 and not _other_vehicle(x["vehicle"], P.vehicle(r.get("vehicle"))) and words & _payload_words(r)]
+            same_day = [r for r in c if _dt(r["time"]).date() == day.date()]
+            best = same_day[0] if len(same_day) == 1 else c[0] if len(c) == 1 else None
+        if not best:
+            continue
+        if x["topic"] in chart_topics.get(best["id"], set()):
+            counts["already_charted"] += 1
+            continue
+        best.setdefault("forum", []).append({"url": x["url"], "title": x["title"]})
+        counts["joined"] += 1
+    counts["records"] = sum(1 for r in recs if r.get("forum"))
+    return counts
+
+
 def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[dict], now: str,
                 nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None,
-                world: "overfly.World | None" = None) -> dict:
+                world: "overfly.World | None" = None, nsf_doc: dict | None = None) -> dict:
     """The History tab's list (data/launches.json). `world` (overfly.World): when given, each record with a flight
     path gets `over`, the countries its ground track crosses (overfly.py)."""
     sites = ledger.get("sites") or {}
@@ -1457,6 +1512,11 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                           "nfc_held": sum(1 for r in recs for x in r.get("nfc_notices") or [] if x.get("joey"))}
     if wayback_doc:
         counts["wayback"] = {**wb_counts, "records": sum(1 for r in recs if r.get("archive_notices"))}
+    if nsf_doc:
+        topics = {r["id"]: {m.group(1) for eid in r.get("chart") or [] for e in all_copies.get(eid, [])
+                            for u in e.get("links") or [] for m in [re.search(r"[?&;]topic=(\d+)", u)] if m}
+                  for r in recs if r.get("chart")}
+        counts["nsf"] = nsf_join(recs, nsf_doc, topics)
     used_sites = {r["site"] for r in recs if r.get("site")}
     site_list, seen = [], set()
     for s in sites.values():

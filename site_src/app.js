@@ -5,6 +5,7 @@ import { createMap } from "./map.js";
 import * as N from "./notam.js";
 import * as TR from "./traj.js";
 import { initHistory } from "./history.js";
+import * as SV from "./saved.js";
 
 const T = window.TicTime;
 const $ = (id) => document.getElementById(id);
@@ -67,7 +68,7 @@ function tiles() {
     ["FAA space-operations TFRs", (snap.tfr || []).length],
     ["Scheduled launches, 14 days", ((snap.orbit || {}).upcoming || []).length],
     ["Coincidences: time / time and place / grouped", `${lv.time || 0} / ${lv["time and place"] || 0} / ${lv.grouped || 0}`],
-    ["Launches since 2023", ix.records.filter((r) => r.status === "launched" && (r.time || "") >= "2023").length],
+    [`Launches since ${(ix.ledger_since || "2012").slice(0, 4)}`, ix.records.filter((r) => r.status === "launched" && (r.time || "") >= (ix.ledger_since || "2012")).length],
     ["Recurring drop zones", pat.recurring.length],
   ];
   items.forEach(([k, v]) => { const t = el("div", "tile"); t.append(el("span", "k", k), el("span", "v", String(v))); box.appendChild(t); });
@@ -168,13 +169,70 @@ function paste() {
         if (s.line) feats.push({ type: "Feature", properties: { key: "paste" }, geometry: { type: "LineString", coordinates: s.line } });
       });
       n.rejected.forEach((r) => d.appendChild(el("p", "small badge-warn", `Not read: ${r.token} (${r.reason})`)));
+      const sp = el("p", "small"), sb = el("button", "linkish", "Save to History (this browser)"); sb.type = "button";
+      sb.addEventListener("click", () => { saveNotices([p]); sb.disabled = true; sb.textContent = "Saved"; });
+      sp.appendChild(sb); d.appendChild(sp);
       out.appendChild(d);
     });
+    if (parts.length > 1) {
+      const sp = el("p", "small"), sb = el("button", "", `Save all ${parts.length} to History (this browser)`); sb.type = "button";
+      sb.addEventListener("click", () => { saveNotices(parts); out.querySelectorAll(".paste-item button.linkish").forEach((b) => { b.disabled = true; b.textContent = "Saved"; }); sb.disabled = true; });
+      sp.appendChild(sb); out.appendChild(sp);
+    }
     pasteFc = { type: "FeatureCollection", features: feats };
     map.set("paste", pasteFc); if (feats.length) map.fit(pasteFc);
     trajRun(true);
   });
   $("paste-clear").addEventListener("click", () => { $("paste-text").value = ""; out.textContent = ""; map.set("paste", null); pasteFc = null; trajAreas = []; trajRun(false); });
+}
+
+/* ---------- notices saved in this browser (saved.js), shown on the History tab ---------- */
+function savedMsg(t) { $("saved-msg").textContent = t; }
+function saveNotices(texts) {
+  const before = SV.load(), after = SV.add(before, texts.map((t) => SV.entry(t)));
+  if (!SV.store(after)) { savedMsg("This browser would not save: its storage is off or full."); return; }
+  savedRender(after.length - before.length);
+}
+function savedRender(added, fromHistory) {
+  const list = SV.load(), ul = $("saved-list"); ul.textContent = "";
+  list.map(SV.read).filter(Boolean).forEach((n) => {
+    const li = el("li");
+    li.appendChild(el("b", "", n.number || "Notice"));
+    li.appendChild(document.createTextNode(" · " + [n.firs.join(" "), n.q_code, n.start ? `${fmt(n.start)} to ${n.end ? fmt(n.end) : "?"}` : "no window read",
+      n.rings.length + n.points.length ? `${n.rings.length + n.points.length} area${n.rings.length + n.points.length === 1 ? "" : "s"}` : "no area read"].filter(Boolean).join(" · ") + " "));
+    const b = el("button", "linkish", "Remove"); b.type = "button";
+    b.addEventListener("click", () => { SV.store(SV.load().filter((x) => x.id !== n.id)); savedRender(); });
+    li.appendChild(b); ul.appendChild(li);
+  });
+  if (!list.length) ul.appendChild(el("li", "muted", "None saved yet."));
+  $("saved-export").disabled = $("saved-clear").disabled = !list.length;
+  let msg = added === undefined ? "" : added ? `Saved ${added} notice${added === 1 ? "" : "s"}.` : "Already saved.";
+  if (H && !fromHistory) {
+    const c = H.savedChanged();
+    if (added !== undefined) msg += ` On the History tab: ${c.joined} of ${c.saved} on a launch, ${c.own} with no identified launch.`;
+  }
+  if (added !== undefined) savedMsg(msg);
+}
+function savedSetup() {
+  $("saved-export").addEventListener("click", () => {
+    const a = el("a"); a.href = URL.createObjectURL(new Blob([SV.toFile(SV.load())], { type: "application/json" }));
+    a.download = "launch-saved-notices.json"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
+  $("saved-import").addEventListener("change", async (ev) => {
+    const f = ev.target.files && ev.target.files[0]; ev.target.value = "";
+    if (!f) return;
+    try {
+      const before = SV.load(), after = SV.add(before, SV.fromFile(await f.text()));
+      if (!SV.store(after)) { savedMsg("This browser would not save: its storage is off or full."); return; }
+      savedRender(after.length - before.length);
+    } catch (err) { savedMsg("Could not read that file: " + err.message); }
+  });
+  $("saved-clear").addEventListener("click", () => {
+    if (!confirm("Remove every saved notice from this browser? Export them first to keep a copy.")) return;
+    SV.store([]); savedRender(); savedMsg("Removed.");
+  });
+  window.addEventListener("launch:saved", () => savedRender(undefined, true));
+  savedRender();
 }
 
 /* ---------- trajectory from a pad (traj.js has the maths and its limits) ---------- */
@@ -310,7 +368,7 @@ async function main() {
   const shown = showTab();
   const model = liveModel();
   map = await createMap($("map"), model, { onPick: (k) => { if (k.startsWith("live:") || k.startsWith("pad:")) pickLive(k); } });
-  patterns(); paste(); trajSetup();
+  patterns(); paste(); trajSetup(); savedSetup();
   map.resize();
   await shown;
   if (T && T.onChange) T.onChange(() => { tiles(); liveTables(); sourcesBox(); });
