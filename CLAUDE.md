@@ -33,8 +33,8 @@ unions the committed baseline, the cache, the published ledger and Orbit's launc
   crosses; `timing.py`; `history.py` map import; `public.py` public gate; `privacy.py`; `nfc.py`, `joey.py`,
   `wayback.py`, `ngawarn.py` (Orbit's NGA rules, archive only), `nsf.py` forum links, `nms.py`, `gnss.py`.
 - `site_src/`: tabs `#live`, `#history`, `#patterns`, `#paste`, `#sources`; `traj.js`, `export.js`, `saved.js`
-  tested in Node. `tic-nav.*`, `tic-time.*` (hub) and `doctrine/kit/` are
-  copies: fix them at their source and copy in again.
+  tested in Node. `tic-nav.*`, `tic-time.*`, `tic-related.*` (hub) and `doctrine/kit/`
+  are copies: fix them at their source and copy in again.
 
 ## History (`data/launches.json`, one list)
 - **Sources** (`sources`): `chart` (Launch's charted notices: a hand-built Google My Maps map of closure areas,

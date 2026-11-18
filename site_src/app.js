@@ -142,6 +142,28 @@ function liveTables() {
   folds("live");
 }
 
+// Elsewhere today (tic-related.js from the hub): the countries of the pads with launches scheduled in the next 14
+// days, strongest first: those with a launch that coincides with a live closure area, then by launches scheduled.
+function related() {
+  const box = $("tic-related");
+  if (!box || !window.TicRelated) return;
+  const up = (snap.orbit || {}).upcoming || [];
+  const matched = new Set((snap.matches || []).map((m) => m.launch));
+  const score = new Map();
+  up.forEach((u, i) => {
+    const cc = u.pad_country || (u.provider_countries || [])[0];
+    if (!cc) return;
+    const s = score.get(cc) || { cc, m: 0, n: 0, i };
+    s.m += matched.has(u.id) ? 1 : 0; s.n += 1;
+    score.set(cc, s);
+  });
+  const ranked = [...score.values()].sort((a, b) => (b.m - a.m) || (b.n - a.n) || (a.i - b.i)).map((s) => s.cc);
+  if (!ranked.length) return;
+  const names = {};
+  ranked.forEach((cc) => { names[cc] = countryName(cc); });
+  window.TicRelated.render(box, { countries: ranked, here: "launch", names, level: 2 });
+}
+
 function pickLive(key) {
   const x = byKey.get(key);
   if (!x) return;
@@ -396,7 +418,7 @@ async function showTab() {
 async function main() {
   [snap, hist, pat, srcs, ix] = await Promise.all(["data/snapshot.json", "data/history.json", "data/patterns.json", "data/sources.json", "data/launches.json"].map(getJSON));
   if (T && T.mountSettings) T.mountSettings($("time-settings"));
-  tiles(); liveTables(); sourcesBox();
+  tiles(); liveTables(); sourcesBox(); related();
   // Address changes (tab links, a pasted or hand-edited History address) are taken from the start: waiting for the
   // maps to load left every tab link dead until then, and for good where a map never loads.
   window.addEventListener("hashchange", () => {

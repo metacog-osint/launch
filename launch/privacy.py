@@ -31,7 +31,8 @@ TERMS_FILE = ROOT / "history" / "source" / "terms.json"
 TEXT = {".py", ".js", ".mjs", ".css", ".html", ".htm", ".json", ".geojson", ".md", ".txt", ".yml", ".yaml", ".csv",
         ".toml", ".cfg", ".ini", ".svg", ".xml", ".kml", ""}
 SKIP = ("site_src/vendor/", "site/vendor/")
-SHARED = ("doctrine/kit/", "site_src/tic-nav.", "site_src/tic-time.", "site/tic-nav.", "site/tic-time.")
+SHARED = ("doctrine/kit/", "site_src/tic-nav.", "site_src/tic-time.", "site_src/tic-related.", "site/tic-nav.",
+          "site/tic-time.", "site/tic-related.")
 # Lower-case words, by SHA-256: a person's name in its usual forms. Words are split at anything that is not a
 # letter and at a lower-to-upper change ("chartById" is chart, By, Id), so a key or an identifier counts too.
 WORD_SHA256 = frozenset({
