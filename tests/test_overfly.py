@@ -100,16 +100,25 @@ class KitTest(unittest.TestCase):
 
 class CatalogTest(unittest.TestCase):
     def test_index_carries_over(self):
+        # a charted event joins a GCAT launch from a made-up site at 1 E on the equator; its closure area at 26 E sets
+        # the estimated path, drawn due east along the made-up countries
+        area = {"ring": [[25.9, 0.1], [26.1, 0.1], [26.1, -0.1], [25.9, -0.1], [25.9, 0.1]], "centroid": [26, 0]}
         hist = {"events": [{"id": "hist:x", "layer": "Previous Russian Launches", "kind": "launch", "actor": "RU",
-                            "label": "x", "cancelled": False, "time": "2024-05-01T10:00:00Z", "time_basis": "time",
-                            "pad": [1, 0], "areas": [], "paths": [[[1, 0], [27, 0]]], "points": [], "notams": [],
-                            "texts": [], "links": []}]}
-        idx = catalog.build_index(hist, {"since": "2023-01-01", "sites": {}, "launches": [], "closures": []}, [], [],
-                                  "2026-11-15T00:00:00Z", world=WORLD)
+                            "label": "x", "cancelled": False, "vehicle": "Soyuz-2.1b", "payload": None, "extra": None,
+                            "time": "2024-05-01T10:00:00Z", "time_basis": "time", "pad": [1, 0], "areas": [area],
+                            "paths": [], "points": [], "notams": [], "texts": [], "links": []}]}
+        sites = {"X": {"name": "Site X", "gcat_name": "X", "lat": 0, "lon": 1, "country": "RU"}}
+        g = {"id": "gcat:2024-090", "source": "gcat", "tag": "2024-090", "time": "2024-05-01T10:00:00Z", "date": "2024-05-01",
+             "vehicle_raw": "Soyuz-2-1B", "flight": "X", "mission": "X", "agency": "X", "country": "RU", "outcome": "success",
+             "kind": "orbital", "category": "Sat LEO O", "site_code": "X",
+             "site": {"name": "X", "lat": 0, "lon": 1, "country": "RU"}, "pad_name": "",
+             "payloads": {"count": 1, "names": ["X"], "more": 0, "owners": [], "states": [], "op_orbits": []}, "inc": None}
+        ledger = {"since": "2023-01-01", "sites": sites, "launches": [g], "closures": []}
+        idx = catalog.build_index(hist, ledger, [], [], "2026-11-15T00:00:00Z", world=WORLD)
         rec = next(r for r in idx["records"] if r.get("path"))
+        self.assertEqual((rec["id"], rec["chart"]), ("gcat:2024-090", ["hist:x"]))
         self.assertEqual([[r["cc"] for r in p] for p in rec["over"]], [["AA", "BB", "CC", "BB", "DD"]])
-        idx = catalog.build_index(hist, {"since": "2023-01-01", "sites": {}, "launches": [], "closures": []}, [], [],
-                                  "2026-11-15T00:00:00Z")
+        idx = catalog.build_index(hist, ledger, [], [], "2026-11-15T00:00:00Z")
         self.assertNotIn("over", next(r for r in idx["records"] if r.get("path")))
 
 

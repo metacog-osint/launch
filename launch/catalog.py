@@ -475,8 +475,8 @@ def _other_vehicle(a: str | None, b: str | None) -> bool:
 
 
 def same_vehicle(a: str | None, b: str | None) -> bool | None:
-    """True or False when both names are read; None when either is not known."""
-    if not a or not b or P.NOT_KNOWN in (a, b):
+    """True or False when both names are read; None when either is not known ("LM-6A or 4B" is not read)."""
+    if not a or not b or P.NOT_KNOWN in (a, b) or " OR " in a.upper() or " OR " in b.upper():
         return None
     return _veh_key(a) == _veh_key(b)
 
@@ -1105,44 +1105,69 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                 info["pad_at_no_site"] = True
             yield h + (0 if same else 1.5) + (d or 0) / 400, g["id"], info
 
-    # Each charted event takes its best GCAT launch; several placemarks of one launch (one per notice, say)
-    # all join it, and the page shows that launch once.
+    # The charted map is a notice source: its events never make a launch of their own. Each takes its best GCAT
+    # launch, and several placemarks of one launch (one per notice, say) all join it. First within 3 h and near in
+    # place (pass 1). Then by NOTAM (pass 0): an event holding a notice (same number, a shared FIR) that NotamForChina
+    # lists for one GCAT launch joins it (the charted name or NotamForChina's sheet is a year or a month out now and
+    # then, and the charted vehicle is a guess made before the launch); else one that Joey0609/notams' window join
+    # puts on one GCAT launch, unless the vehicles differ. Then within 72 h, near and of the same vehicle (pass 2),
+    # then by time and vehicle when the event has no pad (pass 4). An event no launch joins is a notice set.
+    nfc_by_tag, nfc_loose, nfc_counts = _nfc_join(nfc_doc, gcat, g_info)
+    chart_keys = {e["id"]: chart_notice_keys(all_copies.get(e["id"], [e])) for e in events}
+    launching = {g.get("country") for g in gcat if g.get("country") and g_info[g["id"]]["kind"] == P.ORBITAL}
+    # A missile fired in combat is announced by no notice: the archived TFRs and warnings join only the other GCAT
+    # launches. Joey's notices are launch NOTAMs joined by window and a pad within JOEY_NM, too loose to tell a
+    # missile or a sounding rocket from an orbital launch in the same window: by window they join orbital launches.
+    gcat_noticed = [g for g in gcat if g_info[g["id"]]["kind"] != P.COMBAT_LAUNCH]
+    gcat_orbital = [g for g in gcat if g_info[g["id"]]["kind"] == P.ORBITAL]
+    joey_list = (joey_doc or {}).get("notices") or []
+    joey_win = [joey_window_join(n, gcat_orbital, g_info, launching) for n in joey_list]
+    nfc_tags: dict[str, dict] = {}
+    for tag, xs in nfc_by_tag.items():
+        for x in xs:
+            for k in nfc_notice_keys(x):
+                nfc_tags.setdefault(k[0], {}).setdefault(k[1], set()).add(tag)
+    joey_tags: dict[str, dict] = {}
+    for n, (tag, _) in zip(joey_list, joey_win):
+        if tag:
+            joey_tags.setdefault(n["number"], {}).setdefault(joey_firs(n), set()).add(tag)
     chart_to_g, join = {}, {}
     usable = [e for e in events if e["kind"] in ("launch", "upcoming") and e.get("time") and e["time_basis"] != "none"]
-    for second in (False, True):
+
+    def by_place(second: bool):
         for e in usable:
             if e["id"] in chart_to_g:
                 continue
             best = min(candidates(e, second), default=None, key=lambda c: c[0])
             if best:
                 chart_to_g[e["id"]], join[e["id"]] = best[1], best[2]
-    gby = {g["id"]: g for g in gcat}
 
-    # NotamForChina's launches (see _nfc_join). Then two joins by NOTAM: a charted event that joined no GCAT
-    # launch, holding a notice (same number, same FIR) that NotamForChina lists for a launch GCAT has, joins that
-    # launch (pass 3: the charted name or NotamForChina's sheet is a year or a month out now and then); and a NotamForChina
-    # launch that joined nothing joins the charted event that holds one of its notices. Else, before ledger_since
-    # (where GCAT's list here does not reach), one unjoined charted event within NFC_HOURS, not of another
-    # vehicle, at the same site when the vehicle is not read. Else a record of its own.
-    nfc_by_tag, nfc_loose, nfc_counts = _nfc_join(nfc_doc, gcat, g_info)
-    chart_keys = {e["id"]: chart_notice_keys(all_copies.get(e["id"], [e])) for e in events}
-    nfc_tags: dict[str, dict] = {}
-    for tag, xs in nfc_by_tag.items():
-        for x in xs:
-            for k in nfc_notice_keys(x):
-                nfc_tags.setdefault(k[0], {}).setdefault(k[1], set()).add(tag)
-    nfc_counts["chart_by_notam"] = 0
+    by_place(False)
+    by_notam_counts = {"nfc": 0, "joey": 0, "vehicle_refused": 0, "several": 0}
     for e in events:
         if e["id"] in chart_to_g or not chart_keys[e["id"]]:
             continue
-        hits = {t for k in chart_keys[e["id"]] for t in _key_hits(k, nfc_tags)}
-        if len(hits) == 1:
-            gid = "gcat:" + hits.pop()
-            h = _hours_apart(e.get("time"), g_info[gid]["time"])
-            chart_to_g[e["id"]] = gid
-            join[e["id"]] = {"hours": None if h is None else round(h, 1), "nm": None, "pass": 3,
-                             "same": bool(same_vehicle(P.vehicle(e.get("vehicle")), g_info[gid]["vehicle"]))}
-            nfc_counts["chart_by_notam"] += 1
+        hits, via = set(), None
+        for via, idx in (("nfc", nfc_tags), ("joey", joey_tags)):
+            hits = {t for k in chart_keys[e["id"]] for t in _key_hits(k, idx)}
+            if hits:
+                break
+        if len(hits) != 1:
+            by_notam_counts["several"] += len(hits) > 1
+            continue
+        gid = "gcat:" + next(iter(hits))
+        sv = same_vehicle(P.vehicle(e.get("vehicle")), g_info[gid]["vehicle"])
+        if sv is False and via == "joey":
+            by_notam_counts["vehicle_refused"] += 1
+            continue
+        h = _hours_apart(e.get("time"), g_info[gid]["time"])
+        chart_to_g[e["id"]] = gid
+        join[e["id"]] = {"hours": None if h is None else round(h, 1), "nm": None, "pass": 0, "by": "notam", "via": via,
+                         "same": bool(sv)}
+        by_notam_counts[via] += 1
+    nfc_counts["chart_by_notam"] = by_notam_counts["nfc"]
+    by_place(True)
+    gby = {g["id"]: g for g in gcat}
 
     # Pass 4: a charted event with no pad (no line was charted for it, and the pad is a line's first point) has no
     # place for passes 1-3 to measure from. It joins the GCAT launch of the same vehicle (else, where neither vehicle
@@ -1187,6 +1212,10 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     for eid, ks in chart_keys.items():
         for k in ks:
             chart_by_key.setdefault(k[0], {}).setdefault(k[1], set()).add(eid)
+    # A NotamForChina launch that joined no GCAT launch joins the charted event holding one of its notices (its
+    # notices go to the record that event's launch makes, or to the event's notice set). Else, before ledger_since
+    # (where GCAT's list here does not reach), one unjoined charted event within NFC_HOURS, not of another vehicle,
+    # at the same site when the vehicle is not read. Else a record of its own.
     nfc_by_chart: dict[str, list] = {}
     chart_free = [e for e in usable if e["id"] not in chart_to_g and (e.get("actor") or "CN") == "CN"]
     left, by_notam = [], 0
@@ -1229,16 +1258,10 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     for x in nfc_loose:
         for k in nfc_notice_keys(x):
             nfc_key_target.setdefault(k[0], {}).setdefault(k[1], set()).add("nfc:" + x["id"])
-    launching = {g.get("country") for g in gcat if g.get("country") and g_info[g["id"]]["kind"] == P.ORBITAL}
-    # A missile fired in combat is announced by no notice: the archived TFRs and warnings join only the other GCAT
-    # launches. Joey's notices are launch NOTAMs joined by window and a pad within JOEY_NM, too loose to tell a
-    # missile or a sounding rocket from an orbital launch in the same window: by window they join orbital launches.
-    gcat_noticed = [g for g in gcat if g_info[g["id"]]["kind"] != P.COMBAT_LAUNCH]
-    gcat_orbital = [g for g in gcat if g_info[g["id"]]["kind"] == P.ORBITAL]
     joey_by: dict[str, list] = {}
     joey_counts = {"notices": 0, "by_notam_chart": 0, "by_notam_nfc": 0, "by_window": 0, "window_several": 0,
                    "unjoined": 0, "unjoined_by_year": {}, "unjoined_why": {}}
-    for n in (joey_doc or {}).get("notices") or []:
+    for n, (tag, j) in zip(joey_list, joey_win):
         joey_counts["notices"] += 1
         key = (n["number"], joey_firs(n))
         hits = {"chart:" + eid for eid in _key_hits(key, chart_by_key)}
@@ -1249,7 +1272,6 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             joey_by.setdefault(sorted(hits)[0], []).append({**n, "join": {"by": "notam"}})
             joey_counts[how] += 1
             continue
-        tag, j = joey_window_join(n, gcat_orbital, g_info, launching)
         if tag:
             joey_by.setdefault("gcat:" + tag, []).append({**n, "join": j})
             joey_counts["by_window"] += 1
@@ -1362,12 +1384,18 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                 out.append({"ring": ring, "centroid": [round(lo, 4), round(la, 4)]})
         return out
 
-    def finish(r: dict, *, drawn=None, areas=None, orbit_code=None):
+    def finish(r: dict, *, drawn=None, areas=None, orbit_code=None, path=True):
         if (r["mtype"] == P.MTYPES[-1] and P.payload_unknown(r.get("payload"))
                 and all(P.payload_unknown(n) for n in (r.get("payloads") or {}).get("names") or [])):
             r["mtype"] = P.NO_PAYLOAD  # nothing to read, as opposed to a name the table does not know
         site, inc, note = r.get("site"), r.get("inc"), None
         r.setdefault("kind", P.NOT_KNOWN)
+        if not path:  # a notice set: no launch to draw
+            far = farthest_nm(r.get("pad"), areas)
+            if far is not None:
+                r["far_nm"] = far
+            recs.append(r)
+            return
         sub = r["kind"] not in (P.ORBITAL, P.NOT_KNOWN)
         if sub:
             r["orbit"] = "Suborbital"
@@ -1411,68 +1439,53 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             r["closures"] = _closure_list(cl)
         return cl
 
-    groups = [[e] for e in events if e["id"] not in chart_to_g] + list(g_to_chart.values())
-    for grp in groups:
+    def chart_parts(grp: list[dict]) -> tuple[list, list, list]:
+        """(areas, lines, every copy of each event) of the charted events in `grp`."""
+        return ([a for m in grp for a in (m.get("areas") or [])], [p for m in grp for p in (m.get("paths") or [])],
+                [c for m in grp for c in all_copies.get(m["id"], [m])])
+
+    def attach_chart(r: dict, grp: list[dict]):
+        """The charted events joined to a launch record: their ids (the page reads their notices, areas and texts from
+        data/history.json), names, how they joined and the time in the charted name."""
         e = max(grp, key=lambda x: (bool(x.get("paths")), len(x.get("areas") or []), -grp.index(x)))
-        g = gby.get(chart_to_g.get(e["id"], ""))
-        gi = g_info.get(g["id"]) if g else None
-        texts = [x for m in grp for x in (m.get("payload"), m.get("label"), m.get("extra"))]
-        chart_progs = P.programmes(*texts)[0]
-        if g:
-            texts += [g.get("flight"), g.get("mission"), *g["payloads"]["names"]]
-        progs, mtype = P.programmes(*texts, owners=(g["payloads"].get("owners") if g else None))
-        if any(P.MTYPE_OF.get(p) == P.MSL for p in chart_progs):  # a charted "ICBM" outranks a joined launch's payloads
-            mtype = P.MSL
-        kind = gi["kind"] if g else P.NOT_KNOWN
-        if kind != P.ORBITAL and g:
-            mtype = P.kind_mtype(kind, mtype, g.get("category"))
-        future = bool(nowdt and _dt(e.get("time")) and _dt(e["time"]) > nowdt)
-        status = ("launched" if g else "notice" if e["kind"] == "unknown" or not e.get("time") else
-                  "upcoming" if future else "launched")
-        veh = P.vehicle(e.get("vehicle"))
-        g_pad_used = bool(gi and gi["pad"] and (join.get(e["id"]) or {}).get("pad_at_no_site")
-                          and not (sites.get(g.get("site_code") or "") or {}).get("region"))
-        r = {"id": e["id"], "status": status, "time": e.get("time"), "time_basis": e.get("time_basis"),
-             "actor": e.get("actor") or (g or {}).get("country"), "label": e.get("label"),
-             # joined by programme from a pad at no site, the charted name may be the operator's ("SpaceX"): GCAT's
-             "vehicle": gi["vehicle"] if g and (veh == P.NOT_KNOWN or (g_pad_used and same_vehicle(veh, gi["vehicle"]) is False)) else veh,
-             "payload": e.get("payload") or ((g or {}).get("mission") or None),
-             "programmes": progs, "mtype": mtype,
-             "pad": gi["pad"] if g_pad_used else e.get("pad") or (gi["pad"] if gi else None),
-             "site": (gi["site"] if gi and gi["site"] and gi["pad"] and e.get("pad") and  # GCAT names neighbouring pads
-                      (g_pad_used or notam.haversine_nm(e["pad"][1], e["pad"][0], gi["pad"][1], gi["pad"][0]) <= SITE_NM) else None)
-                     or chart_site.get(e["id"]) or (gi["site"] if gi else None),
-             "orbit": P.orbit_class((g or {}).get("category")), "kind": kind, "cancelled": e.get("cancelled"),
-             "sources": ["chart"] + (["gcat"] if g else []), "chart": [m["id"] for m in grp],
-             "areas": sum(len(m.get("areas") or []) for m in grp)}
-        if g_pad_used:
-            r["chart_pad"] = e["pad"]  # the charted start, at no launch site
+        r["chart"] = [m["id"] for m in grp]
+        r["chart_labels"] = [m["label"] for m in grp]
+        r["sources"].append("chart")
+        r["areas"] = sum(len(m.get("areas") or []) for m in grp)
+        if join.get(e["id"]):
+            r["join"] = join[e["id"]]
         if len(grp) > 1:
-            r["chart_labels"] = [m["label"] for m in grp if m is not e]
-        if g:
-            r.update({"gcat": g["tag"], "outcome": g.get("outcome"), "inc": g.get("inc"), "gcat_vehicle": g.get("vehicle_raw"),
-                      "payloads": g.get("payloads"), "flight": g.get("flight"), "join": join.get(e["id"])})
-            gcat_extra(r, g)
-            if g.get("time"):
-                h = _hours_apart(e.get("time"), g["time"])
-                r["time"], r["time_basis"] = g["time"], "time"
-                if h is not None and h > 1:
-                    r["chart_time"] = e.get("time")
-        attach_ll2(r, ll2_link(r.get("time"), r.get("pad")) if r.get("time") else None)
-        extra = add_nfc(r, (nfc_by_tag.get(g["tag"], []) if g else []) +
-                        [x for m in grp for x in nfc_by_chart.get(m["id"], [])],
-                        [c for m in grp for c in all_copies.get(m["id"], [m])])
-        extra += add_joey(r, (["gcat:" + g["tag"]] if g else []) + ["chart:" + m["id"] for m in grp],
-                          [c for m in grp for c in all_copies.get(m["id"], [m])])
-        extra += add_wayback(r, g["tag"] if g else None)
-        # bearings from the record's pad to every area of the group (placemarks without a path have none)
-        areas = _bear(r.get("pad"), [a for m in grp for a in (m.get("areas") or [])] + extra)
-        finish(r, drawn=[p for m in grp for p in (m.get("paths") or [])], areas=areas,
-               orbit_code=P.gcat_orbit_code((g or {}).get("category")))
+            r["chart_joins"] = [join.get(m["id"]) for m in grp]  # in the order of `chart`
+        if r["mtype"] in (P.MTYPES[-1], P.NO_PAYLOAD) and r.get("kind") == P.ORBITAL:
+            progs, mtype = P.programmes(*[x for m in grp for x in (m.get("payload"), m.get("label"), m.get("extra"))])
+            if mtype not in (P.MTYPES[-1], P.NO_PAYLOAD):  # GCAT's names classify nothing; the charted name does
+                r["programmes"], r["mtype"], r["mtype_from"] = progs, mtype, "chart"
+        h = _hours_apart(e.get("time"), r.get("time"))
+        if h is not None and h > 1:
+            r["chart_time"] = e.get("time")
+
+    # A charted event no launch joins: a notice set, not a launch. Its name, vehicle and payload are the charted
+    # ones; it has no flight path, and the page lists it under "Notices with no identified launch".
+    notice_sets = 0
+    for e in events:
+        if e["id"] in chart_to_g:
+            continue
+        progs, mtype = P.programmes(e.get("payload"), e.get("label"), e.get("extra"))
+        future = bool(nowdt and _dt(e.get("time")) and _dt(e["time"]) > nowdt)
+        r = {"id": e["id"], "status": "notice", "notice_set": "later" if future else "none", "time": e.get("time"),
+             "time_basis": e.get("time_basis"), "actor": e.get("actor"), "label": e.get("label"),
+             "vehicle": P.vehicle(e.get("vehicle")), "payload": e.get("payload"), "programmes": progs, "mtype": mtype,
+             "pad": e.get("pad"), "site": chart_site.get(e["id"]), "orbit": P.NOT_KNOWN, "kind": P.NOT_KNOWN,
+             "cancelled": e.get("cancelled"), "sources": [], "areas": 0}
+        attach_chart(r, [e])
+        del r["chart_labels"]
+        areas, _, copies = chart_parts([e])
+        extra = add_nfc(r, nfc_by_chart.get(e["id"], []), copies)
+        extra += add_joey(r, ["chart:" + e["id"]], copies)
+        finish(r, areas=_bear(r.get("pad"), areas + extra), path=False)
+        notice_sets += 1
 
     for g in gcat:
-        if g["id"] in g_to_chart:
-            continue
         gi = g_info[g["id"]]
         r = {"id": g["id"], "status": "launched", "time": g.get("time") or (g["date"] + "T00:00:00Z"),
              "time_basis": "time" if g.get("time") else "date", "actor": g.get("country"),
@@ -1488,10 +1501,15 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         cl = attach_ll2(r, link)
         if link and link.get("lat") is not None:
             r["pad"], r["pad_basis"] = [link["lon"], link["lat"]], "ll2"
-        extra = add_nfc(r, nfc_by_tag.get(g["tag"], []), [])
-        extra += add_joey(r, ["gcat:" + g["tag"]], [])
+        grp = g_to_chart.get(g["id"], [])
+        areas, drawn, copies = chart_parts(grp)
+        if grp:
+            attach_chart(r, grp)
+        extra = add_nfc(r, nfc_by_tag.get(g["tag"], []) + [x for m in grp for x in nfc_by_chart.get(m["id"], [])], copies)
+        extra += add_joey(r, ["gcat:" + g["tag"]] + ["chart:" + m["id"] for m in grp], copies)
         extra += add_wayback(r, g["tag"])
-        finish(r, areas=list(cl) + _bear(r["pad"], extra), orbit_code=P.gcat_orbit_code(g.get("category")))
+        finish(r, drawn=drawn, areas=list(cl) + _bear(r["pad"], areas + extra),
+               orbit_code=P.gcat_orbit_code(g.get("category")))
 
     # NotamForChina's launches that joined nothing. Before ledger_since GCAT's list here does not reach, so the
     # launch stands on NotamForChina's word; from then on GCAT lists every orbital launch, so one it does not list
@@ -1554,7 +1572,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     kinds = {k: sum(1 for r in recs if r.get("kind") == k) for k in P.KINDS}
     gcat_kinds = {k: sum(1 for gi in g_info.values() if gi["kind"] == k) for k in P.KINDS if k != P.NOT_KNOWN}
     counts = {"chart": len(events), "gcat": len(gcat), "gcat_kinds": gcat_kinds, "kinds": kinds,
-              "chart_joined": len(chart_to_g), "chart_no_pad": nopad, "gcat_joined": len(g_to_chart),
+              "chart_joined": len(chart_to_g), "chart_by_notam": by_notam_counts, "chart_no_pad": nopad,
+              "chart_notice_sets": notice_sets, "gcat_joined": len(g_to_chart),
               "provisional": sum(1 for r in recs if r.get("provisional")),
               "upcoming": sum(1 for r in recs if r["status"] == "upcoming"),
               "paths": {k: sum(1 for r in recs if (r.get("path") or {}).get("kind") == k) for k in ("drawn", "estimated")}}

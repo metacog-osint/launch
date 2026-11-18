@@ -37,6 +37,11 @@ def chart_event(eid, time, vehicle, payload, pad, paths=None, areas=None, actor=
             "withheld_notes": 0}
 
 
+def of(ix, chart_id):
+    """The record holding a charted event: the launch it joined, else its own notice set."""
+    return [r for r in ix["records"] if chart_id in (r.get("chart") or [])][0]
+
+
 class Names(unittest.TestCase):
     def test_vehicles(self):
         for raw, want in [("LM-7A", "LM-7A"), ("Chang Zheng 7A", "LM-7A"), ("Long March 7A", "LM-7A"),
@@ -241,23 +246,36 @@ class Index(unittest.TestCase):
         g2 = gcat_rec("2026-117", "2026-06-01T00:00:00Z", "Chang Zheng 5", "Other", "WEN")
         ix = self.build([ev1, ev2], [g, g2])
         recs = {r["id"]: r for r in ix["records"]}
-        self.assertEqual(set(recs), {"hist:a", "gcat:2026-117"})  # one record for the launch, one GCAT-only
-        r = recs["hist:a"]
-        self.assertEqual(r["chart"], ["hist:a", "hist:b"])
+        self.assertEqual(set(recs), {"gcat:2026-116", "gcat:2026-117"})  # a record per launch; the charted events fold in
+        r = recs["gcat:2026-116"]
+        self.assertEqual((r["chart"], r["chart_labels"], r["sources"]), (["hist:a", "hist:b"], [ev1["label"], ev2["label"]],
+                                                                         ["gcat", "chart"]))
         self.assertEqual((r["gcat"], r["vehicle"], r["site"], r["orbit"]), ("2026-116", "LM-7A", "Wenchang", "GTO / GEO"))
         self.assertEqual(r["time"], "2026-05-26T16:16:30Z")  # GCAT's launch time
         self.assertEqual(r["path"]["kind"], "drawn")
         self.assertEqual(r["programmes"], ["TJS"])
 
+    def test_an_event_no_launch_joins_is_a_notice_set(self):
+        pad = [110.95, 19.61]
+        area = {"ring": ring(112, 18), "centroid": [112.25, 17.75]}
+        ev = chart_event("hist:z", "2026-05-01T10:00:00Z", "LM-7A", "TJS-30", pad, paths=[[pad, [120.0, 15.0]]], areas=[area])
+        r = of(self.build([ev], []), "hist:z")
+        self.assertEqual((r["id"], r["status"], r["notice_set"], r["kind"], r["vehicle"], r["sources"]),
+                         ("hist:z", "notice", "none", P.NOT_KNOWN, "LM-7A", ["chart"]))
+        self.assertNotIn("path", r)  # a notice set has no flight path: the charted line is not one
+        self.assertIn("far_nm", r)
+        later = of(self.build([dict(ev, time="2027-01-01T00:00:00Z")], []), "hist:z")
+        self.assertEqual(later["notice_set"], "later")
+
     def test_second_pass_needs_vehicle_and_place(self):
         pad = [110.95, 19.61]
         ev = chart_event("hist:c", "2026-03-01T10:00:00Z", "LM-7A", "Unknown", pad)  # the map's time is a day early
         g = gcat_rec("2026-050", "2026-03-02T09:00:00Z", "Chang Zheng 7A", "Something", "WEN")
-        r = [x for x in self.build([ev], [g])["records"] if x["id"] == "hist:c"][0]
+        r = of(self.build([ev], [g]), "hist:c")
         self.assertEqual(r["join"]["pass"], 2)
         self.assertEqual(r["chart_time"], "2026-03-01T10:00:00Z")
         other = gcat_rec("2026-051", "2026-03-02T09:00:00Z", "Chang Zheng 5", "Something", "WEN")
-        r = [x for x in self.build([ev], [other])["records"] if x["id"] == "hist:c"][0]
+        r = of(self.build([ev], [other]), "hist:c")
         self.assertNotIn("gcat", r)  # a different vehicle a day later is not the same launch
 
     def test_same_country_far_away_needs_a_vehicle_that_does_not_differ(self):
@@ -266,7 +284,7 @@ class Index(unittest.TestCase):
         g = gcat_rec("2026-060", "2026-04-01T10:00:00Z", "Chang Zheng 7A", "Something", "WEN")
         for veh, joined in (("ICBM", False), ("LM-7A", True), ("Unknown Rocket and Unknown Payload", True)):
             ev = chart_event("hist:f", "2026-04-01T11:00:00Z", veh, "X", far)
-            r = [x for x in self.build([ev], [g])["records"] if x["id"] == "hist:f"][0]
+            r = of(self.build([ev], [g]), "hist:f")
             self.assertEqual("gcat" in r, joined, veh)
         self.assertFalse(catalog._other_vehicle("Pegasus", "Pegasus XL"))
         self.assertTrue(catalog._other_vehicle("ICBM", "Lijian-1"))
@@ -357,7 +375,7 @@ class NotamForChina(unittest.TestCase):
         x = nfc_launch("nfc:6", "2025-03-01T10:00:00Z", "长征七号甲", "Wenchang",
                        [nn("ZJSA", "A0500/25", rg=ring(112.01, 18)), nn("ZGZU", "A0500/25", rg=ring(116, 20)),
                         nn("ZJSA", "A0501/25", rg=ring(113, 17))], gcat="2025-050")
-        r = self.recs(self.build([ev], [g], [x]))["hist:t"]
+        r = self.recs(self.build([ev], [g], [x]))["gcat:2025-050"]
         by = {(n["number"], n["fir"]): n for n in r["nfc_notices"]}
         self.assertTrue(by[("A0500/25", "ZJSA")]["chart"])
         self.assertNotIn("ring", by[("A0500/25", "ZJSA")])  # the charted area is drawn; NotamForChina's is the check
@@ -374,9 +392,10 @@ class NotamForChina(unittest.TestCase):
         x = nfc_launch("nfc:7", "2026-03-12T22:33:00Z", "长征二号丁", "Wenchang", [nn("ZLHW", "A0600/26")], gcat="2026-048")
         ix = self.build([ev], [g], [x])
         r = self.recs(ix)
-        self.assertNotIn("gcat:2026-048", r)
-        self.assertEqual((r["hist:y"]["gcat"], r["hist:y"]["join"]["pass"]), ("2026-048", 3))
-        self.assertEqual(r["hist:y"]["chart_time"], "2025-03-12T22:33:00Z")
+        self.assertNotIn("hist:y", r)
+        y = r["gcat:2026-048"]
+        self.assertEqual((y["chart"], y["join"]["pass"], y["join"]["via"]), (["hist:y"], 0, "nfc"))  # by NOTAM, first
+        self.assertEqual(y["chart_time"], "2025-03-12T22:33:00Z")
 
     def test_fold_windows_only_when_one_to_one(self):
         rows = [nn("ZHWH/ZPKM", rg=ring(1, 1)), nn("ZHWH", start="2023-01-01T00:00:00Z", end="2023-01-01T01:00:00Z"),
@@ -437,25 +456,24 @@ class PadAtNoSite(unittest.TestCase):
                          paths=[[sea, [-115.0, 33.0]]], actor=None)
         g = gcat_rec("2026-070", "2026-04-01T10:05:00Z", "Falcon 9", "Starlink 9-9", "VSFBS", country="US")
         recs = {r["id"]: r for r in self.build([ev], [g])["records"]}
-        self.assertEqual(set(recs), {"hist:s"})  # one record, not two
-        r = recs["hist:s"]
-        self.assertEqual((r["gcat"], r["site"], r["join"]["pass"]), ("2026-070", "Vandenberg", 1))
+        self.assertEqual(set(recs), {"gcat:2026-070"})  # one record, not two
+        r = recs["gcat:2026-070"]
+        self.assertEqual((r["chart"], r["site"], r["join"]["pass"]), (["hist:s"], "Vandenberg", 1))
         self.assertEqual(r["pad"], [SITES["VSFBS"]["lon"], SITES["VSFBS"]["lat"]])
-        self.assertEqual(r["chart_pad"], sea)
         self.assertEqual(r["path"]["kind"], "drawn")  # the charted line is still drawn as charted
         op = chart_event("hist:v", "2026-04-01T10:00:00Z", "SpaceX", "Starlink 9-9", sea, actor=None)
-        r = [x for x in self.build([op], [g])["records"] if x["id"] == "hist:v"][0]
+        r = of(self.build([op], [g]), "hist:v")
         self.assertEqual((r["gcat"], r["vehicle"]), ("2026-070", "Falcon 9"))  # joined by programme; GCAT names the vehicle
 
     def test_needs_the_same_vehicle_and_a_pad_at_no_site(self):
         sea = [-116.2, 33.5]
         g = gcat_rec("2026-071", "2026-04-01T10:05:00Z", "Falcon 9", "Starlink 9-9", "VSFBS", country="US")
         other = chart_event("hist:t", "2026-04-01T10:00:00Z", "Minotaur IV", "NROL-1", sea, actor=None)
-        r = [x for x in self.build([other], [g])["records"] if x["id"] == "hist:t"][0]
+        r = of(self.build([other], [g]), "hist:t")
         self.assertNotIn("gcat", r)  # another vehicle at the same time is another launch
         self.assertNotIn("chart_pad", r)
         cape = chart_event("hist:u", "2026-04-01T10:00:00Z", "Falcon 9", "Starlink 9-9", [-80.54, 28.46], actor=None)
-        r = [x for x in self.build([cape], [g])["records"] if x["id"] == "hist:u"][0]
+        r = of(self.build([cape], [g]), "hist:u")
         self.assertNotIn("gcat", r)  # a pad at a known site is measured from: the Cape is not Vandenberg
 
 
@@ -468,7 +486,8 @@ class NoPad(unittest.TestCase):
                                                          "closures": []}, [], [], NOW)
 
     def one(self, ev, launches):
-        return {r["id"]: r for r in self.build([ev], launches)["records"]}
+        ix = self.build([ev], launches)
+        return {**{r["id"]: r for r in ix["records"]}, ev["id"]: of(ix, ev["id"])}
 
     def test_joins_the_same_vehicle_nearest_in_time(self):
         far = gcat_rec("2026-080", "2026-04-04T09:00:00Z", "Falcon 9", "Starlink 1", "CC", country="US")
@@ -477,7 +496,7 @@ class NoPad(unittest.TestCase):
                         [far, near])
         r = recs["hist:n"]
         self.assertEqual((r["gcat"], r["vehicle"], r["join"]["pass"], r["join"]["hours"]), ("2026-081", "Falcon 9", 4, 23.0))
-        self.assertNotIn("gcat:2026-081", recs)  # listed once
+        self.assertEqual(sum(1 for k in recs if k.startswith("gcat:2026-08")), 2)  # listed once each
         self.assertEqual(catalog.build_index({"events": [chart_event("hist:n", "2026-04-01T10:00:00Z", "Falcon 9", None,
                                                                      None, actor=None)]},
                                              {"since": "2023-01-01", "sites": SITES, "launches": [near], "closures": []},
@@ -570,7 +589,7 @@ class Suborbital(unittest.TestCase):
         area = {"ring": [[-110, 20], [-109, 20], [-109, 21], [-110, 20]], "centroid": [-109.5, 20.5]}
         ev = chart_event("hist:m", "2026-03-01T10:00:00Z", "Minuteman", "GT 250", pad, areas=[area], actor="US")
         g = self.sub_rec("2026-M02", "2026-03-01T10:05:00Z", "missile", "VSFBS", vehicle="Minuteman 3")
-        r = [x for x in self.build([ev], [g])["records"] if x["id"] == "hist:m"][0]
+        r = of(self.build([ev], [g]), "hist:m")
         self.assertEqual((r["gcat"], r["kind"]), ("2026-M02", P.MISSILE))
         self.assertEqual(r["path"]["kind"], "estimated")
         self.assertIn("suborbital", r["path"]["basis"])
@@ -580,11 +599,11 @@ class Suborbital(unittest.TestCase):
         far_pad = [110.95, 19.61]  # Wenchang; the GCAT launches below are at Vandenberg
         ev = chart_event("hist:x", "2026-04-01T10:00:00Z", "Unknown", "Unknown", far_pad, actor="US")
         test = self.sub_rec("2026-M03", "2026-04-01T10:30:00Z", "missile", "VSFBS")
-        r = [x for x in self.build([ev], [test])["records"] if x["id"] == "hist:x"][0]
+        r = of(self.build([ev], [test]), "hist:x")
         self.assertNotIn("gcat", r)  # same country, but 6,000 NM apart: a missile needs to be near in place
         near = chart_event("hist:y", "2026-04-01T10:00:00Z", "Unknown", "Unknown", [-120.6, 34.6], actor="US")
         combat = self.sub_rec("2026-M04", "2026-04-01T10:30:00Z", "missile", "VSFBS", category="Weapon")
-        r = [x for x in self.build([near], [combat])["records"] if x["id"] == "hist:y"][0]
+        r = of(self.build([near], [combat]), "hist:y")
         self.assertNotIn("gcat", r)  # a missile fired in combat joins no charted event
         self.assertEqual(r["kind"], P.NOT_KNOWN)
 

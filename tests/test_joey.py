@@ -189,7 +189,7 @@ class OnRecords(unittest.TestCase):
         other_fir = jn("joey:b", "A0500/25", "ZGZU", "2025-02-01T00:00:00Z", "2025-02-01T01:00:00Z", [ring(116, 20)])
         nfc_too = jn("joey:c", "A0501/25", "ZJSA", "2025-02-01T00:00:00Z", "2025-02-01T01:00:00Z", [ring(113, 17)])
         ix, r = self.build([ev], [g], [charted, other_fir, nfc_too], [x])
-        rec = r["hist:t"]
+        rec = r["gcat:2025-050"]  # the charted event's notices are on the launch it joined
         by = {n["id"]: n for n in rec["joey_notices"]}
         self.assertTrue(by["joey:a"]["chart"])
         self.assertNotIn("rings", by["joey:a"])  # the charted area is drawn; Joey's is the check
