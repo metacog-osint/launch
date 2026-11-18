@@ -459,6 +459,52 @@ class PadAtNoSite(unittest.TestCase):
         self.assertNotIn("gcat", r)  # a pad at a known site is measured from: the Cape is not Vandenberg
 
 
+class NoPad(unittest.TestCase):
+    """A charted event with no line has no pad (the import takes the pad from a line's first point), so the joins by
+    place cannot run: Falcon 9/Optus-X (17 Nov 2024), Progress MS-34 (25 Apr 2026), Starship Flight 8 were listed twice."""
+
+    def build(self, events, launches):
+        return catalog.build_index({"events": events}, {"since": "2023-01-01", "sites": SITES, "launches": launches,
+                                                         "closures": []}, [], [], NOW)
+
+    def one(self, ev, launches):
+        return {r["id"]: r for r in self.build([ev], launches)["records"]}
+
+    def test_joins_the_same_vehicle_nearest_in_time(self):
+        far = gcat_rec("2026-080", "2026-04-04T09:00:00Z", "Falcon 9", "Starlink 1", "CC", country="US")
+        near = gcat_rec("2026-081", "2026-04-02T09:00:00Z", "Falcon 9", "Starlink 2", "CC", country="US")
+        recs = self.one(chart_event("hist:n", "2026-04-01T10:00:00Z", "/ Falcon 9 / Optus X", None, None, actor=None),
+                        [far, near])
+        r = recs["hist:n"]
+        self.assertEqual((r["gcat"], r["vehicle"], r["join"]["pass"], r["join"]["hours"]), ("2026-081", "Falcon 9", 4, 23.0))
+        self.assertNotIn("gcat:2026-081", recs)  # listed once
+        self.assertEqual(catalog.build_index({"events": [chart_event("hist:n", "2026-04-01T10:00:00Z", "Falcon 9", None,
+                                                                     None, actor=None)]},
+                                             {"since": "2023-01-01", "sites": SITES, "launches": [near], "closures": []},
+                                             [], [], NOW)["counts"]["chart_no_pad"], 1)
+
+    def test_a_window_counts_from_its_end_and_nothing_before_it_opens(self):
+        g = gcat_rec("2026-090", "2026-04-23T08:29:00Z", "Angara-1.2", "Kosmos", "VOST", country="RU")
+        ev = dict(chart_event("hist:w", "2026-04-13T21:00:00Z", "Angara 1.2", "Unk Payload", None, actor="RU"),
+                  kind="unknown", day_end=29, window_end_hhmm="2400")
+        self.assertEqual(self.one(ev, [g])["hist:w"]["join"]["hours"], 0.0)  # inside 13-29 Apr
+        early = dict(ev, time="2026-04-25T21:00:00Z", day_end=30)
+        self.assertNotIn("gcat", self.one(early, [g])["hist:w"])  # launched two days before the window opened
+        self.assertEqual(catalog.chart_window(dict(ev, day_end=None, window_end_hhmm="1700", time="2025-10-22T09:00:00Z"))[1].hour, 17)
+
+    def test_another_vehicle_country_or_a_return_joins_nothing(self):
+        g = gcat_rec("2026-070", "2026-04-01T10:05:00Z", "Falcon 9", "Starlink 9-9", "VSFBS", country="US")
+        for ev in (chart_event("hist:a", "2026-04-01T10:00:00Z", "Electron", "Starlink 9-9", None, actor=None),
+                   chart_event("hist:b", "2026-04-01T10:00:00Z", "Falcon 9", "Starlink 9-9", None, actor="CN"),
+                   chart_event("hist:c", "2026-04-01T10:00:00Z", "Falcon 9", "Dragon Return", None, actor=None)):
+            self.assertNotIn("gcat", self.one(ev, [g])[ev["id"]], ev["id"])
+
+    def test_vehicle_names(self):
+        self.assertEqual(P.vehicle("RS-24 Yars ICBM"), "Yars (missile)")
+        self.assertEqual(P.vehicle("/ Falcon 9 / Optus X"), "Falcon 9")
+        self.assertEqual(P.vehicle("Super Heavy Block 1/2"), "Starship")
+
+
 class Suborbital(unittest.TestCase):
     """GCAT's suborbital launches and missile firings (LaunchCode S, Y, A, M, L): kinds, orbit, paths and joins."""
 

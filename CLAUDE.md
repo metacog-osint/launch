@@ -51,7 +51,12 @@ The workflow (`.github/workflows/update.yml`) runs tests, collect, build and che
   launch site, a path drawn from a point downrange, joins by the same vehicle or programme instead of place and the
   record takes GCAT's pad and vehicle name, keeping the charted start as `chart_pad`), or within 72 h,
   200 NM and the same vehicle or programme (pass 2); a charted event holding a NOTAM that NotamForChina lists for a
-  GCAT launch (pass 3). A joined record takes GCAT's launch time.
+  GCAT launch (pass 3); a charted event with no pad (no line was charted, and the pad is a line's first point) joins
+  the GCAT launch of the same vehicle (else, where neither vehicle differs, the same programme) and country, nearest in
+  time, from 3 h before its window opens to 72 h after it closes (`chart_window()`: "21-30 Apr", "0900-1700"); a
+  return or reentry joins nothing (pass 4, 18 Nov 2026: 17 events onto 9 launches, among them Falcon 9/Optus-X,
+  Progress MS-34, Starship Flight 8 and RS-24 Yars, read as GCAT's "Yars (missile)"; a record folded by a join keeps
+  its `sel=` address). A joined record takes GCAT's launch time.
 - **Launch kinds** (16 Nov 2026: every one labelled, and each kind easy to show or hide on the map, the list and the
   downloads): every record has a `kind` (`programs.KINDS`), read from GCAT's
   LaunchCode first letter (planet4589.org/space/gcat/web/launch/lcols.html) and Category: Orbital (O, D, N),

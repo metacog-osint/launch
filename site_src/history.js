@@ -113,7 +113,7 @@ function readHash() {
     const lo = m ? num(m[1]) : null, hi = m ? num(m[2]) : null;
     if (lo !== null || hi !== null) s.r[g.k] = lo !== null && hi !== null && lo > hi ? [hi, lo] : [lo, hi];
   });
-  s.q = p.get("q") || ""; s.from = p.get("from") || ""; s.to = p.get("to") || ""; s.sel = p.get("sel") || "";
+  s.q = p.get("q") || ""; s.from = p.get("from") || ""; s.to = p.get("to") || ""; s.sel = p.get("sel") || ""; if (byId.get(s.sel)) s.sel = byId.get(s.sel).id;
   if (p.get("areas") === "0") s.areas = false;
   if (p.get("sort")) { s.sort = p.get("sort"); s.dir = p.get("dir") === "1" ? 1 : -1; }
   return s;
@@ -785,6 +785,9 @@ export async function initHistory(ix, hist) {
   IX = ix; HIST = hist;
   if (Array.isArray(IX.kinds) && IX.kinds.length) KINDS.splice(0, KINDS.length, ...IX.kinds);
   IX.records.forEach((r) => byId.set(r.id, r));
+  // A record later folded into another by a join (a GCAT launch a charted event joined, a second charted placemark of
+  // one launch) keeps its address: sel=gcat:<tag> or sel=<charted id> opens the record that holds it.
+  IX.records.forEach((r) => [r.gcat && "gcat:" + r.gcat, ...(r.chart || [])].forEach((k) => { if (k && !byId.has(k)) byId.set(k, r); }));
   HIST.events.forEach((e) => { if (!chartById.has(e.id)) chartById.set(e.id, []); chartById.get(e.id).push(e); });
   rekey();
   applySaved();

@@ -74,9 +74,9 @@ _V = [  # (pattern on the upper-cased name, canonical name); the first match win
     (r"^KAIROS", "Kairos"),
     (r"^ERIS", "Eris"),
     (r"^SPECTRUM", "Spectrum"),
-    (r"^YARS", "Yars (missile)"),
-    (r"^BULAVA", "Bulava (missile)"),
-    (r"^SARMAT", "Sarmat (missile)"),
+    (r"^(?:RS-?24 )?YARS", "Yars (missile)"),
+    (r"^(?:RSM-?56 )?BULAVA", "Bulava (missile)"),
+    (r"^(?:RS-?28 )?SARMAT", "Sarmat (missile)"),
 ]
 _V = [(re.compile(p), v) for p, v in _V]
 _V_UNKNOWN = re.compile(r"^(?:\?+|UNK(?:NOWN)?(?: LV)?|Z|UTC|-|)$")
@@ -84,7 +84,7 @@ _V_UNKNOWN = re.compile(r"^(?:\?+|UNK(?:NOWN)?(?: LV)?|Z|UTC|-|)$")
 
 def vehicle(raw: str | None) -> str:
     """One name per vehicle. Unread names come back as written (trimmed); none at all is NOT_KNOWN."""
-    t = re.sub(r"\s+", " ", (raw or "").replace("�", " ")).strip()
+    t = re.sub(r"\s+", " ", (raw or "").replace("�", " ")).strip().lstrip("/ ")
     u = t.upper()
     if _V_UNKNOWN.match(u) or " OR " in u:
         return NOT_KNOWN if not (" OR " in u) else t

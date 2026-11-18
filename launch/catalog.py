@@ -39,6 +39,8 @@ AREA_NM = 2500        # closure areas farther than this from the pad do not set 
 SITE_NM = 60          # a pad belongs to the nearest GCAT site within this distance
 MATCH_HOURS = 3       # A charted event and a GCAT launch are one launch within this many hours ...
 MATCH_NM = 200        # ... and this far apart (pad to GCAT site), or of the same country
+NOPAD_HOURS = 72      # a charted event with no pad: a GCAT launch of its vehicle this long after its window
+NOPAD_EARLY_HOURS = 3  # ... or this long before it opens
 REGION_RE = re.compile(r"\?$|\bVarious\b|\bMobile\b|(?<!On-)\bSea\b|\bOcean\b|launch location|Launch Area|Barentsovo",
                        re.I)  # a GCAT site that is a region, not a pad ("Mobile launchers in Iran?")
 LL2_FLOWN = {"Success", "Failure", "Partial Failure"}
@@ -888,6 +890,32 @@ def _hours_apart(a: str | None, b: str | None) -> float | None:
     return abs((x - y).total_seconds()) / 3600 if x and y else None
 
 
+def chart_window(e: dict) -> tuple[datetime, datetime] | None:
+    """A charted event's window from its name: the time to the end day ("21-30 Apr", to the day's end) or the end time
+    ("0900-1700", the next day when it is earlier); a single time is a window of no length."""
+    t = _dt(e.get("time"))
+    if not t or e.get("time_basis") in (None, "none"):
+        return None
+    hhmm = e.get("window_end_hhmm")
+    hh, mm = (int(hhmm[:2]), int(hhmm[2:])) if hhmm and len(hhmm) == 4 and hhmm.isdigit() else (None, None)
+    if hh is not None and (hh > 23 or mm > 59):
+        hh = mm = None
+    end = t
+    if e.get("day_end"):
+        y, m = t.year, t.month
+        if e["day_end"] < t.day:
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        try:
+            end = t.replace(year=y, month=m, day=e["day_end"], hour=23 if hh is None else hh, minute=59 if hh is None else mm)
+        except ValueError:
+            return t, t
+    elif hh is not None:
+        end = t.replace(hour=hh, minute=mm)
+        if end < t:
+            end += timedelta(days=1)
+    return t, max(t, end)
+
+
 def _site_reps(points: list[tuple[str, list[float]]]) -> dict[str, list[float]]:
     """Each site's representative pad: the median of the pads seen there (the charted notices, then Launch Library 2)."""
     by: dict[str, list] = {}
@@ -1115,6 +1143,41 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             join[e["id"]] = {"hours": None if h is None else round(h, 1), "nm": None, "pass": 3,
                              "same": bool(same_vehicle(P.vehicle(e.get("vehicle")), g_info[gid]["vehicle"]))}
             nfc_counts["chart_by_notam"] += 1
+
+    # Pass 4: a charted event with no pad (no line was charted for it, and the pad is a line's first point) has no
+    # place for passes 1-3 to measure from. It joins the GCAT launch of the same vehicle (else, where neither vehicle
+    # differs, the same programme) and the same country, nearest in time, from NOPAD_EARLY_HOURS before its window
+    # opens to NOPAD_HOURS after it closes (a charted name often carries a planned time a launch slipped from; a
+    # launch before the window's notices is not theirs). A return or reentry joins nothing.
+    nopad = 0
+    for e in events:
+        if e["id"] in chart_to_g or e.get("pad") or e["kind"] not in ("launch", "upcoming", "unknown"):
+            continue
+        win = chart_window(e)
+        e_veh = P.vehicle(e.get("vehicle"))
+        e_progs, e_mtype = P.programmes(e.get("payload"), e.get("label"))
+        if not win or e_mtype == P.REENTRY or e.get("cancelled"):
+            continue
+        best = None
+        for g in gcat:
+            gi = g_info[g["id"]]
+            t = _dt(gi["time"])
+            if gi["kind"] == P.COMBAT_LAUNCH or not t or (e.get("actor") and g.get("country") and e["actor"] != g["country"]):
+                continue
+            sv = same_vehicle(e_veh, gi["vehicle"])
+            if not (sv or (sv is None and set(e_progs) & set(gi["progs"]))):
+                continue
+            lo, hi = win
+            h = (lo - t).total_seconds() / 3600 if t < lo else (t - hi).total_seconds() / 3600 if t > hi else 0.0
+            if (t < lo and h > NOPAD_EARLY_HOURS) or (t > hi and h > NOPAD_HOURS):
+                continue
+            if best is None or h < best[0]:
+                best = (h, g["id"], bool(sv))
+        if best:
+            chart_to_g[e["id"]] = best[1]
+            join[e["id"]] = {"hours": round(best[0], 1), "nm": None, "pass": 4, "same": True, "no_pad": True,
+                             "by": "vehicle" if best[2] else "programme"}
+            nopad += 1
     g_to_chart: dict[str, list] = {}
     for e in events:
         if e["id"] in chart_to_g:
@@ -1491,7 +1554,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     kinds = {k: sum(1 for r in recs if r.get("kind") == k) for k in P.KINDS}
     gcat_kinds = {k: sum(1 for gi in g_info.values() if gi["kind"] == k) for k in P.KINDS if k != P.NOT_KNOWN}
     counts = {"chart": len(events), "gcat": len(gcat), "gcat_kinds": gcat_kinds, "kinds": kinds,
-              "chart_joined": len(chart_to_g), "gcat_joined": len(g_to_chart),
+              "chart_joined": len(chart_to_g), "chart_no_pad": nopad, "gcat_joined": len(g_to_chart),
               "provisional": sum(1 for r in recs if r.get("provisional")),
               "upcoming": sum(1 for r in recs if r["status"] == "upcoming"),
               "paths": {k: sum(1 for r in recs if (r.get("path") or {}).get("kind") == k) for k in ("drawn", "estimated")}}
