@@ -52,6 +52,33 @@ function table(head, rows, onRow) {
 }
 const put = (box, node) => { box.textContent = ""; box.appendChild(node); };
 const muted = (t) => el("p", "muted small", t);
+// On a phone a table of more than FOLD + 2 rows shows its first FOLD (each table lists the soonest or largest first)
+// and a "Show all" button; wider screens show every row. The fold is CSS (style.css, .fold-box), so nothing is
+// hidden from a wide screen or a printout. Same rule as Cordon, Elements and Headwind. The History tab's list has
+// its own paging and is left.
+const FOLD = 10;
+function foldLong(box, rows) {
+  const old = box.nextElementSibling;
+  if (old && old.classList.contains("fold-more")) old.remove();
+  box.classList.remove("fold-box", "open");
+  if (rows.length <= FOLD + 2) return;
+  rows.forEach((r, n) => r.classList.toggle("fold", n >= FOLD));
+  box.classList.add("fold-box");
+  const btn = el("button", "fold-more", "Show all " + rows.length);
+  btn.type = "button";
+  btn.setAttribute("aria-expanded", "false");
+  btn.addEventListener("click", () => {
+    const open = box.classList.toggle("open");
+    btn.setAttribute("aria-expanded", String(open));
+    btn.textContent = open ? "Show the first " + FOLD : "Show all " + rows.length;
+    if (!open) box.scrollIntoView({ block: "nearest" });
+  });
+  box.after(btn);
+}
+const folds = (panel) => $(panel).querySelectorAll(".tbl-wrap").forEach((box) => {
+  const t = box.querySelector(":scope > table");
+  foldLong(box, t ? [...t.querySelectorAll(":scope > tbody > tr")] : []);
+});
 const poly = (ring, props) => ({ type: "Feature", properties: props, geometry: { type: "Polygon", coordinates: [N.geodesic(ring)] } }); // edges as great circles
 
 async function getJSON(p) { const r = await fetch(p, { cache: "no-cache" }); if (!r.ok) throw new Error(p + " " + r.status); return r.json(); }
@@ -112,6 +139,7 @@ function liveTables() {
     ((a.windows || []).slice(0, 2).map((w) => fmt(w.start) + " to " + fmt(w.end, { date: false })).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
       + (a.expect ? "; " + expectText(a.expect) : "")] }));
   put($("area-table"), rows.length ? table(["Source", "Notice", "Where", "Windows"], rows, (r) => pickLive(r.key)) : muted("No live areas."));
+  folds("live");
 }
 
 function pickLive(key) {
@@ -147,6 +175,7 @@ function patterns() {
     Object.entries(pat.windows).map(([k, w]) => ({ cells: [k, w.notams, w.median_h, w.p90_h] }))));
   put($("hour-table"), table(["Country", "00–05", "06–11", "12–17", "18–23"], Object.entries(pat.hours).map(([a, h]) => ({ cells: [
     a === "other" ? "Other" : mark(a), ...[0, 6, 12, 18].map((s) => h.slice(s, s + 6).reduce((x, y) => x + y, 0))] }))));
+  folds("patterns");
   $("show-zones").addEventListener("change", (ev) => {
     map.set("zones", ev.target.checked ? { type: "FeatureCollection", features: pat.recurring.map((z, i) => poly(z.ring, { key: "zone:" + i })) } : null);
   });
