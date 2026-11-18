@@ -317,9 +317,14 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     nsf_path = root / "history" / "nsf_links.json"
     nsf_doc = json.loads(nsf_path.read_text(encoding="utf-8")) if nsf_path.exists() and nfc_doc else None
     countries = json.loads((root / "doctrine" / "kit" / "geo" / "countries.json").read_text(encoding="utf-8"))
+    # Sites where GCAT's row is contradicted by the launching state's own report (history/site_fixes.json, reviewed).
+    fix_path = root / "history" / "site_fixes.json"
+    fixes = json.loads(fix_path.read_text(encoding="utf-8"))["fixes"] if fix_path.exists() else None
     index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
                                 snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries),
-                                nsf_doc=nsf_doc)
+                                nsf_doc=nsf_doc, site_fixes=fixes)
+    for tag in (index.get("site_fixes") or {}).get("stale") or []:
+        print(f"site_fixes.json: {tag} no longer has the site its fix names in GCAT; review and drop the fix")
     files = {"data/snapshot.json": dump(snap), "data/feed.geojson": dump(feed.build_feed(snap)),
              "data/sources.json": dump(sources_doc(root)),
              # The charted map's lines are an analyst's guesses, not flight paths: not published.

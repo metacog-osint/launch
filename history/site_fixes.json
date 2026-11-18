@@ -1,0 +1,19 @@
+{
+  "about": "Launch sites where GCAT's launch table gives a site that the launching state's own report contradicts. Each fix names the site GCAT gives, so a fix goes quiet once GCAT corrects the row or changes it to something else (the build lists those as stale). Reviewed by hand; add one only with a published report that names the site.",
+  "fixes": [
+    {
+      "tag": "2026-218",
+      "gcat_site_code": "JQ",
+      "gcat_pad": "LC43/94",
+      "site_code": "TYSC",
+      "source": {
+        "publisher": "CGTN",
+        "title": "China launches Zhuzhou Space Interstellar PIESAT-2 13-16 satellites",
+        "url": "https://news.cgtn.com/news/2026-09-20/China-launches-Zhuzhou-Space-Interstellar-PIESAT-2-13-16-satellites-1QAqQwIxpAI/p.html",
+        "date": "2026-09-20"
+      },
+      "check": "Both closure areas (NOTAMs A4456/26 and A4457/26) lie on one bearing from Taiyuan, 188 deg at 330 and 518 NM, the launch azimuth of a 97.5 deg orbit from Taiyuan (about 190 deg); from Jiuquan they lie at 129 and 140 deg.",
+      "reviewed": "2026-11-18"
+    }
+  ]
+}
