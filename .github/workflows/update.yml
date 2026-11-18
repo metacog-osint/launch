@@ -18,6 +18,8 @@ name: update
 # Secrets: CLOUDFLARE_PAGES_TOKEN and repo variable CLOUDFLARE_ACCOUNT_ID. FAA NMS-API: secrets NMS_CLIENT_ID and
 # NMS_CLIENT_SECRET (production keys, set by hand), optional repo variable NMS_ENV (default prod). The nms lane's
 # state (last bulk pull, kept notices) rides in data/snapshot.json, so the cache below also keeps the FAA's limits.
+# The GPS/GNSS NOTAM subset of the same pulls (launch/gnss.py, for Noisefloor) keeps its state and its day files
+# in data/gnss/, cached with the rest; a lost cache fetches the published day files back.
 on:
   push:
     branches: [main]
@@ -48,6 +50,7 @@ jobs:
           path: |
             data/snapshot.json
             data/ledger.json
+            data/gnss
           key: launch-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: launch-state-
       - name: Say so when there was no state
@@ -71,6 +74,7 @@ jobs:
           path: |
             data/snapshot.json
             data/ledger.json
+            data/gnss
           key: launch-state-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Deploy site/ to Cloudflare Pages
         env:

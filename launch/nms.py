@@ -313,9 +313,10 @@ def apply(store: dict, feats: list[dict], past, now: datetime, replace_all: bool
     return {"notices": out, "counts": counts}
 
 
-def pull(client: Client, prev: dict, past, now: datetime) -> dict:
+def pull(client: Client, prev: dict, past, now: datetime, on_features=None) -> dict:
     """One run: a bulk pull when the last is over BULK_HOURS old (or there is none) or the last pull is too old
-    for a delta, else a delta from the last pull. Returns the lane's state for the snapshot."""
+    for a delta, else a delta from the last pull. Returns the lane's state for the snapshot. on_features(feats,
+    mode) sees every feature read, for other subsets of the same pull (launch/gnss.py)."""
     bulk_at, pulled_to = _dt(prev.get("bulk_at")), _dt(prev.get("pulled_to"))
     store = {_key(n): n for n in prev.get("notices") or []}
     if (bulk_at is None or now - bulk_at >= timedelta(hours=BULK_HOURS) or pulled_to is None
@@ -332,6 +333,8 @@ def pull(client: Client, prev: dict, past, now: datetime) -> dict:
         feats = client.delta(pulled_to - timedelta(seconds=OVERLAP_S))
         res = apply(store, feats, past, now)
         mode = "delta"
+    if on_features:
+        on_features(feats, mode)
     notices = sorted(res["notices"].values(), key=lambda n: (n.get("start") or "", n.get("number") or ""))
     kinds: dict[str, int] = {}
     for n in notices:
