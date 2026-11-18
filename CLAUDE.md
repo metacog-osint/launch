@@ -38,55 +38,56 @@ unions the committed baseline, the cache, the published ledger and Orbit's launc
 
 ## History (`data/launches.json`, one list)
 - **Sources** (`sources`): `chart` (Launch's charted notices: a hand-built Google My Maps map of closure areas,
-  NOTAM texts, analyst lines and sites, 2022 on, imported from an export), `gcat` (GCAT since
+  NOTAM texts, analyst lines and sites, 2022 on; a notice source, never a launch), `gcat` (GCAT since
   `catalog.LEDGER_SINCE` 2012-01-01: orbital, suborbital, missiles), `ll2` (schedule), `nfc` (Chinese launches
-  2012-2026), `joey` (launch NOTAMs, mostly China, Dec 2020 on), `wayback`, `saved`. `chart` lists joined charted
-  events; `chart_time`, `chart_labels` keep their names. Ids (`hist:`, `gcat:`, `nfc:`, `ll2:`) are stable, and a
-  record folded by a join keeps its `sel=` address. A joined record takes GCAT's launch time.
-- **Charted-event joins** (`catalog.py`): pass 1, GCAT launch within 3 h and 200 NM, or same country when vehicles
-  do not differ (`_other_vehicle()`); suborbital and missiles need the 200 NM; combat joins none; a charted pad at no
-  site joins by vehicle or programme and takes GCAT's pad (`chart_pad` keeps the charted one). Pass 2: 72 h, 200
-  NM, same vehicle or programme. Pass 3: holds a NOTAM NotamForChina lists for a GCAT launch. Pass 4: no pad, so
-  same vehicle (else programme) and country, nearest in time, 3 h before the window (`chart_window()`) to 72 h after.
-  A return or reentry joins nothing.
+  2012-2026), `joey` (launch NOTAMs, mostly China, Dec 2020 on), `wayback`, `saved`. `chart_time`, `chart_labels`
+  keep the charted names. Ids (`hist:`, `gcat:`, `nfc:`, `ll2:`) are stable, and a record folded by a join keeps its
+  `sel=` address. A joined record takes GCAT's launch time.
+- **Charted notices** (`catalog.py`): each charted event joins its GCAT launch (`gcat:<tag>` gains `chart`,
+  `chart_joins`). Pass 1: within 3 h and 200 NM, or same country when vehicles do not differ (`_other_vehicle()`);
+  suborbital and missiles need the 200 NM; combat none; a charted pad at no site joins by vehicle or programme.
+  Pass 0: a NOTAM NotamForChina lists for the launch (no vehicle check), else one Joey0609's window join puts on it
+  (not when vehicles differ). Pass 2: 72 h, 200 NM, same vehicle or programme. Pass 4, no pad: same vehicle (else
+  programme) and country, nearest, 3 h before the window (`chart_window()`) to 72 h after. Returns join nothing.
+  An event no launch joins is a notice set (status "notice", `notice_set`, no path), shown under the notices option.
 - **Notice joins:** by NOTAM (number and a shared FIR) first. Joey0609 and NGA: window holds the launch (Joey 2 h
   either side, the notice's state), pad within 5,000 NM, nearest; a window over 7 days only when one launch
-  qualifies; orbital launches only. Archived FAA TFR: at most 7 days, 2 h either side, pad within 100 NM, any
-  non-combat launch. Forum threads (`nsf_join`): timed, nearest Chinese launch within `NSF_HOURS` (3) whose vehicle
-  does not differ; untimed, the day's only launch of that vehicle sharing a payload word; undated, none. Saved
-  notices: same NOTAM, else as Joey (non-combat), else a record of their own, status "notice".
+  qualifies; orbital launches only. Archived FAA TFR: at most 7 days, 2 h either side, pad within 100 NM, any non-
+  combat launch. Forum threads (`nsf_join`): timed, nearest Chinese launch within `NSF_HOURS` (3) whose vehicle does
+  not differ; untimed, the day's only launch of that vehicle sharing a payload word; undated, none. Saved notices:
+  same NOTAM, else as Joey (non-combat), else their own record ("notice").
 - **One notice per NOTAM:** shown charted, then Joey0609 (carries text), then NotamForChina; the rest are checks.
-- **Launch kinds** (`programs.KINDS`, each shown or hidden on map, list and downloads via `kind=`): GCAT LaunchCode
-  first letter and Category: Orbital (O, D, N), Suborbital rocket (S), Crewed suborbital (Y), Atmospheric test (A),
+- **Launch kinds** (`programs.KINDS`, shown or hidden on map, list and downloads, `kind=`): GCAT LaunchCode first
+  letter and Category: Orbital (O, D, N), Suborbital rocket (S), Crewed suborbital (Y), Atmospheric test (A),
   Missile test (M), Lofted missile test (L), Combat launch (M with Weapon or Interceptor Weapon), Not known (a
-  charted notice or notice set no GCAT launch joins). Suborbital: orbit "Suborbital", apogee, range (km), category.
-  GCAT "?" sites are read as that site (`site_uncertain`); regions carry `region`.
-- **Backfill:** Orbit publishes orbital launches only; run `python tools/launch.py backfill ../orbit/data/raw` after
-  an Orbit run for suborbital launches and missiles. Orbit's later reading wins the merge. GIK-2 is Svobodny, not Vostochny; KLA is Kiritimati (sea launch).
-- **Pads and site names:** `catalog.orient_paths()` reverses a charted line whose last point, not first, is a site
-  (within `SITE_NM`) and moves a pad at no site to a line start that is one. A joined launch takes GCAT's site name
-  when within `SITE_NM`, else the site nearest the charted pad.
-- **Flight paths:** a charted line is drawn as charted, azimuth to its farthest point within a quarter globe, else
-  its first leg (`drawn_heading`). Otherwise estimated from the closure areas' bearing, payload inclination, orbit
-  class, or the site's main corridor; Cape south-going paths follow `programs.POLAR_CORRIDOR` (turn point off Boca
-  Raton, approximate; `path.via`). Suborbital and missiles: as charted, or towards the farthest area, else none.
-  Each record says its basis. The charted lines are analyst guesses, not flight paths: the charted-map plan in
-  `.claude/` moves every record to one computed method and drops the lines.
-- **Path crosses** (`overfly.py`): `over`, per path `[{cc, from, to}]` in NM, from the kit's de facto borders; 5 NM
-  samples, land only, gaps under 25 NM closed. A ground track is not airspace (the card says so). Filter `ovf=`.
-- **Ranges** (`history.js` `RANGES`, `inc=`, `far=`, `plen=` as `lo-hi`, open ends): payload inclination, farthest
-  area from the pad (`catalog.farthest_nm()`, charted and NotamForChina areas, not live), charted path length
-  (`path.len_nm`). A launch without the number hides while its range is set.
+  notice set no GCAT launch joins). Suborbital: orbit "Suborbital", apogee, range (km), category. GCAT "?" sites are
+  read as that site (`site_uncertain`); regions carry `region`.
+- **Backfill:** Orbit publishes orbital launches only: run `python tools/launch.py backfill ../orbit/data/raw` after
+  an Orbit run for suborbital launches and missiles. Orbit's later reading wins. GIK-2 is Svobodny; KLA Kiritimati.
+- **Pads:** a charted event's pad is its first line's start; `orient_paths()` turns a line whose last point, not
+  first, is a site (within `SITE_NM`). A joined record takes GCAT's pad and site (LL2's pad when known); for a
+  coarse GCAT site (`coarse_site()`: region, sea or air launch) the charted point stands within `MATCH_NM` of
+  GCAT's, or, for a region, when nearer the charted areas.
+- **Flight paths** (`infer_path()`, one method; the charted lines are analyst guesses, never drawn or published):
+  the bearing to the closure areas 50-2,500 NM out (150 from a coarse point; the farthest of the largest group
+  within 15 deg, `main_area()`), unless over 55 deg (`CROSS_DEG`, past a dog-leg) from both azimuths the record's
+  own inclination allows; else the inclination (payload, station, orbit class, the last launch of the programme),
+  GTO east, or the site's main corridor. Cape south-going paths follow `programs.POLAR_CORRIDOR` (approximate;
+  `path.via`). Suborbital and missiles: towards the farthest area, else none. Each has a basis.
+- **Path crosses** (`overfly.py`): `over`, `[[{cc, from, to}]]` in NM, kit's de facto borders, 5 NM samples, land
+  only, gaps under 25 NM closed. A ground track is not airspace. Filter `ovf=`.
+- **Ranges** (`history.js` `RANGES`, `inc=`, `far=` as `lo-hi`): payload inclination; farthest area from the pad
+  (`catalog.farthest_nm()`). A launch without the number hides while its range is set.
 - **Downloads** (`export.js`): CSV, GeoJSON, KML of the filtered launches, only data the page holds; antimeridian
   cut; UTC plus the viewer's named zone; formula-guarded CSV; sources and licences in every file.
 - **Maps:** great-circle edges (`geodesic()`), globe toggle (`launch.projection`), `fitCoords()`. Filters live in
-  the address (`#history?veh=...`); `history.js` `LEGACY` reads pre-15 Nov 2026 words.
-- **Paste tab:** trajectory from a pad (`traj.js`, dog-leg flag at 25 NM off the great circle); saved notices stay
-  in the browser (`localStorage` `launch.saved`).
+  the address (`#history?veh=...`); `history.js` `LEGACY` and `OLD_PATH` read old words.
+- **Paste tab:** trajectory from a pad (`traj.js`, dog-leg flag at 25 NM off its great circle); saved notices
+  stay in the browser (`launch.saved`).
 - **Source rules:** NotamForChina (Apache-2.0, `nfc.SHA`) and Joey0609/notams (MIT, `joey.SHA`) are fetched into
   git-ignored folders; `build_site` refuses without their licence files and publishes them. `joey.launch_related`
   never keeps a cancellation, a window over 62 days or GA/aerobatics; SOURCE lines dropped. `wayback`: one request
-  a second at most, no refetch, detail pages asked at the list capture's time (FAA reuses names), contacts not kept.
+  a second, no refetch, detail pages at the list capture's time (FAA reuses names), contacts not kept.
   The NASASpaceflight forum and its archived copies are never fetched; threads come from NotamForChina's list.
 
 ## Public gate for the map

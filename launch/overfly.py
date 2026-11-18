@@ -1,15 +1,14 @@
 """Overflight: the countries a History flight path's ground track crosses (the fourth of the old launch mapper's features;
 the old tool only guessed "likely crosses land" from the azimuth).
 
-A path is the line the History map draws: as charted (each leg a great circle) or estimated (a great circle from the
-pad on the inferred azimuth, to the farthest closure area or catalog.DEFAULT_PATH_NM; from the Cape, a south-going
-one first runs to the polar corridor's turn point, `via`, and takes its azimuth from there). It is sampled every SAMPLE_NM
-along the track and each sample is looked up in the doctrine kit's Natural Earth country outlines
-(doctrine/kit/geo/countries.json: admin 0, de facto borders, rings thinned to 0.05 deg, so a border is good to a few
-NM and a country narrower than SAMPLE_NM across the track can be missed). Land only: territorial waters and EEZs are
-not counted. The result is one list per path (an estimated path has one; a charted event can have two or three,
-longest first, the one catalog.infer_path() takes its azimuth from), each a list of runs in order along the track,
-{"cc", "from", "to"} in NM from the path's start (the pad, for an estimated path).
+A path is the line the History map draws, always estimated (a great circle from the pad on the inferred azimuth, to
+the farthest closure area or catalog.DEFAULT_PATH_NM; from the Cape, a south-going one first runs to the polar
+corridor's turn point, `via`, and takes its azimuth from there). It is sampled every SAMPLE_NM along the track and
+each sample is looked up in the doctrine kit's Natural Earth country outlines (doctrine/kit/geo/countries.json:
+admin 0, de facto borders, rings thinned to 0.05 deg, so a border is good to a few NM and a country narrower than
+SAMPLE_NM across the track can be missed). Land only: territorial waters and EEZs are not counted. The result is a
+list of one path (kept a list so the page and downloads read it as before), each a list of runs in order along the
+track, {"cc", "from", "to"} in NM from the path's start (the pad, for an estimated path).
 
 Crossing a country's ground track is not flying through its airspace: most of a launch's track is above any
 airspace within a few hundred NM of the pad. The History tab says so where it shows this.
@@ -118,7 +117,8 @@ def track_samples(lon, lat, az, nm, step=SAMPLE_NM):
 
 
 def line_samples(line, step=SAMPLE_NM):
-    """A charted path (a few points, each leg a great circle) -> samples with distance from its first point."""
+    """A line (a few points, each leg a great circle: an estimated path's legs to its turn point) -> samples with
+    distance from its first point."""
     out, base = [], 0.0
     for a, b in zip(line, line[1:]):
         leg = leg_samples(a, b, step)
@@ -154,14 +154,11 @@ def runs(world: World, samples) -> list[dict]:
     return [{"cc": r["cc"], "from": round(r["from"]), "to": round(r["to"])} for r in joined]
 
 
-def overflight(world: World, record: dict, chart_paths: list[list]) -> list[list[dict]] | None:
-    """The countries each of a record's flight paths crosses (one list per path), or None when it has no path."""
+def overflight(world: World, record: dict) -> list[list[dict]] | None:
+    """The countries a record's estimated flight path crosses (a list of one path), or None when it has no path."""
     path = record.get("path")
     if not path:
         return None
-    if path.get("kind") == "drawn":
-        lines = sorted((p for p in chart_paths if len(p) >= 2), key=len, reverse=True)  # infer_path()'s max(key=len)
-        return [runs(world, line_samples(p)) for p in lines] or None
     pad = record.get("pad")
     if not pad or path.get("az") is None or not path.get("nm"):
         return None

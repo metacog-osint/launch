@@ -35,8 +35,8 @@
 
 <main class="wrap">
   <p class="notice small">Not for navigation or flight planning. Shapes are read from the notices' text or charted
-    by hand, and either can be wrong; every area says which. Flight paths other than charted ones are
-    estimates from an inferred azimuth, and each says what it was inferred from. Worldwide NOTAMs arrive once the
+    by hand, and either can be wrong; every area says which. Flight paths are estimates
+    from an inferred azimuth, and each says what it was inferred from. Worldwide NOTAMs arrive once the
     FAA grants Launch access to its NOTAM service (requested 13 Nov 2026).</p>
 
   <section class="panel" id="live" role="tabpanel" aria-labelledby="tab-live">
@@ -137,8 +137,7 @@
           <div id="h-detail" class="h-detail" aria-live="polite" hidden></div>
         </div>
         <p class="legend small muted h-legend" aria-label="Map key">
-          <span><span class="ln solid"></span>Flight path as charted</span>
-          <span><span class="ln dash"></span>Estimated from an inferred azimuth</span>
+          <span><span class="ln dash"></span>Flight path, estimated from an inferred azimuth</span>
           <span><span class="ln dot"></span>Scheduled launch, estimated</span>
           <span><span class="mk dot"></span>Launch site, sized by launches shown</span>
           <span><span class="sw g-us"></span>US</span><span><span class="sw g-cn"></span>China</span>
@@ -152,8 +151,9 @@
           programme from the same site, with cos i = cos(latitude) &times; sin(azimuth) and the direction (north- or
           south-going) from the site's closure history; else the site's most-used corridor. It is a great circle
           from the pad, drawn to the farthest closure area or 1,500 NM; not a ground track, and it ignores dog-legs.
-          A suborbital launch or missile has no orbit to infer from: its path is drawn only as charted or towards its
-          farthest closure area.
+          A suborbital launch or missile has no orbit to infer from: its path is drawn only towards its farthest
+          closure area. The lines on Launch's charted map are an analyst's guesses from the closure areas, not
+          flight paths, so none is drawn; the charted notices are used for their areas and texts.
           Mission type is Launch's reading of payload names; series the operator describes otherwise but public
           analysis assesses as military (Yaogan, TJS) say so.</p>
       </div>

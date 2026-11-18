@@ -43,9 +43,9 @@ RECS = [
     {"id": "hist:a", "status": "launched", "time": "2026-03-01T12:30:00Z", "time_basis": "time", "actor": "CN",
      "label": "=HYPERLINK(\"x\")", "vehicle": "LM-2C", "payload": "Test, \"one\"", "programmes": ["Yaogan"],
      "mtype": "Earth observation", "site": "Jiuquan", "pad": [170.0, 10.0], "orbit": "LEO", "inc": 97.4,
-     "outcome": "success", "path": {"kind": "drawn", "az": 80, "nm": None, "basis": "path as charted"},
+     "outcome": "success", "path": {"kind": "estimated", "az": 80, "nm": 1500, "basis": "bearing from the pad to its farthest closure area"},
      "sources": ["chart", "gcat"], "chart": ["hist:a"], "gcat": "2026-001",
-     "over": [[{"cc": "CN", "from": 0, "to": 410}, {"cc": "MN", "from": 410, "to": 780}], []],
+     "over": [[{"cc": "CN", "from": 0, "to": 410}, {"cc": "MN", "from": 410, "to": 780}]],
      "nfc_notices": [{"number": "A0002/26", "ring": [[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]}]},
     {"id": "gcat:b", "status": "upcoming", "time": "2026-12-01T00:00:00Z", "time_basis": "date", "actor": "US",
      "label": "B", "vehicle": "Falcon 9", "payload": "Starlink", "programmes": [], "mtype": "LEO broadband constellation",
@@ -112,7 +112,7 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(a["properties"]["notams"], "A0001/26; A0002/26")
         self.assertEqual(a["properties"]["sources"], "Launch's charted notices; GCAT")
         path = next(f for f in g["features"] if f["properties"]["feature"] == "flight path")
-        self.assertEqual(path["geometry"]["type"], "MultiLineString")  # the charted path crosses 180
+        self.assertEqual(path["geometry"]["type"], "MultiLineString")  # the estimated path crosses 180
         self.assertIsNone(g["features"][-1]["geometry"])  # no pad: kept, with no geometry
         self.assertEqual(self.o["noAreas"].count("closure area"), 0)
 
@@ -132,7 +132,8 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(b["pad_lon"], "-80.5774")  # numbers are not prefixed
         self.assertEqual(c["when (America/Chicago)"], "")
         self.assertEqual(c["pad_lat"], "")
-        self.assertEqual(a["overflies"], "CN 0-410 NM; MN 410-780 NM | water only")
+        self.assertEqual(a["overflies"], "CN 0-410 NM; MN 410-780 NM")
+        self.assertNotIn("path_length_nm", a)
         self.assertEqual(b["overflies"], "")  # no `over`: not read
 
     def test_kml(self):

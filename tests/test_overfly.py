@@ -55,16 +55,11 @@ class RunsTest(unittest.TestCase):
         self.assertEqual([r["cc"] for r in over], ["FF"])
         self.assertAlmostEqual(over[0]["to"], 8 * DEG_NM, delta=overfly.SAMPLE_NM)
 
-    def test_charted_paths_merge(self):
-        rec = {"path": {"kind": "drawn", "az": 90, "nm": None}, "pad": [1, 0]}
-        over = overfly.overflight(WORLD, rec, [[[1, 0], [12, 0]], [[1, 0.5], [14, 0.5], [27, 0.5]]])
-        self.assertEqual([[r["cc"] for r in p] for p in over], [["AA", "BB", "CC", "BB", "DD"], ["AA", "BB"]])  # longest first
-
     def test_estimated_with_a_turn_point(self):
         # North out of AA to a turn point at 6 N, then due east above every made-up country: AA only. From the pad
         # on the same azimuth it would read AA, BB, CC, BB, DD.
         rec = {"path": {"kind": "estimated", "az": 90, "nm": 1500, "via": [[9, 6]]}, "pad": [9, 0]}
-        over = overfly.overflight(WORLD, rec, [])
+        over = overfly.overflight(WORLD, rec)
         self.assertEqual([[r["cc"] for r in p] for p in over], [["AA"]])
         self.assertAlmostEqual(over[0][0]["to"], 5 * DEG_NM, delta=overfly.SAMPLE_NM)
         s = overfly.estimated_samples(rec["pad"], rec["path"])
@@ -72,10 +67,10 @@ class RunsTest(unittest.TestCase):
         self.assertTrue(all(b[1] > a[1] for a, b in zip(s, s[1:])))
 
     def test_nothing_to_read(self):
-        self.assertIsNone(overfly.overflight(WORLD, {}, []))
-        self.assertIsNone(overfly.overflight(WORLD, {"path": {"kind": "drawn"}}, []))
-        self.assertIsNone(overfly.overflight(WORLD, {"path": {"kind": "estimated", "az": 90, "nm": 100}, "pad": None}, []))
-        self.assertEqual(overfly.overflight(WORLD, {"path": {"kind": "estimated", "az": 90, "nm": 100}, "pad": [21, 0]}, []), [[]])
+        self.assertIsNone(overfly.overflight(WORLD, {}))
+        self.assertIsNone(overfly.overflight(WORLD, {"path": {"kind": "estimated", "az": 90, "nm": None}, "pad": [1, 0]}))
+        self.assertIsNone(overfly.overflight(WORLD, {"path": {"kind": "estimated", "az": 90, "nm": 100}, "pad": None}))
+        self.assertEqual(overfly.overflight(WORLD, {"path": {"kind": "estimated", "az": 90, "nm": 100}, "pad": [21, 0]}), [[]])
 
 
 class KitTest(unittest.TestCase):
