@@ -509,6 +509,15 @@ function quick(label, k, v) {
   b.addEventListener("click", () => { state.f[k] = [v]; state.sel = ""; update(true); });
   return b;
 }
+/* How a charted event joined its launch (catalog.py build_index: passes 1, 0, 2, 4 in that order). */
+function joinText(j) {
+  if (!j) return "joined";
+  const off = j.hours > 1 ? `; the charted time is ${j.hours >= 8000 ? "about a year" : j.hours + " h"} out` : "";
+  if (j.pass === 0) return (j.via === "nfc" ? "by a NOTAM NotamForChina lists for this launch" : "by a NOTAM Joey0609/notams' copy places in this launch's window") + " (same number and FIR)" + off;
+  if (j.pass === 4) return `no pad was charted: the same ${j.by === "programme" ? "programme" : "vehicle"}, nearest in time (${j.hours} h from the charted window)`;
+  return `${j.hours} h apart` + (j.nm !== null && j.nm !== undefined ? `, ${j.nm} NM apart` : "") + (j.same ? ", same vehicle or programme" : "")
+    + (j.pass === 2 ? " (matched by vehicle and place; the charted time differs)" : "");
+}
 function detail(r) {
   const box = $("h-detail"); box.textContent = "";
   if (!r) { box.hidden = true; return; }
@@ -521,14 +530,16 @@ function detail(r) {
   meta.appendChild(document.createTextNode(`${countryName(r.actor)} · ${STATUS[r.status] || r.status}` + (r.provisional ? " · provisional: Launch Library 2 reports it flown; GCAT has not listed it yet" : "")));
   box.appendChild(meta);
   const dl = el("dl", "facts");
+  if (r.notice_set) fact(dl, "Launch", r.notice_set === "later" ? "none identified yet: no launch is joined to these charted notices"
+    : "none followed, or not identified: no GCAT launch joins these charted notices (a scrub, a slip of more than 72 h, a cancellation, or a launch never identified)");
   fact(dl, r.status === "upcoming" ? "NET" : "When", when(r) + (r.status === "upcoming" && r.net_precision ? ` (precision: ${r.net_precision})` : ""));
   if (r.chart_time) fact(dl, "Charted time", `${fmt(r.chart_time, { year: true })}: the time in the charted name; GCAT's launch time is shown above`);
-  fact(dl, "Vehicle", [r.vehicle, r.gcat_vehicle && r.gcat_vehicle !== r.vehicle ? `(GCAT: ${r.gcat_vehicle})` : "", r.ll2_vehicle && r.ll2_vehicle !== r.vehicle ? `(LL2: ${r.ll2_vehicle})` : ""].filter(Boolean).join(" "));
+  fact(dl, r.notice_set ? "Charted vehicle" : "Vehicle", [r.vehicle, r.gcat_vehicle && r.gcat_vehicle !== r.vehicle ? `(GCAT: ${r.gcat_vehicle})` : "", r.ll2_vehicle && r.ll2_vehicle !== r.vehicle ? `(LL2: ${r.ll2_vehicle})` : ""].filter(Boolean).join(" "));
   fact(dl, "Kind", (r.kind || NK) + ((IX.kind_notes || {})[r.kind || NK] ? `: ${IX.kind_notes[r.kind || NK]}` : "") + (r.gcat_category ? ` · GCAT category: ${r.gcat_category}` : ""));
   fact(dl, "Site", [r.site, r.pad_name].filter(Boolean).join(" · ") + (r.pad ? ` (${r.pad[1].toFixed(2)}, ${r.pad[0].toFixed(2)}${r.pad_basis === "site" ? ", site position" : r.pad_basis === "region" ? ": a region GCAT gives, not a pad" : ""})` : "")
     + (r.site_uncertain ? " · GCAT gives this site with a question mark" : ""));
   if (r.apogee_km != null || r.range_km != null) fact(dl, "Apogee and range", [r.apogee_km != null ? `apogee about ${r.apogee_km.toLocaleString("en-US")} km` : "", r.range_km != null ? `range about ${r.range_km.toLocaleString("en-US")} km` : ""].filter(Boolean).join(", ") + " (GCAT)");
-  fact(dl, "Payload", r.payload);
+  fact(dl, r.notice_set ? "Charted payload" : "Payload", r.payload);
   if (r.payloads && r.payloads.count) fact(dl, "Payloads (GCAT)", `${r.payloads.count}: ${r.payloads.names.join(", ")}${r.payloads.more ? ` and ${r.payloads.more} more` : ""}`);
   const notes = (r.programmes || []).map((p) => IX.programme_notes[p] ? `${p} (${IX.programme_notes[p]})` : p);
   fact(dl, "Type", r.mtype + (notes.length ? ` · ${notes.join(", ")}` : ""));
@@ -536,6 +547,7 @@ function detail(r) {
   if (r.outcome) fact(dl, "Outcome", r.outcome);
   if (r.far_nm !== undefined) fact(dl, "Farthest closure area", `${r.far_nm.toLocaleString("en-US")} NM from the pad`);
   if (r.path) fact(dl, "Flight path", r.path.kind === "drawn" ? `as charted (azimuth about ${r.path.az}°` + (r.path.len_nm ? `, ${r.path.len_nm.toLocaleString("en-US")} NM long)` : ")") : `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
+  else if (r.notice_set) fact(dl, "Flight path", "none: a set of notices, not a launch");
   else if (r.kind && r.kind !== "Orbital" && r.kind !== NK) fact(dl, "Flight path", "none: a suborbital flight's path is drawn only as charted or towards its closure areas, and this one has neither");
   else fact(dl, "Flight path", r.pad ? "none: no closure area, inclination or corridor history to infer an azimuth from" : "none: no pad position");
   if (r.over) {
@@ -543,9 +555,9 @@ function detail(r) {
     fact(dl, "Path crosses", (r.over.length > 1 ? r.over.map((p, i) => `charted path ${i + 1}${i ? "" : " (longest)"}: ${one(p)}`).join("; ") : one(r.over[0]))
       + ". Land under the ground track, NM from the path's start (Natural Earth's de facto borders). Not airspace: a few hundred NM out the vehicle is in space.");
   }
-  if (r.join && r.join.pass === 3) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat} by a NOTAM that NotamForChina lists for this launch (same number and FIR)` + (r.join.hours > 1 ? `; the charted time is ${r.join.hours >= 8000 ? "about a year" : r.join.hours + " h"} out` : ""));
-  else if (r.join) fact(dl, "Joined", `Charted notices and GCAT ${r.gcat}: ${r.join.hours} h apart` + (r.join.nm !== null ? `, ${r.join.nm} NM apart` : "") + (r.join.same ? ", same vehicle or programme" : "") + (r.join.pass === 2 ? " (matched by vehicle and place; the map's time differs)" : ""));
-  else if (r.gcat) fact(dl, "GCAT", r.gcat);
+  if (r.chart_joins) fact(dl, "Charted notices joined", r.chart.map((id, i) => `${(chartById.get(id) || [{}])[0].label || id}: ${joinText(r.chart_joins[i])}`).join("; "));
+  else if (r.join && r.gcat) fact(dl, "Charted notices joined", joinText(r.join));
+  if (r.gcat) fact(dl, "GCAT", r.gcat);
   if (r.ll2_url) { const a = el("a", "", "Launch Library 2 record (JSON)"); a.href = r.ll2_url; a.rel = "noopener"; fact(dl, "Schedule", a); }
   fact(dl, "Sources", r.sources.map((s) => SOURCES[s] || s).join(" · "));
   box.appendChild(dl);
@@ -564,7 +576,7 @@ function detail(r) {
   const joeyFor = (num) => joeyN.find((x) => x.chart && x.number === num);
   if (evs.length) {
     box.appendChild(el("h4", "", `Charted: ${r.areas} closure area${r.areas === 1 ? "" : "s"}, ${evs.reduce((n, e) => n + e.notams.length, 0)} notice(s)`));
-    if (r.chart_labels) box.appendChild(el("p", "small muted", "Also charted as: " + r.chart_labels.join("; ")));
+    if (r.chart_labels) box.appendChild(el("p", "small muted", "Charted as: " + r.chart_labels.join("; ")));
     const seen = new Set();
     evs.forEach((e) => {
       e.notams.forEach((n) => {
@@ -818,7 +830,7 @@ export async function initHistory(ix, hist) {
   $("h-about").textContent = (c.gcat_kinds
     ? `${c.gcat.toLocaleString("en-US")} launches GCAT lists since ${IX.ledger_since.slice(0, 4)}: ${gn("Orbital")} orbital, ${sub.toLocaleString("en-US")} suborbital (sounding rockets, crewed flights, atmospheric tests), ${gn("Missile test")} missile tests, ${gn("Lofted missile test")} lofted missile tests and ${gn("Combat launch")} missiles fired in combat`
     : `${c.gcat} orbital launches GCAT lists since ${IX.ledger_since.slice(0, 4)}`)
-    + `; ${c.chart} events in Launch's charted notices (${c.gcat_joined} GCAT launches joined to them), and Launch Library 2's schedule.`
+    + `; ${c.chart} events in Launch's charted notices (on ${c.gcat_joined} GCAT launches; ${c.chart_notice_sets ?? 0} with no identified launch), and Launch Library 2's schedule.`
     + (c.nfc ? ` NotamForChina adds the notices of ${c.nfc.records - c.nfc.own_records} of those launches` + (c.nfc.own_launched ? `, and ${c.nfc.own_launched} Chinese launches from ${FIRST_YEAR} to ${Number((IX.ledger_since || "2012").slice(0, 4)) - 1}.` : ".") : "")
     + (c.joey ? ` Joey0609/notams adds NOTAM texts to ${c.joey.records} launches (${c.joey.notices - c.joey.unjoined} of its ${c.joey.notices} launch-related notices; the rest match no launch here).` : "")
     + ` Updated ${fmt(IX.generated_at)}.`;
