@@ -547,6 +547,39 @@ class NoPad(unittest.TestCase):
         self.assertEqual(P.vehicle("Super Heavy Block 1/2"), "Starship")
 
 
+class SiteFixes(unittest.TestCase):
+    SITES2 = dict(SITES, JQ={"name": "Jiuquan", "gcat_name": "Jiuquan", "lat": 41.31, "lon": 100.31, "country": "CN"},
+                  TYSC={"name": "Taiyuan", "gcat_name": "Taiyuan", "lat": 38.85, "lon": 111.6, "country": "CN"})
+    FIX = {"tag": "2026-218", "gcat_site_code": "JQ", "gcat_pad": "LC43/94", "site_code": "TYSC",
+           "source": {"publisher": "CGTN", "url": "https://example.org/a", "date": "2026-09-20"}}
+
+    def rec(self, code):
+        s = self.SITES2[code]
+        g = gcat_rec("2026-218", "2026-09-19T10:50:00Z", "Chang Zheng 2D", "PIESAT 2-13 to 16", "WEN",
+                     category="Sat SSO L", inc=97.49)
+        return dict(g, site_code=code, pad_name="LC43/94", site={"name": s["gcat_name"], "lat": s["lat"], "lon": s["lon"],
+                                                              "country": "CN"})
+
+    def test_fix_applies_while_gcat_gives_the_named_site(self):
+        g = self.rec("JQ")
+        out, done = catalog.apply_site_fixes([g], self.SITES2, [self.FIX])
+        self.assertEqual((out[0]["site_code"], out[0]["site"]["lat"], out[0]["pad_name"]), ("TYSC", 38.85, ""))
+        self.assertEqual((out[0]["site_fix"]["gcat_site"], out[0]["site_fix"]["gcat_pad"]), ("Jiuquan", "LC43/94"))
+        self.assertEqual((g["site_code"], done), ("JQ", {"applied": ["2026-218"], "stale": []}))  # input untouched
+
+    def test_fix_goes_stale_when_gcat_changes(self):
+        out, done = catalog.apply_site_fixes([self.rec("TYSC")], self.SITES2, [self.FIX])
+        self.assertNotIn("site_fix", out[0])
+        self.assertEqual(done, {"applied": [], "stale": ["2026-218"]})
+
+    def test_record_takes_the_fixed_site(self):
+        ledger = {"since": "2023-01-01", "sites": self.SITES2, "launches": [self.rec("JQ")], "closures": []}
+        r = catalog.build_index({"events": []}, ledger, [], [], NOW, site_fixes=[self.FIX])["records"][0]
+        self.assertEqual((r["site"], r["pad"], r["site_fix"]["publisher"]), ("Taiyuan", [111.6, 38.85], "CGTN"))
+        r0 = catalog.build_index({"events": []}, ledger, [], [], NOW)["records"][0]
+        self.assertEqual((r0["site"], "site_fix" in r0), ("Jiuquan", False))
+
+
 class Suborbital(unittest.TestCase):
     """GCAT's suborbital launches and missile firings (LaunchCode S, Y, A, M, L): kinds, orbit, paths and joins."""
 

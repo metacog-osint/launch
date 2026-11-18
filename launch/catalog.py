@@ -244,6 +244,33 @@ def merge(*ledgers: dict | None) -> dict:
 
 # ---------- sites ----------
 
+def apply_site_fixes(launches: list[dict], sites: dict, fixes: list[dict] | None) -> tuple[list[dict], dict]:
+    """history/site_fixes.json: a GCAT launch whose site the launching state's own report contradicts takes the
+    reported site. A fix applies only while GCAT still gives the site it names; otherwise it is listed as stale.
+    Returns the launches (fixed ones copied, never changed in place) and {"applied": [...], "stale": [...]}."""
+    by_tag = {f["tag"]: f for f in fixes or []}
+    done: dict = {"applied": [], "stale": []}
+    out = []
+    for g in launches:
+        f = by_tag.get(g.get("tag")) if g.get("source") == "gcat" else None
+        if f is None:
+            out.append(g)
+            continue
+        to = sites.get(f["site_code"])
+        if g.get("site_code") != f["gcat_site_code"] or not to:
+            done["stale"].append(f["tag"])
+            out.append(g)
+            continue
+        was = (sites.get(g.get("site_code") or "") or {}).get("name") or (g.get("site") or {}).get("name")
+        out.append(dict(g, site_code=f["site_code"], pad_name="",
+                        site={k: to.get(k) for k in ("lat", "lon", "country")} | {"name": to.get("gcat_name") or to["name"]},
+                        site_fix={"gcat_site": was, "gcat_pad": f.get("gcat_pad") or g.get("pad_name") or None,
+                                  "publisher": f["source"]["publisher"], "url": f["source"]["url"],
+                                  "date": f["source"].get("date")}))
+        done["applied"].append(f["tag"])
+    return out, done
+
+
 def site_table(gcat_sites: dict, used_codes) -> dict:
     """GCAT sites that launches use, keyed by code: {name (Launch's), gcat_name, lat, lon, country}."""
     out = {}
@@ -1033,9 +1060,11 @@ def nsf_join(recs: list[dict], doc: dict | None, chart_topics: dict[str, set]) -
 
 def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[dict], now: str,
                 nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None,
-                world: "overfly.World | None" = None, nsf_doc: dict | None = None) -> dict:
+                world: "overfly.World | None" = None, nsf_doc: dict | None = None,
+                site_fixes: list[dict] | None = None) -> dict:
     """The History tab's list (data/launches.json). `world` (overfly.World): when given, each record with a flight
-    path gets `over`, the countries its ground track crosses (overfly.py)."""
+    path gets `over`, the countries its ground track crosses (overfly.py). `site_fixes`: history/site_fixes.json's
+    list (apply_site_fixes())."""
     sites = ledger.get("sites") or {}
     nowdt = _dt(now)
     events = [orient_paths(e, sites) for e in chart_events(hist)]
@@ -1046,7 +1075,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     closures_by_ll2: dict[str, list] = {}
     for c in ledger.get("closures") or []:
         closures_by_ll2.setdefault(c["ll2"], []).append(c)
-    gcat = [r for r in ledger.get("launches") or [] if r.get("source") == "gcat"]
+    gcat, fixed = apply_site_fixes([r for r in ledger.get("launches") or [] if r.get("source") == "gcat"], sites,
+                                   site_fixes)
     flown = [r for r in ledger.get("launches") or [] if r.get("source") == "ll2"]
     ll2_all = [u for u in upcoming or [] if u.get("id")]
 
@@ -1338,6 +1368,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                     r[k] = g[k]
         if g.get("site_uncertain"):
             r["site_uncertain"] = True
+        if g.get("site_fix"):
+            r["site_fix"] = g["site_fix"]
 
     def ll2_kind(u: dict) -> str:
         """A Launch Library 2 launch's kind: suborbital by its orbit, crewed by its mission type."""
@@ -1636,6 +1668,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
            "mtypes": P.MTYPES, "orbits": P.ORBITS, "kinds": P.KINDS, "kind_notes": P.KIND_NOTES,
            "programme_notes": P.NOTES, "default_path_nm": DEFAULT_PATH_NM,
            "records": recs}
+    if site_fixes:
+        out["site_fixes"] = fixed
     if nfc_doc:
         out["nfc"] = {k: nfc_doc.get(k) for k in ("source", "commit", "licence", "attribution")}
         out["nfc"].update(licence_file=NFC_LICENCE_FILE, agree_nm=NFC_AGREE_NM)

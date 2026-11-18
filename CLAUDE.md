@@ -5,9 +5,8 @@ with them, a launch history since 2012, and each pad's closure patterns.
 `tic-feed/2`, program id `launch`, prefix `LA`, method `launch-1.0`. Observations only. Site:
 https://launch.theintelligence.company (Cloudflare Pages project `launch`).
 
-Public file, lasting facts only (slimmed 18 Nov 2026 from 29 KB; full text in git history and the git-ignored
-`history/source/claude-md-archive-2026-11-18.md`). Notes, decisions, state and open items: the git-ignored
-`CLAUDE.local.md` and the prompt in `.claude/`, where present. Detail is in each module's docstrings.
+Public file, lasting facts only (old text in git history). Notes, decisions, state and open items: the git-ignored
+`CLAUDE.local.md` and the prompt in `.claude/`. Detail is in each module's docstrings.
 
 ## Commands
 ```bash
@@ -68,6 +67,7 @@ unions the committed baseline, the cache, the published ledger and Orbit's launc
   first, is a site (within `SITE_NM`). A joined record takes GCAT's pad and site (LL2's pad when known); for a
   coarse GCAT site (`coarse_site()`: region, sea or air launch) the charted point stands within `MATCH_NM` of
   GCAT's, or, for a region, when nearer the charted areas.
+  `history/site_fixes.json`: sourced fixes of GCAT sites (`site_fix`), dropped once GCAT changes the row.
 - **Flight paths** (`infer_path()`, one method; the charted lines are analyst guesses, never drawn or published):
   the bearing to the closure areas 50-2,500 NM out (150 from a coarse point; the farthest of the largest group
   within 15 deg, `main_area()`), unless over 55 deg (`CROSS_DEG`, past a dog-leg) from both azimuths the record's
@@ -131,7 +131,7 @@ grouped (GCAT launch from that site, within 30 NM, in the window). The feed carr
 
 ## Tier
 A space operations TFR whose XML `dateIssued` (UTC) is within 72 h of the run (`feed.NEW_HOURS`) is anomaly,
-`baseline_ref` `faa-space-ops-tfrs-in-force`; else routine. Cordon leaves these TFRs to Launch.
+`baseline_ref` `faa-space-ops-tfrs-in-force`; else routine.
 
 ## Rules
 - Code GNU AGPL-3.0. Data keeps each source's licence (GCAT CC BY 4.0, NotamForChina Apache-2.0, Joey0609 MIT,

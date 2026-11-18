@@ -537,7 +537,8 @@ function detail(r) {
   fact(dl, r.notice_set ? "Charted vehicle" : "Vehicle", [r.vehicle, r.gcat_vehicle && r.gcat_vehicle !== r.vehicle ? `(GCAT: ${r.gcat_vehicle})` : "", r.ll2_vehicle && r.ll2_vehicle !== r.vehicle ? `(LL2: ${r.ll2_vehicle})` : ""].filter(Boolean).join(" "));
   fact(dl, "Kind", (r.kind || NK) + ((IX.kind_notes || {})[r.kind || NK] ? `: ${IX.kind_notes[r.kind || NK]}` : "") + (r.gcat_category ? ` · GCAT category: ${r.gcat_category}` : ""));
   fact(dl, "Site", [r.site, r.pad_name].filter(Boolean).join(" · ") + (r.pad ? ` (${r.pad[1].toFixed(2)}, ${r.pad[0].toFixed(2)}${r.pad_basis === "site" ? ", site position" : r.pad_basis === "region" ? ": a region GCAT gives, not a pad" : ""})` : "")
-    + (r.site_uncertain ? " · GCAT gives this site with a question mark" : ""));
+    + (r.site_uncertain ? " · GCAT gives this site with a question mark" : "")
+    + (r.site_fix ? ` · corrected: GCAT gives ${[r.site_fix.gcat_site, r.site_fix.gcat_pad].filter(Boolean).join(" ")}; ${r.site_fix.publisher}${r.site_fix.date ? ` (${r.site_fix.date})` : ""} reports this site` : ""));
   if (r.apogee_km != null || r.range_km != null) fact(dl, "Apogee and range", [r.apogee_km != null ? `apogee about ${r.apogee_km.toLocaleString("en-US")} km` : "", r.range_km != null ? `range about ${r.range_km.toLocaleString("en-US")} km` : ""].filter(Boolean).join(", ") + " (GCAT)");
   fact(dl, r.notice_set ? "Charted payload" : "Payload", r.payload);
   if (r.payloads && r.payloads.count) fact(dl, "Payloads (GCAT)", `${r.payloads.count}: ${r.payloads.names.join(", ")}${r.payloads.more ? ` and ${r.payloads.more} more` : ""}`);
