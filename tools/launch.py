@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
-from launch import catalog, feed, fetch, gcat, history, joey, live, nfc, nms, nsf, overfly, patterns, privacy, public, timing, wayback  # noqa: E402
+from launch import catalog, feed, fetch, gcat, gnss, history, joey, live, nfc, nms, nsf, overfly, patterns, privacy, public, timing, wayback  # noqa: E402
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
@@ -177,7 +177,18 @@ def _lane_cordon(raw_dir: Path, prev: dict, getter):
 def _lane_nms(raw_dir: Path, prev: dict, getter):
     """FAA NMS-API: one bulk pull a day, else a delta (launch/nms.py). Raises nms.Waiting without keys."""
     client = nms.Client()
-    state = nms.pull(client, prev.get("nms") or {}, nms.past_areas(ROOT), datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    gpath = raw_dir.parent / "gnss" / "store.json"
+    got = {}
+
+    def gnss_subset(feats, mode):  # GPS/GNSS NOTAMs from the same pull, no extra request (launch/gnss.py)
+        got["store"] = gnss.update(gnss.load(gpath), feats, mode, now, client.env_name)
+
+    state = nms.pull(client, prev.get("nms") or {}, nms.past_areas(ROOT), now, on_features=gnss_subset)
+    if "store" in got:
+        gpath.parent.mkdir(parents=True, exist_ok=True)
+        gpath.write_text(json.dumps(got["store"], ensure_ascii=False, separators=(",", ":")) + "\n",
+                         encoding="utf-8", newline="\n")
     rec = {"url": client.host + "/nmsapi/v1/notams", "sha256": None, "bytes": None}
     return {"nms": state}, [rec]
 
@@ -227,6 +238,14 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [])
     data_dir.mkdir(parents=True, exist_ok=True)
     snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter)
+    # GPS/GNSS NOTAMs from the nms lane's pulls, for Noisefloor: data/gnss/ -> site/data/gnss-notams/.
+    if not only or "nms" in only:
+        try:
+            snap["lanes"]["nms"]["gnss"] = gnss.publish(data_dir / "gnss", datetime.now(timezone.utc),
+                                                        snap["lanes"]["nms"], nms.SOURCE_NOTE,
+                                                        getter or fetch.get)
+        except Exception as exc:  # the subset never fails the run
+            snap["lanes"]["nms"]["gnss"] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:200]}
     snap_path.write_text(dump(snap), encoding="utf-8", newline="\n")
     return snap
 
@@ -307,6 +326,7 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
              "data/patterns.json": dump(pat, compact=True),
              "data/world.geojson": dump(world_shapes(countries), compact=True),
              "data/launches.json": dump(index, compact=True), "data/ledger.json": dump(ledger, compact=True)}
+    files.update(gnss.site_files(root / "data" / "gnss"))
     if nfc_doc:
         files[catalog.NFC_LICENCE_FILE] = lic_path.read_text(encoding="utf-8")
     if joey_doc:

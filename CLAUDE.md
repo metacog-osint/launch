@@ -257,6 +257,18 @@ Shared copies (`tic-nav.*`, `tic-time.*`, `doctrine/kit/`) are reported, not fai
   staging pull (17 Nov): 80,134 NOTAMs, 62 kept (words 42, unl-area 10, recurring 6, cn-area 4). An FDC notice the
   tfr lane holds is left to it. The page and the feed say the FAA's terms: redistribution allowed, not called FAA
   data, NMS not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`).
+- **GPS/GNSS NOTAMs** (`launch/gnss.py`, rule `gnss-1.0`, 18 Nov 2026, for Noisefloor): a second subset of the
+  nms lane's pulls (`nms.pull(on_features=)`, no extra request), no launch filters. Kept: Q-code subject GA or GW
+  (`q-code`); a GNSS word within 60 characters of a word about the signal, once phrases that name GNSS without
+  saying anything about it are out ("aircraft equipped with ... GPS", "RNAV (GPS) RWY", "GPS required", "in case
+  of GNSS failure") (`text`); a cancel or replacement of a kept NOTAM (`refers`). The NMS-API's own fields as given,
+  ICAO text, geometry; email addresses in the text are removed. State and files in `data/gnss/` (Actions cache);
+  `build` publishes `data/gnss-notams/active.json` (the FAA's active set at the last pull, `in_force` at that time),
+  one `YYYY-MM-DD.json` per UTC day once it has ended (window overlaps the day; rewritten up to 48 h after for late
+  cancels, `revised_at`; written for every day the lane ran, n=0 and the day's runs included), 14 days kept, and
+  `index.json`. A lost cache fetches the published day files back. Staging bulk of 18 Nov 15:59 UTC: 82,045
+  NOTAMs, 233 kept (200 by Q-code, 33 by text), 199 in force, 73 FIRs. Without production keys in CI the files say
+  `waiting` with n=0.
 - **Timing** (`launch/timing.py`, `python tools/launch.py timing` -> committed `history/timing.json`, from the
   built `site/data/launches.json`): for each launch with a GCAT time, the notice nearest the pad (within 450 NM,
   window of 6 h or less) whose window holds the launch; minutes from its opening to the launch, by site (5+
