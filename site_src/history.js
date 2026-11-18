@@ -54,7 +54,7 @@ const FACETS = [
   { k: "orb", label: "Orbit", get: (r) => r.orbit || NK },
   { k: "out", label: "Outcome", get: (r) => (r.status === "upcoming" ? "Scheduled" : r.outcome === "success" ? "Success" : r.outcome ? "Failure or partial" : NK) },
   { k: "src", label: "Source", get: (r) => r.sources, name: (v) => SOURCES[v] || v },
-  { k: "path", label: "Flight path", get: (r) => (r.path ? (r.path.kind === "drawn" ? "As charted" : "Estimated from an azimuth") : "None"), },
+  { k: "path", label: "Flight path", get: (r) => (r.path ? "Estimated from an azimuth" : "None"), },
   // overfly.py: the countries the path's ground track crosses (land only).
   { k: "ovf", label: "Path crosses", get: (r) => { const cc = r.over ? [...new Set(r.over.flat().map((o) => o.cc))] : []; return !r.over ? ["nopath"] : cc.length ? cc : ["water"]; },
     name: (v) => (v === "nopath" ? "No flight path" : v === "water" ? "No land (water only)" : countryName(v)), flag: true, search: true },
@@ -68,9 +68,6 @@ const RANGES = [
   { k: "far", label: "Farthest closure area", unit: "NM", step: "1", get: (r) => r.far_nm,
     about: "from the pad to the centre of the launch's farthest charted or NotamForChina area",
     presets: [["Under 500 NM", null, 500], ["500-2,500 NM", 500, 2500], ["Over 2,500 NM", 2500, null]] },
-  { k: "plen", label: "Charted path length", unit: "NM", step: "1", get: (r) => (r.path && r.path.len_nm) || null,
-    about: "length of the flight path as charted (estimated paths have no length)",
-    presets: [["Under 1,000 NM", null, 1000], ["1,000-3,000 NM", 1000, 3000], ["Over 3,000 NM", 3000, null]] },
 ];
 const num = (v) => (v === "" || v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
 const rangeText = (g, [lo, hi]) => (lo !== null && hi !== null ? `${lo} to ${hi}` : lo !== null ? `${lo} or more` : `up to ${hi}`) + (g.unit === "°" ? "°" : " " + g.unit);
@@ -96,10 +93,13 @@ const zoneName = () => (T && T.zoneLabel ? T.zoneLabel() : "UTC");
 /* ---------- the address ---------- */
 /* Addresses written before 15 Nov 2026 used other words for the charted source (src=) and for its flight paths
    (path=). They are matched by a short string hash, so the old words are not spelled out in this public file, and
-   read as the new ones. No current value shares either hash (tests/test_privacy.py checks). */
+   read as the new ones. No current value shares either hash (tests/test_privacy.py checks). From 19 Nov 2026 no
+   path is "as charted" (the charted lines are an analyst's guesses, not flight paths): an address asking for those
+   paths reads as the estimated paths the same launches now have. */
 const strHash = (s) => [...s].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) | 0, 0);
-const LEGACY = { src: { 115026: "chart" }, path: { "-1763747857": "As charted" } };
-const legacy = (k, v) => (LEGACY[k] || {})[strHash(v)] || v;
+const LEGACY = { src: { 115026: "chart" }, path: { "-1763747857": "Estimated from an azimuth" } };
+const OLD_PATH = { "As charted": "Estimated from an azimuth" };
+const legacy = (k, v) => (LEGACY[k] || {})[strHash(v)] || (k === "path" && OLD_PATH[v]) || v;
 function readHash() {
   const h = location.hash.replace(/^#/, "");
   const [tab, qs] = h.split("?");
@@ -546,13 +546,13 @@ function detail(r) {
   fact(dl, "Orbit", r.orbit + (r.inc ? ` · payload inclination ${r.inc}° (GCAT)` : ""));
   if (r.outcome) fact(dl, "Outcome", r.outcome);
   if (r.far_nm !== undefined) fact(dl, "Farthest closure area", `${r.far_nm.toLocaleString("en-US")} NM from the pad`);
-  if (r.path) fact(dl, "Flight path", r.path.kind === "drawn" ? `as charted (azimuth about ${r.path.az}°` + (r.path.len_nm ? `, ${r.path.len_nm.toLocaleString("en-US")} NM long)` : ")") : `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
+  if (r.path) fact(dl, "Flight path", `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
   else if (r.notice_set) fact(dl, "Flight path", "none: a set of notices, not a launch");
-  else if (r.kind && r.kind !== "Orbital" && r.kind !== NK) fact(dl, "Flight path", "none: a suborbital flight's path is drawn only as charted or towards its closure areas, and this one has neither");
+  else if (r.kind && r.kind !== "Orbital" && r.kind !== NK) fact(dl, "Flight path", "none: a suborbital flight's path is drawn only towards its closure areas, and this one has none");
   else fact(dl, "Flight path", r.pad ? "none: no closure area, inclination or corridor history to infer an azimuth from" : "none: no pad position");
   if (r.over) {
     const one = (p) => (p.length ? p.map((o) => `${countryName(o.cc)} ${o.from.toLocaleString("en-US")}–${o.to.toLocaleString("en-US")} NM`).join(", ") : "no land");
-    fact(dl, "Path crosses", (r.over.length > 1 ? r.over.map((p, i) => `charted path ${i + 1}${i ? "" : " (longest)"}: ${one(p)}`).join("; ") : one(r.over[0]))
+    fact(dl, "Path crosses", one(r.over[0])
       + ". Land under the ground track, NM from the path's start (Natural Earth's de facto borders). Not airspace: a few hundred NM out the vehicle is in space.");
   }
   if (r.chart_joins) fact(dl, "Charted notices joined", r.chart.map((id, i) => `${(chartById.get(id) || [{}])[0].label || id}: ${joinText(r.chart_joins[i])}`).join("; "));

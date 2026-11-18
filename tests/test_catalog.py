@@ -17,6 +17,8 @@ SITES = {
     "CC": {"name": "Cape Canaveral", "gcat_name": "Canaveral", "lat": 28.46, "lon": -80.54, "country": "US"},
     "KSC": {"name": "Kennedy (KSC)", "gcat_name": "Kennedy", "lat": 28.6083, "lon": -80.6041, "country": "US"},
     "VSFBS": {"name": "Vandenberg", "gcat_name": "Vandenberg", "lat": 34.63, "lon": -120.61, "country": "US"},
+    "YJ": {"name": "Yangjiang (sea launch)", "gcat_name": "Yangjiang launch area", "lat": 21.28, "lon": 112.0, "country": "CN",
+           "region": True},
 }
 
 
@@ -151,8 +153,6 @@ class Azimuths(unittest.TestCase):
 
     def test_infer_path_order(self):
         pad = [110.95, 19.61]
-        drawn = catalog.infer_path(pad, "Wenchang", [], drawn=[[[110.95, 19.61], [118.0, 15.0]]])
-        self.assertEqual(drawn["kind"], "drawn")
         area = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400}, {"azimuth": 125.0, "downrange_nm": 900}], inc=50)
         self.assertEqual((area["az"], area["nm"]), (125.0, 1035))
         far = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400},
@@ -179,6 +179,34 @@ class Azimuths(unittest.TestCase):
         area = catalog.infer_path(slc40, "Cape Canaveral", [], areas=[{"azimuth": 170.0, "downrange_nm": 300}], inc=98.07)
         self.assertNotIn("via", area)
 
+    def test_areas_bearing_checked_against_the_inclination(self):
+        jiuquan = [100.29, 40.96]  # Shenzhou: the station's 41.5 deg allows about 83 or 97 from Jiuquan
+        p = catalog.infer_path(jiuquan, "Jiuquan", [], areas=[{"azimuth": 162.0, "downrange_nm": 900}], orbit_code="LSS",
+                               inc=41.47)
+        self.assertAlmostEqual(p["az"], 97.0, delta=1.0)
+        self.assertIn("off the ascent track", p["basis"])
+        ok = catalog.infer_path(jiuquan, "Jiuquan", [], areas=[{"azimuth": 140.0, "downrange_nm": 900}], inc=41.47)
+        self.assertEqual((ok["az"], ok["basis"]), (140.0, "bearing from the pad to its farthest closure area"))  # a dog-leg
+        sso = catalog.infer_path([80.23, 13.72], "Sriharikota", [], areas=[{"azimuth": 149.2, "downrange_nm": 1500}], inc=97.5)
+        self.assertEqual(sso["az"], 149.2)  # PSLV's dog-leg round Sri Lanka: the areas' track, not the plane's 188
+        lent = catalog.infer_path(jiuquan, "Jiuquan", [], areas=[{"azimuth": 162.0, "downrange_nm": 900}], inc=41.47,
+                                  inc_note="inclination 41.47° of the last launch")
+        self.assertEqual(lent["az"], 162.0)  # a borrowed inclination checks nothing
+
+    def test_the_main_group_of_areas_sets_the_bearing(self):
+        xichang = [102.03, 28.25]  # LM-3B ChinaSat-6E: four ascent areas east, an NGA warning of another event south-west
+        areas = [{"azimuth": 98.0, "downrange_nm": 329}, {"azimuth": 99.0, "downrange_nm": 664},
+                 {"azimuth": 99.0, "downrange_nm": 1436}, {"azimuth": 99.0, "downrange_nm": 1437},
+                 {"azimuth": 237.0, "downrange_nm": 1459}, {"azimuth": 56.0, "downrange_nm": 0.4}]
+        p = catalog.infer_path(xichang, "Xichang", [], areas=areas, orbit="GTO / GEO")
+        self.assertEqual((p["az"], p["nm"]), (99.0, round(1437 * 1.15)))
+        self.assertIn("4 of 5", p["basis"])  # the area at the pad (0.4 NM) counts for nothing
+        ksc = catalog.infer_path([-80.60, 28.61], "Kennedy (KSC)", [], areas=[{"azimuth": 299.6, "downrange_nm": 2}], inc=45.05)
+        self.assertIn("payload inclination", ksc["basis"])  # a TFR round the pad sets no azimuth
+        sea = [{"azimuth": 0.0, "downrange_nm": 104}, {"azimuth": 1.0, "downrange_nm": 106}, {"azimuth": 127.0, "downrange_nm": 450}]
+        self.assertEqual(catalog.infer_path([121.19, 34.9], None, [], areas=sea, coarse=True)["az"], 127.0)  # the platform's own areas
+        self.assertEqual(catalog.infer_path([121.19, 34.9], None, [], areas=sea)["az"], 1.0)
+
     def test_paths_drawn_back_to_the_pad_are_turned_round(self):
         wen = [110.95, 19.61]
         sites = {"WEN": SITES["WEN"]}
@@ -194,14 +222,8 @@ class Azimuths(unittest.TestCase):
         later = {"id": "w", "pad": [125.0, 30.0], "paths": [[[125.0, 30.0], [130.0, 25.0]], [wen, [120.0, 10.0]]]}
         self.assertEqual(catalog.orient_paths(later, sites)["pad"], wen)  # a later leg drawn first
 
-    def test_path_length_and_farthest_area(self):
-        # The History tab's range filters: a charted path's length (legs summed) and the farthest area's distance.
-        one_deg = catalog.path_length_nm([[0.0, 0.0], [1.0, 0.0]])
-        self.assertEqual(one_deg, 60)  # one degree of the equator is about 60 NM
-        self.assertEqual(catalog.path_length_nm([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]]), 120)
-        self.assertEqual(catalog.path_length_nm([[0.0, 0.0]]), 0)
-        drawn = catalog.infer_path([0.0, 0.0], None, [], drawn=[[[0.0, 0.0], [1.0, 0.0]], [[0.0, 0.0], [3.0, 0.0], [4.0, 0.0]]])
-        self.assertEqual(drawn["len_nm"], 240)  # the longest line, as for its azimuth
+    def test_farthest_area(self):
+        # The History tab's range filter: the farthest area's distance.
         areas = [{"azimuth": 120.0, "downrange_nm": 400.4}, {"azimuth": 290.0, "downrange_nm": 9500.6}, {"ring": []}]
         self.assertEqual(catalog.farthest_nm([0, 0], areas), 9501)  # every area counts here, a splashdown too
         self.assertIsNone(catalog.farthest_nm(None, areas))
@@ -252,7 +274,7 @@ class Index(unittest.TestCase):
                                                                          ["gcat", "chart"]))
         self.assertEqual((r["gcat"], r["vehicle"], r["site"], r["orbit"]), ("2026-116", "LM-7A", "Wenchang", "GTO / GEO"))
         self.assertEqual(r["time"], "2026-05-26T16:16:30Z")  # GCAT's launch time
-        self.assertEqual(r["path"]["kind"], "drawn")
+        self.assertEqual(r["path"]["kind"], "estimated")  # the charted line is not a flight path
         self.assertEqual(r["programmes"], ["TJS"])
 
     def test_an_event_no_launch_joins_is_a_notice_set(self):
@@ -423,23 +445,24 @@ class AreaBearings(unittest.TestCase):
         self.assertEqual(catalog._bear([111.585, 38.8587], [{"ring": []}]), [{"ring": []}])  # no centroid: as it was
 
 
-class DrawnHeading(unittest.TestCase):
-    def test_heading_is_the_first_legs_not_the_bearing_to_the_end(self):
-        line31 = [[-97.16, 26.0], [-83.0, 24.32], [50.66, -27.19], [113.82, -16.05]]  # Starbase, east, to off Australia
-        p = catalog.infer_path(line31[0], None, [], drawn=[line31])
-        self.assertAlmostEqual(p["az"], 94.4, delta=0.5)  # the bearing to the end would read 282.8
-        wiggle = [[0.0, 0.0], [0.1, 0.0], [0.0, 5.0]]  # a 6 NM first leg east, then north
-        self.assertAlmostEqual(catalog.initial_heading(wiggle), 0.0, delta=0.5)
-        glonass = [[40.6, 62.9], [164.1, -61.2], [-131.2, -61.0]]  # Plesetsk over the pole: every point past a quarter
-        self.assertAlmostEqual(catalog.infer_path(glonass[0], None, [], drawn=[glonass])["az"], 111.9, delta=0.5)
-        dogleg = [[121.2, 36.6], [121.6, 35.6], [123.2, 20.8], [111.2, -18.6]]  # Haiyang: SSE, then south-west
-        az = catalog.infer_path(dogleg[0], None, [], drawn=[dogleg])["az"]
-        self.assertAlmostEqual(az, catalog.history.bearing(36.6, 121.2, -18.6, 111.2), delta=0.1)  # downrange, not the first leg
-        self.assertAlmostEqual(catalog.initial_heading([[0.0, 0.0], [0.5, 0.0]]), 90.0, delta=0.5)  # short line: its end
-        baikonur = [63.56, 46.0]
-        outline = [[80.0, 50.5], [89.4, 51.5], [80.0, 50.5]]  # a drop zone drawn as a line, away from the pad
-        az = catalog.infer_path(baikonur, None, [], drawn=[outline])["az"]
-        self.assertAlmostEqual(az, catalog.history.bearing(46.0, 63.56, 51.5, 89.4), delta=0.1)  # pad to its far end
+class CoarseSites(unittest.TestCase):
+    """A sea launch: the charted launch point stands where it lies nearer the charted areas than GCAT's coarse point."""
+
+    def build(self, events, launches):
+        return catalog.build_index({"events": events}, {"since": "2023-01-01", "sites": SITES, "launches": launches,
+                                                         "closures": []}, [], [], NOW)
+
+    def test_the_point_nearer_the_areas(self):
+        yj = [SITES["YJ"]["lon"], SITES["YJ"]["lat"]]
+        haiyang = [121.2, 36.63]
+        near = {"ring": ring(121.3, 36.5), "centroid": [121.4, 36.4]}
+        g = gcat_rec("2024-009", "2024-01-11T05:30:00Z", "Gravity-1", "Yunyao-1 18", "YJ", country="CN")
+        ev = chart_event("hist:g", "2024-01-11T05:30:00Z", "Gravity-1", "Yunyao-1 18", haiyang, areas=[near])
+        r = of(self.build([ev], [g]), "hist:g")
+        self.assertEqual((r["id"], r["pad"], r["pad_basis"]), ("gcat:2024-009", haiyang, "chart"))
+        far = {"ring": ring(112.1, 21.2), "centroid": [112.2, 21.1]}  # the areas are at GCAT's point: its pad stands
+        r = of(self.build([dict(ev, areas=[far])], [g]), "hist:g")
+        self.assertEqual(r["pad"], yj)
 
 
 class PadAtNoSite(unittest.TestCase):
@@ -460,7 +483,7 @@ class PadAtNoSite(unittest.TestCase):
         r = recs["gcat:2026-070"]
         self.assertEqual((r["chart"], r["site"], r["join"]["pass"]), (["hist:s"], "Vandenberg", 1))
         self.assertEqual(r["pad"], [SITES["VSFBS"]["lon"], SITES["VSFBS"]["lat"]])
-        self.assertEqual(r["path"]["kind"], "drawn")  # the charted line is still drawn as charted
+        self.assertNotIn("path", r)  # the charted line is not a flight path, and nothing else gives an azimuth
         op = chart_event("hist:v", "2026-04-01T10:00:00Z", "SpaceX", "Starlink 9-9", sea, actor=None)
         r = of(self.build([op], [g]), "hist:v")
         self.assertEqual((r["gcat"], r["vehicle"]), ("2026-070", "Falcon 9"))  # joined by programme; GCAT names the vehicle

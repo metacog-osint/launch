@@ -161,7 +161,7 @@ export function splitMany(raw) {
 const R_NM = 3440.065;
 const rad = (d) => (d * Math.PI) / 180, deg = (r) => (r * 180) / Math.PI;
 
-/* Great-circle lines for charted paths and closure-area rings. A charted path is stored as a few points, often
+/* Great-circle lines for closure-area rings and an estimated path's legs. A line is stored as a few points, often
    thousands of miles apart, and Google My Maps draws each leg as a great circle; the edges between NOTAM vertices are
    great circles too. Joined straight on a Web Mercator map a long leg goes wrong: Vostochny's sun-synchronous paths
    (great-circle azimuth about 352 deg, north over the pole) would head west-south-west across Eurasia, a leg over the

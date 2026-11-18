@@ -322,7 +322,9 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
                                 nsf_doc=nsf_doc)
     files = {"data/snapshot.json": dump(snap), "data/feed.geojson": dump(feed.build_feed(snap)),
              "data/sources.json": dump(sources_doc(root)),
-             "data/history.json": dump(hist, compact=True),
+             # The charted map's lines are an analyst's guesses, not flight paths: not published.
+             "data/history.json": dump(dict(hist, events=[{k: v for k, v in e.items() if k != "paths"}
+                                                          for e in hist.get("events") or []]), compact=True),
              "data/patterns.json": dump(pat, compact=True),
              "data/world.geojson": dump(world_shapes(countries), compact=True),
              "data/launches.json": dump(index, compact=True), "data/ledger.json": dump(ledger, compact=True)}

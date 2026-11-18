@@ -4,8 +4,7 @@
    to the buttons. (The third of the old launch mapper's features; its exports were of one analysis, these are of
    the History view.)
 
-   Each launch is its pad (a point), its flight path (as charted, or estimated from an azimuth: the lines the map
-   draws) and, when the view draws them, its closure areas. Lines and area edges are great circles, a point every
+   Each launch is its pad (a point), its flight path (estimated from an azimuth: the line the map draws) and, when the view draws them, its closure areas. Lines and area edges are great circles, a point every
    25 NM, as on the map. The map lets longitudes run past 180 so a line stays whole; a file must not (RFC 7946 3.1.9,
    KML's -180..180), so lines and areas that cross the antimeridian are cut there into two parts. Times are UTC in
    every file; the CSV adds a column in the viewer's zone, named in its header. Each file names its sources and
@@ -17,7 +16,7 @@ export const ATTRIBUTION = "Launch (The Intelligence Company), launch.theintelli
   + "Chinese notices: NotamForChina (mikezang, github.com/mikezang/NotamForChina), Apache License 2.0. Publicly "
   + "available information; observations, not warnings.";
 const SOURCE = { chart: "Launch's charted notices", gcat: "GCAT", ll2: "Launch Library 2", nfc: "NotamForChina" };
-const PATH = { drawn: "As charted", estimated: "Estimated from an azimuth" };
+const PATH = { estimated: "Estimated from an azimuth" };
 const BIG = { US: "us", CN: "cn", RU: "ru" };
 const group = (cc) => BIG[cc] || "other";
 const r4 = (x) => Math.round(x * 1e4) / 1e4;
@@ -35,9 +34,7 @@ export function utcTime(r) {
 
 /* ---------- geometry for one record (the same lines and rings hmap.js draws) ---------- */
 export function geometry(r, events, withAreas) {
-  const paths = !r.path ? [] : r.path.kind === "drawn"
-    ? events.flatMap((e) => e.paths || []).filter((p) => p.length >= 2).map(geodesic)
-    : r.pad ? [estimatedLine(r.pad, r.path)] : [];
+  const paths = r.path && r.pad && r.path.az != null && r.path.nm ? [estimatedLine(r.pad, r.path)] : [];
   const areas = !withAreas ? [] : [
     ...events.flatMap((e) => (e.areas || []).map((a) => ({ ring: a.ring, notam: a.notam || "", source: "chart" }))),
     ...(r.closures || []).map((c) => ({ ring: c.ring, notam: c.notam || "", source: "closure" })),
@@ -119,9 +116,8 @@ export function properties(r, events, o) {
     programmes: (r.programmes || []).join("; "), mission_type: r.mtype || "", site: r.site || "", orbit: r.orbit || "",
     inclination_deg: r.inc ?? null, outcome: outcome(r), flight_path: pathName(r),
     path_azimuth_deg: r.path && r.path.az != null ? r.path.az : null, path_basis: (r.path && r.path.basis) || "",
-    path_length_nm: (r.path && r.path.len_nm) ?? null, farthest_area_nm: r.far_nm ?? null,
+    farthest_area_nm: r.far_nm ?? null,
     notams: notams(r, events).join("; "), sources: (r.sources || []).map((s) => SOURCE[s] || s).join("; "),
-    // One list per path ("|" between a charted event's paths, longest first).
     overflies: r.over ? r.over.map((p) => p.map((x) => `${x.cc} ${x.from}-${x.to} NM`).join("; ") || "water only").join(" | ") : "",
     gcat: r.gcat || "", ll2: r.ll2_url || "", link: o.link(r.id),
   };
@@ -161,7 +157,7 @@ const kmlColour = (hex, alpha) => alpha + hex.slice(4, 6) + hex.slice(2, 4) + he
 const LABELS = { label: "Name", status: "Status", kind: "Launch kind", time_utc: "Time (UTC)", time_precision: "Time precision", country_name: "Country",
   vehicle: "Vehicle", payload: "Payload", programmes: "Programmes", mission_type: "Mission type", site: "Launch site",
   orbit: "Orbit", inclination_deg: "Inclination (deg)", outcome: "Outcome", flight_path: "Flight path",
-  path_azimuth_deg: "Path azimuth (deg)", path_basis: "Path basis", path_length_nm: "Charted path length (NM)",
+  path_azimuth_deg: "Path azimuth (deg)", path_basis: "Path basis",
   farthest_area_nm: "Farthest closure area (NM from the pad)",
   overflies: "Path crosses (land, NM from start)", notams: "NOTAMs", sources: "Sources", gcat: "GCAT",
   ll2: "Launch Library 2", link: "On Launch" };
@@ -200,7 +196,7 @@ export function toKML(rows, o) {
 }
 
 /* ---------- CSV (RFC 4180; a byte-order mark so spreadsheet programs read it as UTF-8) ---------- */
-const NUMERIC = new Set(["pad_lat", "pad_lon", "inclination_deg", "path_azimuth_deg", "path_length_nm", "farthest_area_nm", "closure_areas"]);
+const NUMERIC = new Set(["pad_lat", "pad_lon", "inclination_deg", "path_azimuth_deg", "farthest_area_nm", "closure_areas"]);
 function cell(k, v) {
   if (v === null || v === undefined) return "";
   let s = String(v);
@@ -212,7 +208,7 @@ function cell(k, v) {
 export function toCSV(rows, o) {
   const cols = ["id", "status", "kind", "time_utc", "when_local", "time_precision", "country", "country_name", "label", "vehicle",
     "payload", "programmes", "mission_type", "site", "pad_lat", "pad_lon", "orbit", "inclination_deg", "outcome",
-    "flight_path", "path_azimuth_deg", "path_basis", "path_length_nm", "farthest_area_nm", "overflies", "closure_areas", "notams", "sources", "gcat", "ll2", "link"];
+    "flight_path", "path_azimuth_deg", "path_basis", "farthest_area_nm", "overflies", "closure_areas", "notams", "sources", "gcat", "ll2", "link"];
   const head = cols.map((c) => (c === "when_local" ? `when (${o.zone})` : c));
   const lines = [head.map((h) => cell("", h)).join(",")];
   rows.forEach((r) => {

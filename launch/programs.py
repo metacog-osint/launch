@@ -390,6 +390,13 @@ def kind_mtype(kind: str, mtype: str, category: str | None = None) -> str:
     return mtype
 
 
+AIR_LAUNCH = ("Pegasus", "LauncherOne")  # dropped from an aircraft: GCAT's site is the airfield it flew from
+
+
+def air_launch(vehicle: str | None) -> bool:
+    return bool(vehicle) and vehicle.startswith(AIR_LAUNCH)
+
+
 def gcat_orbit_code(category: str | None) -> str | None:
     t = (category or "").split()
     return t[1] if len(t) > 1 and t[0] == "Sat" else None

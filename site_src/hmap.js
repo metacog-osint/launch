@@ -1,6 +1,5 @@
 // The History tab's map: every launch site, and for the launches in the current filters their flight paths
-// (as charted: solid; estimated from an inferred azimuth: dashed; scheduled: dotted) and, if asked, their
-// closure areas. The selected launch is drawn on top with its pad. Same base map as map.js. Colours come from the
+// (estimated from an inferred azimuth: dashed; scheduled: dotted) and, if asked, their closure areas. The selected launch is drawn on top with its pad. Same base map as map.js. Colours come from the
 // style.css actor tokens through MapLibre paint (no inline styles, CSP).
 import * as ml from "./vendor/maplibre-gl/maplibre-gl.mjs";
 import { buildStyle, addProjectionToggle, collapseAttribution, fitCoords, worldZoom } from "./map.js";
@@ -21,15 +20,10 @@ const nfcRings = (r) => (r.nfc_notices || []).filter((n) => n.ring && n.ring.len
   .concat((r.saved_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)));
 
 const lineCache = new Map();
-const drawnCache = new WeakMap(); // a charted path or a closure ring (an array from the data) -> its great-circle line
-const curved = (a) => { if (!drawnCache.has(a)) drawnCache.set(a, geodesic(a)); return drawnCache.get(a); };
-function pathLines(r, chartEvents) {
-  if (!r.path) return [];
-  if (r.path.kind === "drawn") return chartEvents.flatMap((e) => e.paths || []).filter((p) => p.length >= 2).map((p) => {
-    if (!drawnCache.has(p)) drawnCache.set(p, geodesic(p));
-    return drawnCache.get(p);
-  });
-  if (!r.pad) return [];
+const ringCache = new WeakMap(); // a closure ring (an array from the data) -> its great-circle outline
+const curved = (a) => { if (!ringCache.has(a)) ringCache.set(a, geodesic(a)); return ringCache.get(a); };
+function pathLines(r) {
+  if (!r.path || !r.pad || r.path.az == null || !r.path.nm) return [];
   if (!lineCache.has(r.id)) lineCache.set(r.id, [estimatedLine(r.pad, r.path)]);
   return lineCache.get(r.id);
 }
@@ -63,8 +57,6 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
     for (const [k, v] of Object.entries(data)) map.addSource("h_" + k, { type: "geojson", data: v });
     map.addLayer({ id: "h-areas-fill", type: "fill", source: "h_areas", paint: { "fill-color": actor, "fill-opacity": 0.06 } });
     map.addLayer({ id: "h-areas-line", type: "line", source: "h_areas", paint: { "line-color": actor, "line-width": 0.7, "line-opacity": 0.5 } });
-    map.addLayer({ id: "h-paths-drawn", type: "line", source: "h_paths", filter: ["==", ["get", "k"], "drawn"],
-      layout: { "line-cap": "round" }, paint: { "line-color": actor, "line-width": 1.4, "line-opacity": opacity } });
     map.addLayer({ id: "h-paths-est", type: "line", source: "h_paths", filter: ["==", ["get", "k"], "est"],
       paint: { "line-color": actor, "line-width": 1.4, "line-opacity": opacity, "line-dasharray": [3, 2] } });
     map.addLayer({ id: "h-paths-up", type: "line", source: "h_paths", filter: ["==", ["get", "k"], "up"],
@@ -86,7 +78,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
   dark.addEventListener("change", async () => { const n = await buildStyle(); map.setStyle(n.style, { diff: false }); });
   await new Promise((res) => (map.loaded() ? res() : map.once("load", res)));
 
-  const PATHS = ["h-paths-drawn", "h-paths-est", "h-paths-up", "h-sel-path"];
+  const PATHS = ["h-paths-est", "h-paths-up", "h-sel-path"];
   const near = (pt, layers, px = 5) => map.queryRenderedFeatures([[pt.x - px, pt.y - px], [pt.x + px, pt.y + px]], { layers: layers.filter((l) => map.getLayer(l)) });
   map.on("mousemove", (e) => {
     const s = near(e.point, ["h-sites"], 4);
@@ -167,9 +159,9 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
       let f = featCache.get(r.id);
       if (!f) {
         const evs = (r.chart || []).flatMap((id) => chartById.get(id) || []);
-        const k = r.status === "upcoming" ? "up" : r.path && r.path.kind === "drawn" ? "drawn" : "est";
+        const k = r.status === "upcoming" ? "up" : "est";
         const props = { id: r.id, group: group(r.actor) };
-        const lines = pathLines(r, evs);
+        const lines = pathLines(r);
         f = {
           lines: lines.map((line) => ({ type: "Feature", properties: { ...props, k }, geometry: { type: "LineString", coordinates: line } })),
           ends: lines.flatMap((line) => [line[0], line[line.length - 1]]).concat(r.pad ? [r.pad] : []),
@@ -184,7 +176,7 @@ export async function createHistoryMap(container, IX, { onPick, onSite }) {
     set("paths", { type: "FeatureCollection", features: feats });
     set("areas", { type: "FeatureCollection", features: areas });
     opacity = rows.length <= 40 ? 0.9 : rows.length <= 200 ? 0.6 : 0.32;
-    ["h-paths-drawn", "h-paths-est"].forEach((l) => map.getLayer(l) && map.setPaintProperty(l, "line-opacity", opacity));
+    if (map.getLayer("h-paths-est")) map.setPaintProperty("h-paths-est", "line-opacity", opacity);
     if (refit) {
       if (rows.length > 600 || !ends.length) map.easeTo({ center: [100, 30], zoom: worldZoom(container), duration: 600 });
       else fit(ends, rows.length === 1 ? 6 : 5);
