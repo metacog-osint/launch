@@ -146,6 +146,40 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
     return status
 
 
+def update_nms_ledger(snap: dict, data_dir: Path, getter=None) -> dict:
+    """Every NMS closure notice ever kept (launch/nms.py ledger()): the cache's copy, the published copy and this
+    run's notices (only when the nms lane succeeded), a union. With no cached copy and the published one unreadable
+    (anything but a 404, which is a first run), the run stops: publishing now would publish less than the site
+    holds, and a later run tries again."""
+    path = data_dir / "nms-closures.json"
+    try:
+        prev = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    except ValueError:
+        prev = None
+    published, status = None, {"status": "ok"}
+    try:
+        body, _ = fetch.fetch("launch-nms-closures", nms.LEDGER_URL, data_dir / "raw", "json", getter=getter)
+        published = json.loads(body)
+    except Exception as exc:  # noqa: BLE001
+        if prev is None and getattr(exc, "code", None) != 404:
+            raise RuntimeError(f"NMS closure ledger: no cached copy and the published one is unreadable "
+                               f"({type(exc).__name__}: {exc}); not publishing a smaller ledger") from exc
+        status = {"status": "ok" if getattr(exc, "code", None) == 404 else "failed",
+                  "error": f"{type(exc).__name__}: {exc}"[:200]}
+    # This run's notices, or the copy a failed lane carries from its last good read, stamped with the time they
+    # were read (the lane's fetched_at), so the closures Launch read itself before Cordon's first bulk stay too.
+    lane = (snap.get("lanes") or {}).get("nms") or {}
+    fresh = (snap.get("nms") or {}).get("notices") or []
+    seen_at = lane.get("fetched_at") or snap["generated_at"]
+    before = len({nms.ledger_key(e) for d in (prev, published) if d for e in d.get("notices") or []})
+    led = nms.ledger([published, prev], fresh, seen_at)
+    led["generated_at"] = snap["generated_at"]
+    path.write_text(dump(led, compact=True), encoding="utf-8", newline="\n")
+    status.update({"records": led["n"], "added": led["n"] - before, "cache": prev is not None,
+                   "published": published is not None})
+    return status
+
+
 def _lane_tfr(raw_dir: Path, prev: dict, getter):
     lst, r1 = fetch.fetch("faa-tfr-list", live.TFR_LIST, raw_dir, "json", getter=getter)
     shp, r2 = fetch.fetch("faa-tfr-shapes", live.TFR_SHAPES, raw_dir, "json", getter=getter)
@@ -175,22 +209,33 @@ def _lane_cordon(raw_dir: Path, prev: dict, getter):
 
 
 def _lane_nms(raw_dir: Path, prev: dict, getter):
-    """FAA NMS-API: one bulk pull a day, else a delta (launch/nms.py). Raises nms.Waiting without keys."""
-    client = nms.Client()
+    """FAA NMS-API NOTAMs through Cordon, the suite's one NMS reader (launch/nms.py): its index, then the
+    launch-areas and gnss subsets, the active set at Cordon's last pull. No FAA request. Until Cordon has published
+    its subsets the lane fails, so the last good NMS areas stay (collect keeps a failed lane's previous copy)."""
     now = datetime.now(timezone.utc)
-    gpath = raw_dir.parent / "gnss" / "store.json"
-    got = {}
-
-    def gnss_subset(feats, mode):  # GPS/GNSS NOTAMs from the same pull, no extra request (launch/gnss.py)
-        got["store"] = gnss.update(gnss.load(gpath), feats, mode, now, client.env_name)
-
-    state = nms.pull(client, prev.get("nms") or {}, nms.past_areas(ROOT), now, on_features=gnss_subset)
-    if "store" in got:
+    body, rec = fetch.fetch("cordon-notams", nms.CORDON_NOTAMS + "index.json", raw_dir, "json", getter=getter)
+    index = json.loads(body)
+    files = {s["name"]: s for s in index.get("subsets") or []}
+    if nms.SUBSET not in files:
+        raise RuntimeError(f"Cordon's NOTAM index lists no {nms.SUBSET} subset (lane {index.get('lane_status')})")
+    recs, feats = [rec], {}
+    for name in (nms.SUBSET, "gnss"):
+        if name not in files:
+            continue
+        b, r = fetch.fetch("cordon-notams", nms.CORDON_NOTAMS + files[name]["file"], raw_dir, "json",
+                           getter=getter, gz=True)
+        feats[name] = nms.features(json.loads(b))
+        recs.append(r)
+    state = nms.from_set(feats[nms.SUBSET], index, nms.past_areas(ROOT), now)
+    if "gnss" in feats:  # GPS/GNSS NOTAMs for Noisefloor (launch/gnss.py): Cordon's set is the whole active set
+        gpath = raw_dir.parent / "gnss" / "store.json"
+        gnss.restore(gpath.parent, getter or fetch.get)   # the published store and days first: nothing lost
+        g = gnss.update(gnss.load(gpath), feats["gnss"], "bulk", now, index.get("env"))
+        g["bulk_at"], g["pulled_to"] = index.get("bulk_at"), index.get("pulled_to") or g.get("pulled_to")
         gpath.parent.mkdir(parents=True, exist_ok=True)
-        gpath.write_text(json.dumps(got["store"], ensure_ascii=False, separators=(",", ":")) + "\n",
+        gpath.write_text(json.dumps(g, ensure_ascii=False, separators=(",", ":")) + "\n",
                          encoding="utf-8", newline="\n")
-    rec = {"url": client.host + "/nmsapi/v1/notams", "sha256": None, "bytes": None}
-    return {"nms": state}, [rec]
+    return {"nms": state}, recs
 
 
 LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit, "cordon": _lane_cordon, "nms": _lane_nms}
@@ -217,7 +262,7 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
                                    "fetches": [{k: r[k] for k in ("url", "sha256", "bytes")} for r in recs]}
         except nms.Waiting as exc:
             snap["nms"] = {}
-            snap["lanes"][lane] = {"status": "waiting", "note": f"FAA NMS-API: {exc}; nothing is read."}
+            snap["lanes"][lane] = {"status": "waiting", "note": f"FAA NMS-API via Cordon: {exc}; nothing is read."}
         except Exception as exc:
             had = bool(prev_lane.get("fetched_at"))
             for k in LANE_FIELDS[lane]:
@@ -238,13 +283,17 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [])
     data_dir.mkdir(parents=True, exist_ok=True)
     snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter)
+    if not only or "nms" in only:
+        snap["lanes"]["nms_ledger"] = update_nms_ledger(snap, data_dir, getter)
     # GPS/GNSS NOTAMs from the nms lane's pulls, for Noisefloor: data/gnss/ -> site/data/gnss-notams/.
     if not only or "nms" in only:
         try:
             snap["lanes"]["nms"]["gnss"] = gnss.publish(data_dir / "gnss", datetime.now(timezone.utc),
                                                         snap["lanes"]["nms"], nms.SOURCE_NOTE,
                                                         getter or fetch.get)
-        except Exception as exc:  # the subset never fails the run
+        except gnss.Unreachable:  # no local copy and the site unreadable: stop, never publish a smaller set
+            raise
+        except Exception as exc:  # otherwise the subset never fails the run
             snap["lanes"]["nms"]["gnss"] = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:200]}
     snap_path.write_text(dump(snap), encoding="utf-8", newline="\n")
     return snap
@@ -336,6 +385,10 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
              "data/patterns.json": dump(pat, compact=True),
              "data/world.geojson": dump(world_shapes(countries), compact=True),
              "data/launches.json": dump(index, compact=True), "data/ledger.json": dump(ledger, compact=True)}
+    # Every NMS closure notice ever kept (launch/nms.py ledger()), kept for good.
+    nl_path = root / "data" / "nms-closures.json"
+    if nl_path.exists():
+        files["data/nms-closures.json"] = nl_path.read_text(encoding="utf-8")
     files.update(gnss.site_files(root / "data" / "gnss"))
     if nfc_doc:
         files[catalog.NFC_LICENCE_FILE] = lic_path.read_text(encoding="utf-8")
@@ -360,6 +413,31 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     return files
 
 
+# Cloudflare Pages, Free plan (developers.cloudflare.com/pages/platform/limits, read 19 Nov 2026): 25 MiB per file,
+# 20,000 files per site. The files kept for good (data/nms-closures.json, data/gnss-notams/all.json) grow without
+# end, so check warns well ahead and fails before a deploy would be refused; the fix is splitting a file by year.
+PAGES_FILE_LIMIT = 25 * 1024 * 1024
+SIZE_WARN, SIZE_FAIL = 20 * 1024 * 1024, 24 * 1024 * 1024
+PAGES_FILES_LIMIT, FILES_WARN = 20_000, 18_000
+
+
+def site_size_problems(site: Path) -> tuple[list[str], list[str]]:
+    """(problems, notes) for site/: a file over SIZE_FAIL or over FILES_WARN files fails; over SIZE_WARN is noted."""
+    errs, notes = [], []
+    files = [f for f in site.rglob("*") if f.is_file()] if site.exists() else []
+    for f in sorted(files):
+        n = f.stat().st_size
+        rel = f.relative_to(site).as_posix()
+        mib = f"{n / 1048576:.1f} MiB"
+        if n > SIZE_FAIL:
+            errs.append(f"site/{rel}: {mib}, near Cloudflare Pages' 25 MiB per-file limit: split it (by year)")
+        elif n > SIZE_WARN:
+            notes.append(f"site/{rel}: {mib} of Cloudflare Pages' 25 MiB per-file limit: plan a split (by year)")
+    if len(files) > FILES_WARN:
+        errs.append(f"site/: {len(files)} files, near Cloudflare Pages' {PAGES_FILES_LIMIT} files per site")
+    return errs, notes
+
+
 def check_all(root: Path = ROOT) -> list[str]:
     errs = registers.check(root / "doctrine")
     regs = registers.ids(root / "doctrine")
@@ -381,9 +459,10 @@ def check_all(root: Path = ROOT) -> list[str]:
         public.allowlist(root / "history" / "public_sites.json"))]
     # Nothing private in site/ or in any tracked file (launch/privacy.py); shared copies are noted, not failed.
     perrs, notes = privacy.problems(root)
-    for n in notes:
+    serrs, snotes = site_size_problems(root / "site")
+    for n in notes + snotes:
         print("  note:", n)
-    return errs + perrs
+    return errs + perrs + serrs
 
 
 def main(argv=None) -> int:

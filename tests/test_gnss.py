@@ -3,6 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -103,7 +104,7 @@ class Days(unittest.TestCase):
                 s = gnss.update(gnss.load(d / "store.json"), feats, "bulk", t, "staging")
                 (d / "store.json").write_text(json.dumps(s), encoding="utf-8")
             out = gnss.publish(d, t, OK if feats is not None else {"status": "waiting", "note": "no keys"},
-                               NOTE, getter=lambda url, timeout: (_ for _ in ()).throw(OSError("offline")))
+                               NOTE, getter=self.site({}))   # nothing published yet (404)
         return d, out
 
     def test_day_file_after_day_ends(self):
@@ -148,26 +149,69 @@ class Days(unittest.TestCase):
         self.assertEqual(next(n for n in doc["notices"] if n["notam"]["number"] == "A0001/26")["ended_at"],
                          "2026-11-18T10:00:00Z")
 
-    def test_old_days_dropped(self):
+    def test_old_days_kept_for_good(self):
         d = Path(tempfile.mkdtemp())
         (d / "days").mkdir(parents=True)
-        (d / "days" / "2026-11-01.json").write_text("{}", encoding="utf-8")
+        old = {"day": "2026-01-01", "n": 2, "written_at": "2026-01-02T00:10:00Z", "revised_at": None, "notices": []}
+        (d / "days" / "2026-01-01.json").write_text(json.dumps(old), encoding="utf-8")
         gnss.publish(d, NOW, OK, NOTE)
-        self.assertFalse((d / "days" / "2026-11-01.json").exists())
+        self.assertEqual(json.loads((d / "days" / "2026-01-01.json").read_text(encoding="utf-8")), old)
+        idx = json.loads((d / "index.json").read_text(encoding="utf-8"))
+        self.assertEqual([x["day"] for x in idx["days"]][-1], "2026-01-01")
+        self.assertEqual(idx["kept"], "for good")
+
+    def test_ended_notices_never_pruned(self):
+        s = gnss.update(gnss.empty(), [feat()], "bulk", NOW, "prod")
+        s = gnss.update(s, [], "bulk", NOW + timedelta(days=400), "prod")
+        self.assertEqual(len(s["notices"]), 1)
+        self.assertIsNotNone(next(iter(s["notices"].values()))["gone_at"])
+
+    @staticmethod
+    def site(pub):
+        def get(url, timeout=0):
+            if url not in pub:
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            return json.dumps(pub[url]).encode()
+        return get
 
     def test_restore_from_published(self):
-        pub = {gnss.PUBLISHED + "index.json": {"days": [{"day": "2026-11-17"}]},
-               gnss.PUBLISHED + "2026-11-17.json": {"day": "2026-11-17", "n": 3, "notices": []}}
+        day = {"day": "2026-10-17", "n": 3, "written_at": "2026-10-18T00:11:00Z", "revised_at": None, "notices": []}
+        rec = {"key": "A0001/26|LLLL|", **gnss._public(gnss.record(feat(), {"matched_by": "q-code", "q_code": "QGWXX",
+                                                                            "words": []}, "2026-10-17T06:00:00Z", [0]))}
+        pub = {gnss.PUBLISHED + "index.json": {"days": [{"day": "2026-10-17"}]},
+               gnss.PUBLISHED + "2026-10-17.json": day,
+               gnss.PUBLISHED + "all.json": {"notices": [rec]}}
         d = Path(tempfile.mkdtemp())
-        out = gnss.publish(d, NOW, OK, NOTE, getter=lambda url, timeout: json.dumps(pub[url]).encode())
-        self.assertEqual(out["restored"], 1)
-        self.assertEqual(json.loads((d / "days" / "2026-11-17.json").read_text(encoding="utf-8"))["n"], 3)
+        out = gnss.publish(d, NOW, OK, NOTE, getter=self.site(pub))
+        self.assertEqual(out["restored"], 2)
+        self.assertEqual(json.loads((d / "days" / "2026-10-17.json").read_text(encoding="utf-8")), day,
+                         "fetched back as published: written_at and revised_at unchanged")
+        self.assertEqual(list(json.loads((d / "store.json").read_text(encoding="utf-8"))["notices"]),
+                         ["A0001/26|LLLL|"])
+        allj = json.loads((d / "all.json").read_text(encoding="utf-8"))
+        self.assertEqual(allj["n"], 1)
+
+    def test_unreachable_site_with_no_local_copy_stops(self):
+        d = Path(tempfile.mkdtemp())
+
+        def down(url, timeout=0):
+            raise urllib.error.URLError("down")
+        with self.assertRaises(gnss.Unreachable):
+            gnss.publish(d, NOW, OK, NOTE, getter=down)
+        self.assertFalse((d / "index.json").exists())
+
+    def test_first_run_404_starts_afresh(self):
+        d = Path(tempfile.mkdtemp())
+        out = gnss.publish(d, NOW, OK, NOTE, getter=self.site({}))
+        self.assertEqual(out["restored"], 0)
+        self.assertTrue((d / "all.json").exists())
 
     def test_site_files(self):
         d, _ = self.run_day([feat()], [datetime(2026, 11, 18, 6, tzinfo=timezone.utc),
                                        datetime(2026, 11, 19, 1, tzinfo=timezone.utc)])
         self.assertEqual(sorted(gnss.site_files(d)), ["data/gnss-notams/2026-11-18.json",
                                                       "data/gnss-notams/active.json",
+                                                      "data/gnss-notams/all.json",
                                                       "data/gnss-notams/index.json"])
 
 

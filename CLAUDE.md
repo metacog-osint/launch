@@ -23,14 +23,14 @@ python -m unittest discover -s tests   # offline tests
 python tools/serve.py                  # http://127.0.0.1:8771 with _headers (CSP)
 ```
 `.github/workflows/update.yml` (every 6 h at :11, on every push to `main`, by hand) runs tests, collect, build and
-check, then deploys `site/`. State (snapshot, ledger, nms and gnss state) is in the private Actions cache; each run
-unions the committed baseline, the cache, the published ledger and Orbit's launches, so a lost cache loses nothing.
+check, then deploys `site/`. State is in the Actions cache (not durable); each run unions the committed baseline,
+the cache, the published copies and this run, so a lost cache loses nothing.
 
 ## Layout
 - `launch/`: `notam.py` parser; `live.py` lanes; `feed.py`; `catalog.py` the History list and its joins;
   `programs.py` vehicles, sites, programmes, kinds, mission types; `patterns.py` pad patterns; `overfly.py` path
   crosses; `timing.py`; `history.py` map import; `public.py` public gate; `privacy.py`; `nfc.py`, `joey.py`,
-  `wayback.py`, `ngawarn.py` (Orbit's NGA rules, archive only), `nsf.py` forum links, `nms.py`, `gnss.py`.
+  `wayback.py`, `ngawarn.py` (archive only), `nsf.py` forum links, `nms.py`, `gnss.py`.
 - `site_src/`: tabs `#live`, `#history`, `#patterns`, `#paste`, `#sources`; `traj.js`, `export.js`, `saved.js`
   tested in Node. `tic-nav.*`, `tic-time.*`, `tic-related.*` (hub) and `doctrine/kit/`
   are copies: fix them at their source and copy in again.
@@ -111,17 +111,19 @@ reported, not failed.
 - `tfr`: FAA TFR list, map-service shapes (joined to the active list), XNOTAM XML of each SPACE OPERATIONS TFR.
   Windows UTC (`tfr_windows`): the text's EFFECTIVE...UNTIL UTC, else `dateEffective`/`dateExpire` as UTC;
   `codeTimeZone` is only the FAA page's display zone.
-- `orbit`: Orbit's `data/snapshot.json` (scheduled and GCAT launches, payload `inc`); its NGA warnings only until
-  `cordon` has succeeded once.
+- `orbit`: Orbit's `data/snapshot.json` (scheduled and GCAT launches, payload `inc`); its NGA warnings until
+  `cordon` first succeeds.
 - `cordon`: Cordon's feed, `launch` category (the one NGA reader): launch, debris, reentry hazards; Orbit's keys.
-- `nms` (`nms.py`): FAA NMS-API, keys `NMS_CLIENT_ID`/`NMS_CLIENT_SECRET`, `NMS_ENV` (workflow default prod);
-  no keys, `waiting`. FAA limits: one bulk a day (~80,000 NOTAMs), else one delta every 3 min on the kept set.
-  `nms.keep`: no cancels, permanent notices, windows over 62 days, tops under FL100 or non-launch hazards; kept for launch words, area/warning Q-codes, `cn-area`,
-  `unl-area`, `recurring-area` (within 25 NM of a historical area). FDC notices the tfr lane holds go to it. FAA
-  terms (`nms.SOURCE_NOTE`): redistribution allowed, never "FAA data", not authoritative for non-US NOTAMs.
-- **GPS/GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): a second subset of the same pulls, no launch filters
-  (Q-code GA/GW, signal text, `refers`). Publishes `data/gnss-notams/active.json`, one
-  `YYYY-MM-DD.json` per ended UTC day (rewritten up to 48 h, n=0 days included), 14 days, `index.json`.
+- `nms` (`nms.py`): FAA NMS-API NOTAMs via Cordon's `data/notams/` index and `launch-areas.json` (the active set);
+  Cordon holds the keys and makes every FAA request.
+  `nms.keep`: no cancels, permanent notices, windows over 62 days, tops under FL100 or non-launch hazards; kept for
+  launch words, area/warning Q-codes, `cn-area`, `unl-area`, `recurring-area` (25 NM of a past area). FDC notices
+  the tfr lane holds go there. Terms (`nms.SOURCE_NOTE`): never "FAA data", not authoritative for non-US NOTAMs.
+  Every kept notice stays in `data/nms-closures.json` (per number+FIR+lastUpdated; cache, published copy and run
+  unioned); no cache and the site unreadable (not 404) stops the run.
+- **GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): Cordon's `gnss.json`, no launch filters (Q-code GA/GW,
+  signal text, `refers`). `data/gnss-notams/`: `active.json`, a `YYYY-MM-DD.json` per ended UTC day (rewritten up to
+  48 h, n=0 days too), `all.json`, `index.json`; kept for good.
 - **Timing** (`timing.py`): median opening-to-launch per site (5+ launches; 450 NM, windows 6 h or less) gives
   nearby live areas an `expect`. History, not a forecast.
 

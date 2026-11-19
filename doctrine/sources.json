@@ -56,7 +56,7 @@
       "id": "faa-nms",
       "name": "FAA NOTAM Management Service API",
       "url": "https://api-nms.aim.faa.gov/",
-      "licence": "FAA NMS-API terms of service (7 Oct 2026): redistribution allowed, not to be called FAA data; not authoritative for non-US NOTAMs. Access by FAA approval: pre-production granted 16 Nov 2026, production granted 18 Nov 2026",
+      "licence": "FAA NMS-API terms of service (7 Oct 2026): redistribution allowed, not to be called FAA data; not authoritative for non-US NOTAMs. Access by FAA approval: pre-production granted 16 Nov 2026, production granted 18 Nov 2026. Read through Cordon, the suite's one NMS reader, from 19 Nov 2026 (cordon.theintelligence.company/data/notams/)",
       "use": "ingest",
       "grade": "A1",
       "independence_group": "faa",

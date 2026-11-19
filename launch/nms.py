@@ -1,42 +1,32 @@
-"""The FAA NOTAM Management Service API (NMS-API): the `nms` live lane.
+"""FAA NOTAMs (NMS-API) through Cordon: the `nms` live lane.
 
-Access: OAuth2 client credentials from the environment (NMS_CLIENT_ID, NMS_CLIENT_SECRET, set by hand; never
-in this repository). NMS_ENV picks the host: "staging" (the pre-production environment the FAA opens first, the
-default) or "prod" (after the FAA moves the account to production). Without both keys the lane says "waiting".
+Cordon is the suite's one NMS reader (decided 18 Nov 2026): it holds the only keys, makes the one bulk pull a day the
+FAA allows and the deltas, and publishes subset files of the active set at
+https://cordon.theintelligence.company/data/notams/ (index.json; Cordon's cordon/nms.py). Launch reads its
+`launch-areas` subset (restricted, danger and prohibited areas, warnings and "other" notices reaching FL100, not
+permanent, open at most 62 days) and applies its own rules here (keep()); launch/gnss.py reads the `gnss` subset.
+Launch makes no FAA request and holds no NMS keys. From 16 to 19 Nov 2026 Launch read NMS itself; that client
+moved to Cordon.
 
-What it reads (the FAA's limits, NMS-API FAQ, Nov 2026: production allows one bulk pull a day and one delta pull
-every 3 minutes; pre-production one request a second):
-  - bulk, at most once in BULK_HOURS: every active NOTAM of each classification in CLASSES, as GeoJSON files;
-  - otherwise a delta: every NOTAM created, replaced or cancelled since the last pull (lastUpdatedDate, at most 24 h
-    back), applied to the notices kept from the last run (Launch's snapshot, kept in the Actions cache).
-Every NOTAM is filtered here, not at the FAA: one bulk or delta pull, then Launch's own rules (keep()).
+Nothing is lost (decided 18 Nov 2026: storage keeps everything; live views may filter): the live state drops a closure
+a day after it ends, but every closure notice Launch ever kept stays in the ledger (ledger(): data/nms-closures.json,
+published at LEDGER_URL), each version once. Cordon keeps every raw NMS feature for good (its release archive).
 
 The FAA's terms allow redistribution but not calling it FAA data; the FAQ asks that NMS not be presented as the
 authoritative source for non-US NOTAMs. SOURCE_NOTE says both on the page.
 """
 from __future__ import annotations
 
-import base64
-import gzip
 import json
-import os
 import re
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import joey, notam, timing
+from .gnss import EMAIL, EMAIL_NOTE
 
-HOSTS = {"staging": "https://api-staging.cgifederal-aim.com", "prod": "https://api-nms.aim.faa.gov"}
-UA = "tic-launch (+https://launch.theintelligence.company)"
-CLASSES = ("INTERNATIONAL", "FDC", "MILITARY", "DOMESTIC")
-BULK_HOURS = 24          # one bulk pull a day at most (FAA production limit)
-DELTA_MAX_HOURS = 23.5   # lastUpdatedDate reaches 24 h back at most; older state means a bulk pull
-OVERLAP_S = 60           # each delta starts a minute before the last one ended (FAA's advice)
-PAUSE_S = 1.2            # between requests (pre-production: one a second)
+CORDON_NOTAMS = "https://cordon.theintelligence.company/data/notams/"   # Cordon's index.json and subsets
+SUBSET = "launch-areas"
 SOURCE_NOTE = ("NOTAMs read through the FAA NOTAM Management Service API (NMS-API). Not FAA data as published "
                "by Launch, and not the authoritative source for NOTAMs issued outside the United States.")
 
@@ -52,6 +42,12 @@ WORDS = re.compile(notam.LAUNCH_WORDS.pattern.replace(
     "|STAGE|", r"|\b(?:ROCKET|BOOSTER|FIRST|SECOND|THIRD|UPPER|1ST|2ND|3RD) STAGES?\b|\bSTAGES? (?:FALL|IMPACT|DEBRIS|DROP|SPLASH)|"))
 assert WORDS.pattern != notam.LAUNCH_WORDS.pattern, "STAGE was not narrowed"
 UNL_MAX_HOURS = joey.CN_MAX_HOURS
+LEDGER_URL = "https://launch.theintelligence.company/data/nms-closures.json"
+LEDGER_ABOUT = ("Every NMS closure notice Launch has kept (nms.keep), ended ones included, kept for good: one record "
+                "per version (number, FIR, lastUpdated), with when Launch first and last saw it in Cordon's active "
+                "set (first_seen, last_seen). Email addresses in the text are replaced by '" + EMAIL_NOTE + "'. The "
+                "live areas are in snapshot.json; every raw NMS feature is in Cordon's archive "
+                "(its release assets nms-archive-YYYY-MM; Cordon's notams index.json, field archive, links them).")
 RECUR_NM = 25                   # an area centred this close to a past launch closure area is "recurring"
 RECUR_MAX_DAYS = 7
 
@@ -60,62 +56,7 @@ class Waiting(Exception):
     """No keys in the environment: the lane waits."""
 
 
-# ---------- the client ----------
-
-class Client:
-    def __init__(self, env: dict | None = None, opener=None, pause: float = PAUSE_S):
-        env = os.environ if env is None else env
-        self.cid, self.secret = env.get("NMS_CLIENT_ID"), env.get("NMS_CLIENT_SECRET")
-        if not (self.cid and self.secret):
-            raise Waiting("NMS_CLIENT_ID and NMS_CLIENT_SECRET are not set")
-        self.env_name = env.get("NMS_ENV") or "staging"
-        self.host = HOSTS[self.env_name]
-        self.open = opener or urllib.request.urlopen
-        self.pause = pause
-        self.token, self.token_until, self.requests, self._last = None, 0.0, 0, 0.0
-
-    def _call(self, req: urllib.request.Request, timeout: int = 120) -> bytes:
-        wait = self.pause - (time.monotonic() - self._last)
-        if wait > 0:
-            time.sleep(wait)
-        self._last = time.monotonic()
-        self.requests += 1
-        with self.open(req, timeout=timeout) as r:
-            body = r.read()
-        return gzip.decompress(body) if body[:2] == b"\x1f\x8b" else body
-
-    def _auth(self) -> str:
-        if self.token and time.monotonic() < self.token_until:
-            return self.token
-        basic = base64.b64encode(f"{self.cid}:{self.secret}".encode()).decode()
-        req = urllib.request.Request(self.host + "/v1/auth/token", data=b"grant_type=client_credentials",
-                                     method="POST", headers={"User-Agent": UA, "Authorization": "Basic " + basic,
-                                                             "Content-Type": "application/x-www-form-urlencoded"})
-        j = json.loads(self._call(req, 60))
-        self.token = j["access_token"]
-        self.token_until = time.monotonic() + int(j.get("expires_in") or 1799) - 120
-        return self.token
-
-    def get(self, path: str, params: dict | None = None, fmt: str | None = "GEOJSON", timeout: int = 300) -> bytes:
-        url = self.host + path + ("?" + urllib.parse.urlencode(params) if params else "")
-        h = {"User-Agent": UA, "Authorization": "Bearer " + self._auth(), "Accept": "application/json"}
-        if fmt:
-            h["nmsResponseFormat"] = fmt
-        return self._call(urllib.request.Request(url, headers=h), timeout)
-
-    def classification(self, name: str) -> list[dict]:
-        """Every active NOTAM of one classification: a content path, then the file it points to."""
-        j = json.loads(self.get("/nmsapi/v1/notams", {"classification": name, "allowRedirect": "false"}))
-        path = (j.get("data") or {}).get("url")
-        if not path:
-            raise ValueError(f"no content path for {name}: {str(j)[:160]}")
-        body = self.get(path if path.startswith("/") else urllib.parse.urlparse(path).path, fmt=None)
-        return features(json.loads(body))
-
-    def delta(self, since: datetime) -> list[dict]:
-        j = json.loads(self.get("/nmsapi/v1/notams", {"lastUpdatedDate": iso(since)}))
-        return features(j)
-
+# ---------- Cordon's files ----------
 
 def features(j) -> list[dict]:
     """The GeoJSON features of a response, a classification file or a FeatureCollection."""
@@ -313,35 +254,16 @@ def apply(store: dict, feats: list[dict], past, now: datetime, replace_all: bool
     return {"notices": out, "counts": counts}
 
 
-def pull(client: Client, prev: dict, past, now: datetime, on_features=None) -> dict:
-    """One run: a bulk pull when the last is over BULK_HOURS old (or there is none) or the last pull is too old
-    for a delta, else a delta from the last pull. Returns the lane's state for the snapshot. on_features(feats,
-    mode) sees every feature read, for other subsets of the same pull (launch/gnss.py)."""
-    bulk_at, pulled_to = _dt(prev.get("bulk_at")), _dt(prev.get("pulled_to"))
-    store = {_key(n): n for n in prev.get("notices") or []}
-    if (bulk_at is None or now - bulk_at >= timedelta(hours=BULK_HOURS) or pulled_to is None
-            or now - pulled_to >= timedelta(hours=DELTA_MAX_HOURS)):
-        feats, by_class = [], {}
-        for c in CLASSES:
-            got = client.classification(c)
-            by_class[c] = len(got)
-            feats += got
-        res = apply({}, feats, past, now, replace_all=True)
-        mode, bulk_at = "bulk", now
-        res["counts"]["by_class"] = by_class
-    else:
-        feats = client.delta(pulled_to - timedelta(seconds=OVERLAP_S))
-        res = apply(store, feats, past, now)
-        mode = "delta"
-    if on_features:
-        on_features(feats, mode)
+def from_set(feats: list[dict], index: dict, past, now: datetime) -> dict:
+    """Cordon's launch-areas subset (the active set at its last pull) -> the lane's state for the snapshot."""
+    res = apply({}, feats, past, now, replace_all=True)
     notices = sorted(res["notices"].values(), key=lambda n: (n.get("start") or "", n.get("number") or ""))
     kinds: dict[str, int] = {}
     for n in notices:
         kinds[n["kept"]] = kinds.get(n["kept"], 0) + 1
-    return {"env": client.env_name, "mode": mode, "bulk_at": iso(bulk_at), "pulled_to": iso(now),
-            "requests": client.requests, "counts": {**res["counts"], "kept_by_rule": kinds},
-            "source_note": SOURCE_NOTE, "notices": notices}
+    return {"env": index.get("env"), "mode": "cordon", "via": CORDON_NOTAMS, "bulk_at": index.get("bulk_at"),
+            "pulled_to": index.get("pulled_to"), "cordon_status": index.get("lane_status"), "requests": 0,
+            "counts": {**res["counts"], "kept_by_rule": kinds}, "source_note": SOURCE_NOTE, "notices": notices}
 
 
 def areas(state: dict, tfr_ids: set[str] | None = None, sites: dict | None = None) -> list[dict]:
@@ -361,3 +283,35 @@ def areas(state: dict, tfr_ids: set[str] | None = None, sites: dict | None = Non
                         "windows": [{"start": n["start"], "end": n["end"]}], "ring_basis": n.get("ring_basis"),
                         "expect": timing.expect(ring, n["start"], n["end"], sites or {})})
     return out
+
+
+# ---------- the ledger: every closure notice ever kept ----------
+
+def ledger_key(n: dict) -> str:
+    """Number, FIR and lastUpdated: one record per version ("2026-11-19T17:59:00.000Z" and "...00Z" are one time)."""
+    lu = (n.get("last_updated") or "").replace(".000Z", "Z")
+    return f"{n.get('number')}|{n.get('fir') or ''}|{lu}"
+
+
+def ledger(docs: list, fresh: list[dict], at: str) -> dict:
+    """The union of earlier ledgers (the cache's, the published copy) and this run's kept notices."""
+    out: dict[str, dict] = {}
+
+    def add(e: dict) -> None:
+        k = e.get("ledger_key") or ledger_key(e)
+        old = out.get(k)
+        if old:
+            e = {**old, **e, "first_seen": min(old.get("first_seen") or at, e.get("first_seen") or at),
+                 "last_seen": max(old.get("last_seen") or "", e.get("last_seen") or "")}
+        out[k] = {**e, "ledger_key": k}
+
+    for d in docs:
+        for e in (d or {}).get("notices") or []:
+            if isinstance(e, dict) and e.get("number"):
+                add(e)
+    for n in fresh:
+        add({**n, "text": EMAIL.sub(EMAIL_NOTE, n.get("text") or ""), "first_seen": at, "last_seen": at})
+    notices = sorted(out.values(), key=lambda e: (e.get("start") or "", e.get("number") or "", e["ledger_key"]))
+    return {"program": "launch", "dataset": "nms-closures", "source": "FAA NMS-API via Cordon",
+            "source_note": SOURCE_NOTE, "about": LEDGER_ABOUT, "generated_at": at, "n": len(notices),
+            "notices": notices}

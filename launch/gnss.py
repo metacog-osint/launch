@@ -14,15 +14,22 @@ Each kept NOTAM keeps the NMS-API's own fields as given (`notam`), its ICAO text
 fields: why it was kept, the words, when Launch first and last saw it, and what cancelled or replaced it.
 Email addresses in the text are removed (Launch's privacy check refuses them on the site); nothing else is.
 
-State (data/gnss/store.json, kept in the Actions cache with the snapshot): every kept NOTAM seen in the last
-KEEP_DAYS + 2 days, and a log of the lane's runs. Published (site/data/gnss-notams/, copied by `build`):
+Nothing is ever dropped (decided 18 Nov 2026: storage keeps everything; live views may filter). State
+(data/gnss/store.json, kept in the Actions cache with the snapshot): every GNSS NOTAM ever kept, ended ones
+included, and a log of the lane's runs (RUNS_KEEP_DAYS; each day file keeps its own day's counts). The Actions cache
+is not durable, so each run unions the store with the published all.json and fetches back any published day file
+it lacks; with no local copy and the site unreachable (not a 404) the run stops (Unreachable) rather than publish
+less than the site holds. A day file fetched back is written as published, so its written_at and revised_at stay
+as they were (Noisefloor copies a day again only when that pair changes). Published (site/data/gnss-notams/,
+copied by `build`):
   active.json         the kept NOTAMs in the FAA's active set at the last pull (cancels and replaces included,
                       `in_force` says whether each is in force at that time);
   YYYY-MM-DD.json     one per UTC day, written once the day has ended: every kept NOTAM whose window overlaps the
                       day (to its end, or to the cancel that ended it), and the cancels and replaces issued that
                       day. Rewritten for REVISE_HOURS after the day ends when a late cancel changes it
                       (`revised_at`). Written for every day the lane ran, n=0 included, with the lane's runs that
-                      day, so a day with no pull says so. KEEP_DAYS days are kept;
+                      day, so a day with no pull says so. Kept for good (until 19 Nov 2026, 14 days);
+  all.json            every GNSS NOTAM Launch has kept, ended ones included (the store, without the run log);
   index.json          the day files, with n and when each was written.
 The FAA's terms allow redistribution but not calling it FAA data, and NMS is not the authoritative source for
 NOTAMs issued outside the United States (nms.SOURCE_NOTE, in every file's header).
@@ -35,7 +42,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 RULE = "gnss-1.0"
-KEEP_DAYS = 14
+RUNS_KEEP_DAYS = 16     # the run log only; NOTAMs and day files are kept for good
 REVISE_HOURS = 48
 NEAR = 60
 PUBLISHED = "https://launch.theintelligence.company/data/gnss-notams/"
@@ -226,13 +233,8 @@ def update(store: dict, feats: list[dict], mode: str, now: datetime, env: str | 
 
 
 def prune(s: dict, now: datetime) -> dict:
-    cut = now - timedelta(days=KEEP_DAYS + 2)
-    keep = {}
-    for k, v in s["notices"].items():
-        last = max([d for d in (_end(v), _dt(v.get("gone_at")), _dt(v.get("last_seen"))) if d] or [now])
-        if not (v.get("gone_at") or _end(v)) or last >= cut:
-            keep[k] = v
-    s["notices"] = keep
+    """Only the run log is trimmed (each day file keeps its day's counts); every NOTAM stays."""
+    cut = now - timedelta(days=RUNS_KEEP_DAYS)
     s["runs"] = [r for r in s.get("runs") or [] if (_dt(r.get("at")) or now) >= cut]
     return s
 
@@ -343,26 +345,71 @@ def _write(p: Path, doc: dict) -> None:
     p.write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8", newline="\n")
 
 
+class Unreachable(RuntimeError):
+    """No local copy and the published one cannot be read: publishing now would publish less than the site holds."""
+
+
+_RESTORED: set[str] = set()
+
+
+def _missing(exc: Exception) -> bool:
+    return getattr(exc, "code", None) == 404
+
+
+def _newer(a: dict, b: dict) -> dict:
+    return a if (a.get("last_seen") or "") >= (b.get("last_seen") or "") else b
+
+
 def restore(gdir: Path, getter) -> int:
-    """With no index here (a lost cache), fetch the published day files of the last KEEP_DAYS days."""
-    if (gdir / "index.json").exists() or getter is None:
+    """Once a run: fetch back every published day file not here (written as published), and union the store with
+    the published all.json, so a lost or older cache loses nothing. Raises Unreachable when there is no local copy
+    and the site answers anything but 404 (a 404 is a first run: nothing published yet). Returns the number of
+    files fetched back."""
+    if getter is None or str(gdir) in _RESTORED:
         return 0
+    have_index, have_store = (gdir / "index.json").exists(), (gdir / "store.json").exists()
+    got = 0
     try:
         idx = json.loads(getter(PUBLISHED + "index.json", 60))
-    except Exception:  # nothing published yet, or the site is down: start afresh
-        return 0
-    got = 0
-    for d in (idx.get("days") or [])[:KEEP_DAYS]:
+    except Exception as exc:  # noqa: BLE001
+        if not have_index and not _missing(exc):
+            raise Unreachable(f"published GNSS index unreadable and no local copy: {type(exc).__name__}: {exc}")
+        idx = {}
+    for d in idx.get("days") or []:
         name = d.get("day")
         if not (isinstance(name, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", name)):
             continue
+        if (gdir / "days" / (name + ".json")).exists():
+            continue
         try:
             doc = json.loads(getter(PUBLISHED + name + ".json", 60))
-        except Exception:
-            continue
+        except Exception as exc:  # noqa: BLE001
+            raise Unreachable(f"published GNSS day file {name} unreadable: {type(exc).__name__}: {exc}")
         if isinstance(doc, dict) and doc.get("day") == name:
             _write(gdir / "days" / (name + ".json"), doc)
             got += 1
+    try:
+        pub = json.loads(getter(PUBLISHED + "all.json", 60))
+    except Exception as exc:  # noqa: BLE001
+        if idx and not _missing(exc) and not have_store:
+            raise Unreachable(f"published GNSS all.json unreadable and no local store: {type(exc).__name__}: {exc}")
+        pub = {}
+    if pub.get("notices"):
+        s = load(gdir / "store.json")
+        notices = dict(s["notices"])
+        added = 0
+        for v in pub["notices"]:
+            if not (isinstance(v, dict) and v.get("key")):
+                continue
+            old = notices.get(v["key"])
+            if old is None:
+                added += 1
+            notices[v["key"]] = _newer(old, v) if old else v
+        if added or not have_store:
+            s["notices"] = notices
+            _write(gdir / "store.json", s)
+            got += 1
+    _RESTORED.add(str(gdir))
     return got
 
 
@@ -396,18 +443,18 @@ def publish(gdir: Path, now: datetime, lane: dict, source_note: str, getter=None
             new["written_at"], new["revised_at"] = old.get("written_at"), iso(now)
             _write(p, new)
             revised.append(p.stem)
-    cut = (today - timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%d")
     days = []
     for p in sorted(days_dir.glob("*.json"), reverse=True) if days_dir.exists() else []:
-        if p.stem < cut:
-            p.unlink()
-            continue
         doc = _read(p) or {}
         days.append({"day": p.stem, "n": doc.get("n"), "written_at": doc.get("written_at"),
                      "revised_at": doc.get("revised_at"), "runs_that_day": doc.get("runs_that_day"),
                      "url": PUBLISHED + p.stem + ".json"})
-    _write(gdir / "index.json", {**header(s, lane, source_note), "generated_at": iso(now), "keep_days": KEEP_DAYS,
-                                 "active": PUBLISHED + "active.json", "days": days})
+    every = sorted(s["notices"].values(), key=_order)
+    _write(gdir / "all.json", {**header(s, lane, source_note), "generated_at": iso(now),
+                               "all_rule": "Every GNSS NOTAM Launch has kept, ended ones included, kept for good.",
+                               "n": len(every), "notices": [{"key": v.get("key"), **_public(v)} for v in every]})
+    _write(gdir / "index.json", {**header(s, lane, source_note), "generated_at": iso(now), "kept": "for good",
+                                 "active": PUBLISHED + "active.json", "all": PUBLISHED + "all.json", "days": days})
     return {"active": len(pub), "kept": len(s["notices"]), "days": len(days), "written": written,
             "revised": revised, "restored": restored, "rule": RULE}
 
@@ -415,7 +462,7 @@ def publish(gdir: Path, now: datetime, lane: dict, source_note: str, getter=None
 def site_files(gdir: Path) -> dict[str, str]:
     """The published files, for `build` (site/data/gnss-notams/)."""
     out = {}
-    for name in ("active.json", "index.json"):
+    for name in ("active.json", "all.json", "index.json"):
         if (gdir / name).exists():
             out["data/gnss-notams/" + name] = (gdir / name).read_text(encoding="utf-8")
     for p in sorted((gdir / "days").glob("*.json")) if (gdir / "days").exists() else []:
