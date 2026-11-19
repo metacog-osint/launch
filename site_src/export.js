@@ -15,7 +15,7 @@ export const ATTRIBUTION = "Launch (The Intelligence Company), launch.theintelli
   + "(J. McDowell, planet4589.org/space/gcat), CC BY 4.0; Launch Library 2 (The Space Devs); Launch's charted notices. "
   + "Chinese notices: NotamForChina (mikezang, github.com/mikezang/NotamForChina), Apache License 2.0. Publicly "
   + "available information; observations, not warnings.";
-const SOURCE = { chart: "Launch's charted notices", gcat: "GCAT", ll2: "Launch Library 2", nfc: "NotamForChina" };
+const SOURCE = { chart: "Launch's charted notices", gcat: "GCAT", ll2: "Launch Library 2", nfc: "NotamForChina", published: "Published notices (reviewed copies)" };
 const PATH = { estimated: "Estimated from an azimuth" };
 const BIG = { US: "us", CN: "cn", RU: "ru" };
 const group = (cc) => BIG[cc] || "other";
@@ -39,6 +39,7 @@ export function geometry(r, events, withAreas) {
     ...events.flatMap((e) => (e.areas || []).map((a) => ({ ring: a.ring, notam: a.notam || "", source: "chart" }))),
     ...(r.closures || []).map((c) => ({ ring: c.ring, notam: c.notam || "", source: "closure" })),
     ...(r.nfc_notices || []).filter((n) => n.ring && n.ring.length >= 3).map((n) => ({ ring: n.ring, notam: n.number || "", fir: n.fir || "", source: "nfc" })),
+    ...(r.published_notices || []).filter((n) => n.ring && n.ring.length >= 3).map((n) => ({ ring: n.ring, notam: n.number || "", source: "published" })),
   ].map((a) => ({ ...a, ring: geodesic(a.ring) }));
   return { paths, areas };
 }

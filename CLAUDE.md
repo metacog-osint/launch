@@ -68,12 +68,12 @@ unions the committed baseline, the cache, the published ledger and Orbit's launc
   coarse GCAT site (`coarse_site()`: region, sea or air launch) the charted point stands within `MATCH_NM` of
   GCAT's, or, for a region, when nearer the charted areas.
   `history/site_fixes.json`: sourced fixes of GCAT sites (`site_fix`), dropped once GCAT changes the row.
-- **Flight paths** (`infer_path()`, one method; the charted lines are analyst guesses, never drawn or published):
-  the bearing to the closure areas 50-2,500 NM out (150 from a coarse point; the farthest of the largest group
-  within 15 deg, `main_area()`), unless over 55 deg (`CROSS_DEG`, past a dog-leg) from both azimuths the record's
-  own inclination allows; else the inclination (payload, station, orbit class, the last launch of the programme),
-  GTO east, or the site's main corridor. Cape south-going paths follow `programs.POLAR_CORRIDOR` (approximate;
-  `path.via`). Suborbital and missiles: towards the farthest area, else none. Each has a basis.
+  `history/published_notices.json`: reviewed notices no source carries (North Korea), `published_notices`.
+- **Flight paths** (`infer_path()`, `ascent.py` docstring; charted lines are never drawn): through the ascent
+  areas by distance (`via` once it bends 25 NM: a dog-leg), then the inclination's heading. Set aside, said in the
+  basis: off-window or off-schedule, a later pass, far and untied, window-joined off the tied bearing, a 40-deg
+  kink. Over `CROSS_DEG` (55) off the inclination: areas give way. Else a sibling's path (`borrow_paths()`),
+  textbook azimuth, GTO east, main corridor; Cape polar `POLAR_CORRIDOR`. Suborbital: farthest area, else none.
 - **Path crosses** (`overfly.py`): `over`, `[[{cc, from, to}]]` in NM, kit's de facto borders, 5 NM samples, land
   only, gaps under 25 NM closed. A ground track is not airspace. Filter `ovf=`.
 - **Ranges** (`history.js` `RANGES`, `inc=`, `far=` as `lo-hi`): payload inclination; farthest area from the pad

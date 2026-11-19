@@ -1,0 +1,295 @@
+{
+ "about": "Closure areas for launches that no other source here carries, each copied from a published copy of the notice and checked against it: North Korea's orbital attempts. A notice's areas are the launch's by the notice's own words or its timing and site (the warning itself names no launch); the source says which. Coordinates are [lon, lat]; times UTC.",
+ "notices": [
+  {
+   "tag": "2012-F01",
+   "kind": "NOTAM",
+   "issuer": "Philippines (RPHI)",
+   "number": "B0372/12",
+   "stage": "second stage",
+   "hazard": "satellite launching falling area",
+   "windows": [
+    [
+     "2012-04-11T22:00:00Z",
+     "2012-04-16T03:00:00Z"
+    ]
+   ],
+   "schedule": "2200-0300",
+   "ring": [
+    [
+     123.9072,
+     19.4089
+    ],
+    [
+     124.7536,
+     19.3856
+    ],
+    [
+     124.7708,
+     15.1386
+    ],
+    [
+     123.7575,
+     15.1597
+    ],
+    [
+     123.9072,
+     19.4089
+    ]
+   ],
+   "source": {
+    "publisher": "NK TechLab, quoting the Philippine NOTAM",
+    "title": "Air traffic warned of rocket drop zone",
+    "url": "https://www.nktechlab.org/2012/03/22/air-traffic-warned-of-rocket-drop-zone/",
+    "date": "2012-03-22"
+   },
+   "reviewed": "2026-11-18"
+  },
+  {
+   "tag": "2016-009",
+   "kind": "NOTAM",
+   "issuer": "Republic of Korea (RKRR)",
+   "number": "A0170/16",
+   "stage": "first stage",
+   "hazard": "debris",
+   "windows": [],
+   "note": "The NOTAMs as quoted give a window from 7 Feb 2016 22:30 UTC, after the launch (00:29 UTC that day): North Korea moved its launch window forward to 7-14 Feb, and the revised notices are not quoted; no window is kept.",
+   "ring": [
+    [
+     124.5,
+     36.0667
+    ],
+    [
+     124.9,
+     36.0667
+    ],
+    [
+     124.9,
+     35.3167
+    ],
+    [
+     124.5,
+     35.3167
+    ],
+    [
+     124.5,
+     36.0667
+    ]
+   ],
+   "source": {
+    "publisher": "Orbital Focus (Orbital Diaries), quoting the NOTAMs",
+    "title": "Kwangmyongsong-4",
+    "url": "https://www.orbitalfocus.uk/Diaries/NKorea/Kwangmyongsong4.php",
+    "date": "2016"
+   },
+   "reviewed": "2026-11-18"
+  },
+  {
+   "tag": "2016-009",
+   "kind": "NOTAM",
+   "issuer": "Republic of Korea (RKRR)",
+   "number": "A0171/16",
+   "stage": "payload fairing",
+   "hazard": "debris",
+   "windows": [],
+   "note": "The NOTAMs as quoted give a window from 7 Feb 2016 22:30 UTC, after the launch (00:29 UTC that day): North Korea moved its launch window forward to 7-14 Feb, and the revised notices are not quoted; no window is kept.",
+   "ring": [
+    [
+     124.1833,
+     33.2667
+    ],
+    [
+     125.15,
+     33.2667
+    ],
+    [
+     125.1333,
+     32.35
+    ],
+    [
+     124.1833,
+     32.3667
+    ],
+    [
+     124.1833,
+     33.2667
+    ]
+   ],
+   "source": {
+    "publisher": "Orbital Focus (Orbital Diaries), quoting the NOTAMs",
+    "title": "Kwangmyongsong-4",
+    "url": "https://www.orbitalfocus.uk/Diaries/NKorea/Kwangmyongsong4.php",
+    "date": "2016"
+   },
+   "reviewed": "2026-11-18"
+  },
+  {
+   "tag": "2016-009",
+   "kind": "NOTAM",
+   "issuer": "Philippines (RPHI)",
+   "number": "B0521/16",
+   "stage": "second stage",
+   "hazard": "debris",
+   "windows": [],
+   "note": "The NOTAMs as quoted give a window from 7 Feb 2016 22:30 UTC, after the launch (00:29 UTC that day): North Korea moved its launch window forward to 7-14 Feb, and the revised notices are not quoted; no window is kept.",
+   "ring": [
+    [
+     123.8833,
+     19.7333
+    ],
+    [
+     124.85,
+     19.7167
+    ],
+    [
+     124.8,
+     17.0
+    ],
+    [
+     123.8667,
+     17.0167
+    ],
+    [
+     123.8833,
+     19.7333
+    ]
+   ],
+   "source": {
+    "publisher": "Orbital Focus (Orbital Diaries), quoting the NOTAMs",
+    "title": "Kwangmyongsong-4",
+    "url": "https://www.orbitalfocus.uk/Diaries/NKorea/Kwangmyongsong4.php",
+    "date": "2016"
+   },
+   "reviewed": "2026-11-18"
+  },
+  {
+   "tag": "2023-F06",
+   "kind": "NGA navigational warning",
+   "issuer": "NGA (NAVAREA XII, HYDROPAC)",
+   "number": "HYDROPAC 1779/23",
+   "stage": "area A",
+   "hazard": "rocket debris",
+   "windows": [
+    [
+     "2023-05-30T15:00:00Z",
+     "2023-06-10T15:00:00Z"
+    ]
+   ],
+   "ring": [
+    [
+     123.5512,
+     36.1093
+    ],
+    [
+     123.3745,
+     35.4052
+    ],
+    [
+     123.8062,
+     35.3335
+    ],
+    [
+     123.9852,
+     36.0377
+    ],
+    [
+     123.5512,
+     36.1093
+    ]
+   ],
+   "source": {
+    "publisher": "SatTrackCam Leiden (Marco Langbroek), quoting NGA's warning",
+    "title": "North Korea's Chollima-1 launch of 30/31 May 2023",
+    "url": "https://sattrackcam.blogspot.com/2023/05/",
+    "date": "2023-05-31"
+   },
+   "reviewed": "2026-11-18"
+  },
+  {
+   "tag": "2023-F06",
+   "kind": "NGA navigational warning",
+   "issuer": "NGA (NAVAREA XII, HYDROPAC)",
+   "number": "HYDROPAC 1779/23",
+   "stage": "area B",
+   "hazard": "rocket debris",
+   "windows": [
+    [
+     "2023-05-30T15:00:00Z",
+     "2023-06-10T15:00:00Z"
+    ]
+   ],
+   "ring": [
+    [
+     123.0265,
+     34.0923
+    ],
+    [
+     122.8588,
+     33.388
+    ],
+    [
+     123.49,
+     33.272
+    ],
+    [
+     123.6673,
+     33.9763
+    ],
+    [
+     123.0265,
+     34.0923
+    ]
+   ],
+   "source": {
+    "publisher": "SatTrackCam Leiden (Marco Langbroek), quoting NGA's warning",
+    "title": "North Korea's Chollima-1 launch of 30/31 May 2023",
+    "url": "https://sattrackcam.blogspot.com/2023/05/",
+    "date": "2023-05-31"
+   },
+   "reviewed": "2026-11-18"
+  },
+  {
+   "tag": "2023-F06",
+   "kind": "NGA navigational warning",
+   "issuer": "NGA (NAVAREA XII, HYDROPAC)",
+   "number": "HYDROPAC 1779/23",
+   "stage": "area C",
+   "hazard": "rocket debris",
+   "windows": [
+    [
+     "2023-05-30T15:00:00Z",
+     "2023-06-10T15:00:00Z"
+    ]
+   ],
+   "ring": [
+    [
+     128.6677,
+     14.9017
+    ],
+    [
+     129.175,
+     11.3197
+    ],
+    [
+     129.9013,
+     11.4415
+    ],
+    [
+     129.4005,
+     15.0237
+    ],
+    [
+     128.6677,
+     14.9017
+    ]
+   ],
+   "source": {
+    "publisher": "SatTrackCam Leiden (Marco Langbroek), quoting NGA's warning",
+    "title": "North Korea's Chollima-1 launch of 30/31 May 2023",
+    "url": "https://sattrackcam.blogspot.com/2023/05/",
+    "date": "2023-05-31"
+   },
+   "reviewed": "2026-11-18"
+  }
+ ]
+}
