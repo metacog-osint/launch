@@ -167,11 +167,12 @@ def centre(pad, a: dict) -> list[float]:
 
 
 def select(pad, near: list[dict], far: list[dict], *, time=None, inc=None, own=False, area_nm=2500,
-           spread=15.0, branch_az=None) -> tuple[list[dict], dict]:
+           spread=15.0, branch_az=None, others: list | None = None) -> tuple[list[dict], dict]:
     """(the ascent areas, {reason: count} of those set aside). `near`: areas within the distance limits; `far`:
     beyond area_nm. Each area: azimuth, downrange_nm, centroid [lon, lat], and optionally tie, notice, windows,
     schedule. `own`: the inclination is the record's own (a borrowed one tests nothing). `branch_az`: the
-    azimuths that inclination allows from the pad."""
+    azimuths that inclination allows from the pad. `others`: a list that gains the areas set aside as another
+    event's (window or schedule, bearing); a later pass or a far area is still the launch's own."""
     t = _dt(time)
     timed = [a for a in near + far if time_holds(a, t)]
     nearest = min(timed, key=lambda a: a["downrange_nm"]) if timed else None
@@ -195,6 +196,8 @@ def select(pad, near: list[dict], far: list[dict], *, time=None, inc=None, own=F
             why = "far"
         if why:
             aside[why] = aside.get(why, 0) + 1
+            if why == "time" and others is not None:
+                others.append(a)
         else:
             keep.append(a)
     if not keep:
@@ -217,6 +220,8 @@ def select(pad, near: list[dict], far: list[dict], *, time=None, inc=None, own=F
     n = len(keep) - len(chosen)
     if n:
         aside["bearing"] = n
+        if others is not None:
+            others.extend(a for a in keep if a not in chosen)
     return chosen, aside
 
 

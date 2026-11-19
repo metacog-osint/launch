@@ -477,7 +477,7 @@ def _target_inc(inc, inc_note, orbit_code, orbit) -> tuple[float | None, str | N
 
 
 def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None, inc_note=None,
-               orbit_code=None, orbit=None, suborbital=False, coarse=False, time=None) -> dict | None:
+               orbit_code=None, orbit=None, suborbital=False, coarse=False, time=None, others=None) -> dict | None:
     """{kind, az, nm, basis} for a record, or None; kind is always "estimated". `areas`: [{azimuth, downrange_nm}],
     optionally with centroid, tie, notice, windows and schedule (`ascent.select()`). A path through its closure
     areas that bends (`ascent.bends()`) has `via` ([[lon, lat]], the ascent areas in order of distance) and runs on
@@ -489,7 +489,8 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
     orbital ones. The areas' overall bearing is checked against the record's own inclination: when it is more than
     CROSS_DEG from both azimuths that inclination allows, the areas give way (Shenzhou-20 from Jiuquan: 162 deg to an
     area, ~97 for the station). `coarse`: the pad is a coarse site point (a region, a sea launch), so nearer areas
-    than COARSE_MIN_NM count for nothing. An internal `_by` key ("areas", "inc", ...) is popped by build_index."""
+    than COARSE_MIN_NM count for nothing. `others`: a list that gains the areas set aside as another event's
+    (ascent.select()). An internal `_by` key ("areas", "inc", ...) is popped by build_index."""
     if not pad:
         return None
     ar = [x for x in (areas or []) if x.get("azimuth") is not None and x.get("downrange_nm")]
@@ -505,7 +506,7 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
     beyond = [x for x in ar if x["downrange_nm"] > AREA_NM]
     opts, direct = branches(pad[1], target) if target is not None else (None, False)
     kept, aside = A.select(pad, near, beyond, time=time, inc=target, own=own, area_nm=AREA_NM, spread=SPREAD_DEG,
-                           branch_az=opts if (own and direct) else None)
+                           branch_az=opts if (own and direct) else None, others=others)
     set_aside = "; set aside: " + ", ".join(f"{n} {A.WHY[k]}" for k, n in aside.items()) if aside else ""
     gave_way = None
     if kept:
@@ -1576,10 +1577,11 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                        or orbit_code in P.STATION_INC)
         if not inc and r["status"] != "notice" and not known_class:
             inc, note = borrowed_inc(site, r.get("programmes"), r.get("vehicle"), r.get("time") or "9999")
+        others: list[dict] = []
         path = infer_path(r.get("pad"), site, bands_by_site.get(site or "", []), areas=areas, inc=inc,
                           inc_note=note, orbit_code=orbit_code, orbit=r.get("orbit"),
                           coarse=coarse_site(r) and r.get("pad_basis") != "chart",
-                          time=r.get("time") if r.get("time_basis") == "time" else None)
+                          time=r.get("time") if r.get("time_basis") == "time" else None, others=others)
         if path:
             path["_inc"] = _target_inc(inc, note, orbit_code, r.get("orbit"))[0]
             r["path"] = path
@@ -1587,7 +1589,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                 over = overfly.overflight(world, r)
                 if over is not None:
                     r["over"] = over
-        far = farthest_nm(r.get("pad"), areas)
+        # Not an area set aside as another event's (its window does not hold the launch, or joined by window alone
+        # off the launch's bearing); a later pass, a far splashdown and a TFR round the pad still count.
+        far = farthest_nm(r.get("pad"), [a for a in areas or [] if not any(a is x for x in others)])
         if far is not None:
             r["far_nm"] = far
         recs.append(r)

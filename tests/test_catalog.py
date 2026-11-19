@@ -207,8 +207,10 @@ class Azimuths(unittest.TestCase):
         areas = [{"azimuth": 98.0, "downrange_nm": 329}, {"azimuth": 99.0, "downrange_nm": 664},
                  {"azimuth": 99.0, "downrange_nm": 1436}, {"azimuth": 99.0, "downrange_nm": 1437},
                  {"azimuth": 237.0, "downrange_nm": 1459}, {"azimuth": 56.0, "downrange_nm": 0.4}]
-        p = catalog.infer_path(xichang, "Xichang", [], areas=areas, orbit="GTO / GEO")
+        others = []
+        p = catalog.infer_path(xichang, "Xichang", [], areas=areas, orbit="GTO / GEO", others=others)
         self.assertEqual((p["az"], p["nm"]), (99.0, round(1437 * 1.15)))
+        self.assertEqual(others, [areas[4]])  # another event's: left out of far_nm, which counts the rest
         self.assertIn("set aside: 1 joined by window alone", p["basis"])  # the area at the pad (0.4 NM) counts for nothing
         ksc = catalog.infer_path([-80.60, 28.61], "Kennedy (KSC)", [], areas=[{"azimuth": 299.6, "downrange_nm": 2}], inc=45.05)
         self.assertIn("payload inclination", ksc["basis"])  # a TFR round the pad sets no azimuth
