@@ -10,6 +10,13 @@ sys.path.insert(0, str(ROOT))
 from launch import catalog, gcat  # noqa: E402
 from launch import programs as P  # noqa: E402
 
+
+def first_leg(pad, p):
+    """The path's bearing from the pad: to its first via point, else its azimuth."""
+    if p.get("via"):
+        return round(catalog.history.bearing(pad[1], pad[0], p["via"][0][1], p["via"][0][0]), 1)
+    return p["az"]
+
 NOW = "2026-11-15T00:00:00Z"
 SITES = {
     "WEN": {"name": "Wenchang", "gcat_name": "Wenchang", "lat": 19.6142, "lon": 110.9511, "country": "CN"},
@@ -154,14 +161,24 @@ class Azimuths(unittest.TestCase):
     def test_infer_path_order(self):
         pad = [110.95, 19.61]
         line = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 125.0, "downrange_nm": 400}, {"azimuth": 125.0, "downrange_nm": 900}], inc=50)
-        self.assertEqual((line["az"], line["nm"]), (125.0, 1035))
-        self.assertNotIn("via", line)  # areas on one line: one great circle
+        # Areas on one line: one great circle to the farthest area, then the inclination's heading there (139 deg).
+        self.assertEqual((first_leg(pad, line), len(line["via"]), line["nm"]), (125.0, 1, 1035))
+        self.assertAlmostEqual(line["az"], 139.2, delta=0.5)
         bend = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400}, {"azimuth": 125.0, "downrange_nm": 900}], inc=50)
         self.assertEqual(len(bend["via"]), 2)  # 400 NM out, 35 NM off the line to the far area: through both
         self.assertIn("dog-leg", bend["basis"])
         far = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400},
                                                                {"azimuth": 290.0, "downrange_nm": 9500}])
         self.assertEqual(far["az"], 120.0)  # a splashdown half a world away sets no azimuth
+        # One area on a drop zone's bearing, well off the inclination: through it, then on the inclination's heading
+        # (Plesetsk to 64.8 deg, Kosmos-2619 2026: X4748/26 at 91.6 deg, 201 NM; the orbit heads ~68 deg there).
+        ple = catalog.infer_path([40.58, 62.93], "Plesetsk", [], areas=[{"azimuth": 91.6, "downrange_nm": 201}], inc=64.76)
+        self.assertEqual(len(ple["via"]), 1)
+        self.assertTrue(60 < ple["az"] < 75, ple["az"])
+        self.assertIn("off the areas' line: a dog-leg", ple["basis"])
+        lent = catalog.infer_path([40.58, 62.93], "Plesetsk", [], areas=[{"azimuth": 91.6, "downrange_nm": 201}], inc=64.76,
+                                  inc_note="inclination 64.76° of the last launch")
+        self.assertNotIn("via", lent)  # a borrowed inclination turns nothing
         geo = catalog.infer_path(pad, "Wenchang", [], orbit="GTO / GEO")
         self.assertEqual(geo["az"], 90.0)
         # Deep space goes east like GTO (Lucy, 2021, from the Cape: only a TFR round the pad), not from Vandenberg.
@@ -184,9 +201,10 @@ class Azimuths(unittest.TestCase):
         # North-going (a space station) and other sites keep a single great circle from the pad.
         self.assertNotIn("via", catalog.infer_path(slc40, "Cape Canaveral", [], inc=51.6))
         self.assertNotIn("via", catalog.infer_path([-120.61, 34.63], "Vandenberg", [], inc=97.6))
-        # A measured bearing (a closure area) is never turned.
+        # A measured bearing (a closure area) takes no corridor turn point: out to the area, then the orbit's heading.
         area = catalog.infer_path(slc40, "Cape Canaveral", [], areas=[{"azimuth": 170.0, "downrange_nm": 300}], inc=98.07)
-        self.assertNotIn("via", area)
+        self.assertNotEqual(area["via"], [[-79.7, 26.3]])
+        self.assertAlmostEqual(first_leg(slc40, area), 170.0, delta=0.5)
 
     def test_areas_bearing_checked_against_the_inclination(self):
         jiuquan = [100.29, 40.96]  # Shenzhou: the station's 41.5 deg allows about 83 or 97 from Jiuquan
@@ -195,9 +213,12 @@ class Azimuths(unittest.TestCase):
         self.assertAlmostEqual(p["az"], 97.0, delta=1.0)
         self.assertIn("off the ascent track", p["basis"])
         ok = catalog.infer_path(jiuquan, "Jiuquan", [], areas=[{"azimuth": 140.0, "downrange_nm": 900}], inc=41.47)
-        self.assertEqual((ok["az"], ok["basis"]), (140.0, "bearing from the pad to its farthest closure area"))  # a dog-leg
+        self.assertAlmostEqual(first_leg(jiuquan, ok), 140.0, delta=0.5)  # a dog-leg: the areas' line, then the orbit's
+        self.assertTrue(ok["basis"].startswith("bearing from the pad to its farthest closure area, then on the heading"))
         sso = catalog.infer_path([80.23, 13.72], "Sriharikota", [], areas=[{"azimuth": 149.2, "downrange_nm": 1500}], inc=97.5)
-        self.assertEqual(sso["az"], 149.2)  # PSLV's dog-leg round Sri Lanka: the areas' track, not the plane's 188
+        # PSLV's dog-leg round Sri Lanka: the areas' track, not the plane's 188, then south on the plane's heading.
+        self.assertAlmostEqual(first_leg([80.23, 13.72], sso), 149.2, delta=0.5)
+        self.assertTrue(180 < sso["az"] < 195, sso["az"])
         lent = catalog.infer_path(jiuquan, "Jiuquan", [], areas=[{"azimuth": 162.0, "downrange_nm": 900}], inc=41.47,
                                   inc_note="inclination 41.47° of the last launch")
         self.assertEqual(lent["az"], 162.0)  # a borrowed inclination checks nothing
