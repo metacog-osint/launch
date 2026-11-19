@@ -5,8 +5,8 @@ with them, a launch history since 2012, and each pad's closure patterns.
 `tic-feed/2`, program id `launch`, prefix `LA`, method `launch-1.0`. Observations only. Site:
 https://launch.theintelligence.company (Cloudflare Pages project `launch`).
 
-Public file, lasting facts only (old text in git history). Notes, decisions, state and open items: the git-ignored
-`CLAUDE.local.md` and the prompt in `.claude/`. Detail is in each module's docstrings.
+Public file, lasting facts only. Notes, decisions, state and open items: the git-ignored
+`CLAUDE.local.md`. Detail is in each module's docstrings.
 
 ## Commands
 ```bash
@@ -27,13 +27,11 @@ check, then deploys `site/`. State is in the Actions cache (not durable); each r
 the cache, the published copies and this run, so a lost cache loses nothing.
 
 ## Layout
-- `launch/`: `notam.py` parser; `live.py` lanes; `feed.py`; `catalog.py` the History list and its joins;
-  `programs.py` vehicles, sites, programmes, kinds, mission types; `patterns.py` pad patterns; `overfly.py` path
-  crosses; `timing.py`; `history.py` map import; `public.py` public gate; `privacy.py`; `nfc.py`, `joey.py`,
-  `wayback.py`, `ngawarn.py` (archive only), `nsf.py` forum links, `nms.py`, `gnss.py`.
+- `launch/`: one module a job, most named below; `notam.py` parser, `catalog.py` the History list
+  and its joins, `programs.py` vehicles, sites, programmes, kinds, mission types; `ngawarn.py` archive only.
 - `site_src/`: tabs `#live`, `#history`, `#patterns`, `#paste`, `#sources`; `traj.js`, `export.js`, `saved.js`
   tested in Node. `tic-nav.*`, `tic-time.*`, `tic-related.*` (hub) and `doctrine/kit/`
-  are copies: fix them at their source and copy in again.
+  are copies: fix them at their source.
 
 ## History (`data/launches.json`, one list)
 - **Sources** (`sources`): `chart` (Launch's charted notices: a hand-built Google My Maps map of closure areas,
@@ -109,18 +107,21 @@ reported, not failed.
 
 ## Live lanes (`launch/live.py`)
 - `tfr`: FAA TFR list, map-service shapes (joined to the active list), XNOTAM XML of each SPACE OPERATIONS TFR.
-  Windows UTC (`tfr_windows`): the text's EFFECTIVE...UNTIL UTC, else `dateEffective`/`dateExpire` as UTC;
-  `codeTimeZone` is only the FAA page's display zone.
+  Windows UTC (`tfr_windows`): the text's EFFECTIVE...UNTIL UTC, else `dateEffective`/`dateExpire` as UTC.
 - `orbit`: Orbit's `data/snapshot.json` (scheduled and GCAT launches, payload `inc`); its NGA warnings until
   `cordon` first succeeds.
+- **Ascent move** (from Orbit, 19 Nov 2026; both run for a two-day check): `schedule` (one LL2 request;
+  multi-source records `upcoming:<first source>:<its id>`, kept by later joins), `news` (links only), LL2 ledger
+  (`ll2ledger.py`: one pull, at most one lookup; launches since GCAT's newest become provisional `ll2:` rows),
+  `compare.py`. Stores kept for good on release `ledger`.
 - `cordon`: Cordon's feed, `launch` category (the one NGA reader): launch, debris, reentry hazards; Orbit's keys.
 - `nms` (`nms.py`): FAA NMS-API NOTAMs via Cordon's `data/notams/` index and `launch-areas.json` (the active set);
   Cordon holds the keys and makes every FAA request.
   `nms.keep`: no cancels, permanent notices, windows over 62 days, tops under FL100 or non-launch hazards; kept for
-  launch words, area/warning Q-codes, `cn-area`, `unl-area`, `recurring-area` (25 NM of a past area). FDC notices
-  the tfr lane holds go there. Terms (`nms.SOURCE_NOTE`): never "FAA data", not authoritative for non-US NOTAMs.
-  Every kept notice stays in `data/nms-closures.json` (per number+FIR+lastUpdated; cache, published copy and run
-  unioned); no cache and the site unreadable (not 404) stops the run.
+  launch words, area/warning Q-codes, `cn-area`, `unl-area`, `recurring-area` (25 NM of a past area); FDC notices
+  the tfr lane holds go there. Never "FAA data", not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`). Every
+  kept notice stays in `data/nms-closures.json` (copies and run unioned; no local
+  copy and the site unreadable, not 404, stops the run).
 - **GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): Cordon's `gnss.json`, no launch filters (Q-code GA/GW,
   signal text, `refers`). `data/gnss-notams/`: `active.json`, a `YYYY-MM-DD.json` per ended UTC day (rewritten up to
   48 h, n=0 days too), `all.json`, `index.json`; kept for good.

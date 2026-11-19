@@ -21,6 +21,13 @@ name: update
 # with the rest. The ledger of every NMS closure notice ever kept (data/nms-closures.json) is not cached: each run
 # unions it with the published copy. Both are kept for good. Never change the path list below: actions/cache keys
 # an entry's version on it, so a changed list finds no earlier state (19 Nov 2026, run 44461432466).
+#
+# Ascent move (19 Nov 2026): the schedule lane makes one Launch Library 2 upcoming request a run, the LL2 ledger one
+# pull and at most one by-id lookup, and the news lane one Spaceflight News request. While Orbit's own LL2 lanes
+# still run (1-2 an hour plus 4 a day) the two stay well under LL2's 15 requests an hour without a key. Their stores
+# (the multi-source schedule, the LL2 ledger and the side-by-side check with Orbit) are kept for good on this
+# repository's public release `ledger`, uploaded after collect; collect reads them back from there (a 404 is a
+# first run; anything else with no local copy stops the run). That is why this job may write contents.
 on:
   push:
     branches: [main]
@@ -28,7 +35,7 @@ on:
     - cron: "11 */6 * * *"
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: update
   cancel-in-progress: false
@@ -59,6 +66,17 @@ jobs:
         run: echo "::warning::No state in the Actions cache, so this run has no last good copy to fall back on."
       - name: Live collection (a failed lane keeps its last good copy and says so on the page)
         run: python tools/launch.py collect
+      - name: Keep the schedule, the LL2 ledger and the comparison for good (release `ledger`)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ledger >/dev/null 2>&1 || gh release create ledger --title "Launch ledger" --latest=false \
+            --notes "Launch's stores, kept for good: ll2-ledger.json (every launch since 1 Jan 2024 from Launch Library 2, The Space Devs, verified and extended each run; begun from Orbit's ledger, 19 Nov 2026), upcoming-store.json (every scheduled launch Launch has seen, one multi-source record each) and ascent-compare.json (the side-by-side check with Orbit's lanes). Launch data: Launch Library 2, The Space Devs (thespacedevs.com)."
+          files=""
+          for f in upcoming-store.json ll2-ledger.json ascent-compare.json; do
+            if [ -f "data/$f" ]; then files="$files data/$f"; fi
+          done
+          if [ -n "$files" ]; then gh release upload ledger $files --clobber; fi
       - name: Build site/
         run: python tools/launch.py build
       - name: Feed check
