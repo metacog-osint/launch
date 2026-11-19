@@ -1,0 +1,230 @@
+{
+ "count": 4,
+ "results": [
+  {
+   "id": "0f867f0c-5422-4d44-93b8-d7faaae7019b",
+   "name": "Starship | Starlink Group 31-2 (Starship Flight 15)",
+   "net": "2026-11-13T22:47:36Z",
+   "window_start": "2026-11-13T22:45:00Z",
+   "window_end": "2026-11-14T00:00:00Z",
+   "last_updated": "2026-11-13T22:47:59Z",
+   "url": "https://ll.thespacedevs.com/2.3.0/launches/0f867f0c-5422-4d44-93b8-d7faaae7019b/",
+   "net_precision": {
+    "name": "Second"
+   },
+   "status": {
+    "abbrev": "In Flight",
+    "name": "Launch in Flight"
+   },
+   "launch_service_provider": {
+    "name": "SpaceX",
+    "type": {
+     "name": "Commercial"
+    },
+    "country": [
+     {
+      "alpha_2_code": "US"
+     }
+    ]
+   },
+   "rocket": {
+    "configuration": {
+     "name": "Starship",
+     "full_name": "Starship V3"
+    }
+   },
+   "mission": {
+    "name": "Starlink Group 31-2 (Starship Flight 15)",
+    "type": "Communications",
+    "description": "Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). ",
+    "orbit": {
+     "abbrev": "LEO",
+     "name": "Low Earth Orbit"
+    }
+   },
+   "pad": {
+    "name": "Orbital Launch Pad 2",
+    "latitude": 25.99677,
+    "longitude": -97.15799,
+    "location": {
+     "name": "SpaceX Starbase, TX, USA",
+     "country": {
+      "alpha_2_code": "US"
+     }
+    }
+   },
+   "image": {
+    "image_url": "x.jpg"
+   }
+  },
+  {
+   "id": "bff2fc91-eddd-4dfc-af26-ac0674cfab4d",
+   "name": "Soyuz 2.1b/Fregat-M | MKA Kinosputnik, KOEN and others",
+   "net": "2026-11-14T01:16:00Z",
+   "window_start": "2026-11-14T00:50:00Z",
+   "window_end": "2026-11-14T01:50:00Z",
+   "last_updated": "2026-11-13T15:37:56Z",
+   "url": "https://ll.thespacedevs.com/2.3.0/launches/bff2fc91-eddd-4dfc-af26-ac0674cfab4d/",
+   "net_precision": {
+    "name": "Minute"
+   },
+   "status": {
+    "abbrev": "Go",
+    "name": "Go for Launch"
+   },
+   "launch_service_provider": {
+    "name": "Russian Federal Space Agency (ROSCOSMOS)",
+    "type": {
+     "name": "Government"
+    },
+    "country": [
+     {
+      "alpha_2_code": "RU"
+     }
+    ]
+   },
+   "rocket": {
+    "configuration": {
+     "name": "Soyuz 2.1b/Fregat-M",
+     "full_name": "Soyuz 2.1b Fregat-M"
+    }
+   },
+   "mission": {
+    "name": "MKA Kinosputnik, KOEN and others",
+    "type": "Technology",
+    "description": "Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). ",
+    "orbit": {
+     "abbrev": "SSO",
+     "name": "Sun-Synchronous Orbit"
+    }
+   },
+   "pad": {
+    "name": "Cosmodrome Site 1S",
+    "latitude": 51.884395,
+    "longitude": 128.333932,
+    "location": {
+     "name": "Vostochny Cosmodrome, Siberia, Russian Federation",
+     "country": {
+      "alpha_2_code": "RU"
+     }
+    }
+   },
+   "image": {
+    "image_url": "x.jpg"
+   }
+  },
+  {
+   "id": "db3500ac-965b-4ad8-b417-cb8d8d005586",
+   "name": "Electron | The Mountain God Rises (iQPS Launch 10)",
+   "net": "2026-11-14T05:30:00Z",
+   "window_start": "2026-11-14T05:30:00Z",
+   "window_end": "2026-11-14T05:30:00Z",
+   "last_updated": "2026-11-13T00:15:49Z",
+   "url": "https://ll.thespacedevs.com/2.3.0/launches/db3500ac-965b-4ad8-b417-cb8d8d005586/",
+   "net_precision": {
+    "name": "Minute"
+   },
+   "status": {
+    "abbrev": "Go",
+    "name": "Go for Launch"
+   },
+   "launch_service_provider": {
+    "name": "Rocket Lab",
+    "type": {
+     "name": "Commercial"
+    },
+    "country": [
+     {
+      "alpha_2_code": "US"
+     }
+    ]
+   },
+   "rocket": {
+    "configuration": {
+     "name": "Electron",
+     "full_name": "Electron"
+    }
+   },
+   "mission": {
+    "name": "The Mountain God Rises (iQPS Launch 10)",
+    "type": "Earth Science",
+    "description": "Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). ",
+    "orbit": {
+     "abbrev": "LEO",
+     "name": "Low Earth Orbit"
+    }
+   },
+   "pad": {
+    "name": "Rocket Lab Launch Complex 1A",
+    "latitude": -39.262833,
+    "longitude": 177.864469,
+    "location": {
+     "name": "Rocket Lab Launch Complex 1, Mahia Peninsula, New Zealand",
+     "country": {
+      "alpha_2_code": "NZ"
+     }
+    }
+   },
+   "image": {
+    "image_url": "x.jpg"
+   }
+  },
+  {
+   "id": "7bdc412b-c965-4517-a131-f57a01189803",
+   "name": "Ariane 64 Block 2 | Amazon Leo (LE-04)",
+   "net": "2026-11-23T00:00:00Z",
+   "window_start": "2026-11-23T00:00:00Z",
+   "window_end": "2026-11-23T00:00:00Z",
+   "last_updated": "2026-10-15T05:35:18Z",
+   "url": "https://ll.thespacedevs.com/2.3.0/launches/7bdc412b-c965-4517-a131-f57a01189803/",
+   "net_precision": {
+    "name": "Day"
+   },
+   "status": {
+    "abbrev": "TBD",
+    "name": "To Be Determined"
+   },
+   "launch_service_provider": {
+    "name": "Arianespace",
+    "type": {
+     "name": "Commercial"
+    },
+    "country": [
+     {
+      "alpha_2_code": "FR"
+     }
+    ]
+   },
+   "rocket": {
+    "configuration": {
+     "name": "Ariane 64",
+     "full_name": "Ariane 64 Block 2"
+    }
+   },
+   "mission": {
+    "name": "Amazon Leo (LE-04)",
+    "type": "Communications",
+    "description": "Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). Mission text (stand-in). ",
+    "orbit": {
+     "abbrev": "LEO",
+     "name": "Low Earth Orbit"
+    }
+   },
+   "pad": {
+    "name": "Ariane Launch Area 4",
+    "latitude": 5.256319,
+    "longitude": -52.786838,
+    "location": {
+     "name": "Guiana Space Centre, French Guiana",
+     "country": {
+      "alpha_2_code": "GF"
+     }
+    }
+   },
+   "image": {
+    "image_url": "x.jpg"
+   }
+  }
+ ],
+ "note": "Cut from a Launch Library 2 reply of 13 Nov 2026 (The Space Devs) to the fields Launch reads; mission text replaced."
+}
