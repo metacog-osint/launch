@@ -19,8 +19,9 @@ areas those are), the path running through them in order of distance and on at t
 against the record's own inclination (CROSS_DEG); else the path a launch from the same site to the same
 inclination took through its own areas (borrow_paths()); else the payloads' inclination (GCAT) or the orbit's usual
 one (sun-synchronous, a space station), with the direction (north- or south-going) from the pad's closure history;
-GTO and GEO launches go east; else the pad's most-used corridor. cos i = cos(latitude) x sin(az) holds for a launch
-without a dog-leg. An estimated path is great circles, not a ground track. A suborbital launch or a missile has no
+GTO, GEO and deep-space launches go east (a deep-space payload's inclination is its final orbit's, so it sets
+nothing; not from a site in P.NO_EAST); else the pad's most-used corridor. cos i = cos(latitude) x sin(az) holds
+for a launch without a dog-leg. An estimated path is great circles, not a ground track. A suborbital launch or a missile has no
 orbit to infer an azimuth from: its path is the bearing to its farthest closure area (drawn to that area, at any
 distance), else none.
 """
@@ -562,13 +563,14 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
                     "basis": f"{what} from the turn point's latitude; {how}; {P.CORRIDOR_NOTE}{note_aside}"}
         return {"kind": "estimated", "az": az, "nm": DEFAULT_PATH_NM, "_by": "inc",
                 "basis": f"{what} from the pad's latitude; {how}{note}{note_aside}"}
-    if orbit == "GTO / GEO":
+    if orbit == "GTO / GEO" or (orbit == "Deep space / lunar" and site not in P.NO_EAST):
+        bound = "geostationary-bound" if orbit == "GTO / GEO" else "bound for deep space or the Moon"
         near = [b for b in bands or [] if _adiff((b["from"] + b["to"]) / 2, 90) <= 30 and b["events"] >= 2]
         if near:
             b = max(near, key=lambda b: b["events"])
             return {"kind": "estimated", "az": b["from"] + 2.5, "nm": DEFAULT_PATH_NM,
-                    "basis": f"geostationary-bound: the site's most-used easterly corridor ({b['events']} events)"}
-        return {"kind": "estimated", "az": 90.0, "nm": DEFAULT_PATH_NM, "basis": "geostationary-bound: due east"}
+                    "basis": f"{bound}: the site's most-used easterly corridor ({b['events']} events)"}
+        return {"kind": "estimated", "az": 90.0, "nm": DEFAULT_PATH_NM, "basis": f"{bound}: due east"}
     good = [b for b in bands or [] if b["events"] >= 3]
     if good:
         b = max(good, key=lambda b: b["events"])
@@ -1570,7 +1572,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             return
         if r.get("orbit") in ("GTO / GEO", "Deep space / lunar"):
             inc = None  # a payload's inclination there is its final orbit's, not the launch's
-        known_class = r.get("orbit") in P.CLASS_INC or r.get("orbit") == "GTO / GEO" or orbit_code in P.STATION_INC
+        known_class = (r.get("orbit") in P.CLASS_INC or r.get("orbit") in ("GTO / GEO", "Deep space / lunar")
+                       or orbit_code in P.STATION_INC)
         if not inc and r["status"] != "notice" and not known_class:
             inc, note = borrowed_inc(site, r.get("programmes"), r.get("vehicle"), r.get("time") or "9999")
         path = infer_path(r.get("pad"), site, bands_by_site.get(site or "", []), areas=areas, inc=inc,

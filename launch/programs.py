@@ -117,6 +117,9 @@ SITE_DIRECTION = {
     "Wenchang": "S", "Hainan commercial (Wenchang)": "S", "Yellow Sea (sea launch)": "S", "Plesetsk": "N",
     "Vostochny": "N", "Baikonur": "N", "Andøya": "N",
 }
+# Sites that launch nothing east (Vandenberg flies south or west over the Pacific: InSight, 2018, and DART, 2021,
+# went south), so a deep-space launch from them takes no estimated eastward path.
+NO_EAST = {"Vandenberg"}
 POLAR_DIRECTION = {"Cape Canaveral": "S", "Kennedy (KSC)": "S", "Mahia": "S", "Kourou": "N"}
 # A south-going polar launch from the Cape does not fly its orbit's azimuth from the pad, which would cross the
 # Florida peninsula: it heads south-east over the Atlantic, turns south and runs parallel to the east coast, close
