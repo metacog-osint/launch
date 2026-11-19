@@ -16,7 +16,8 @@
 Flight paths. Every path is estimated one way (the lines on the charted map are an analyst's guesses, not flight
 paths, so none is taken as one). Best basis first: the launch's ascent areas (ascent.py says which of its closure
 areas those are), the path running through them in order of distance and on at the orbit's heading, checked
-against the record's own inclination (CROSS_DEG); else the path a launch from the same site to the same
+against the record's own inclination (CROSS_DEG), turning onto its heading at the farthest area when the line is
+more than TURN_DEG off it; else the path a launch from the same site to the same
 inclination took through its own areas (borrow_paths()); else the payloads' inclination (GCAT) or the orbit's usual
 one (sun-synchronous, a space station), with the direction (north- or south-going) from the pad's closure history;
 GTO, GEO and deep-space launches go east (a deep-space payload's inclination is its final orbit's, so it sets
@@ -40,6 +41,8 @@ from . import programs as P
 LEDGER_SINCE = "2012-01-01"
 DEFAULT_PATH_NM = 1500
 AREA_NM = 2500        # closure areas farther than this from the pad do not set an azimuth
+TURN_DEG = 5          # a straight path through its areas this far off its own inclination's heading at the farthest
+                      # area turns onto that heading there (Plesetsk to 64.8 deg: a drop zone at 92 deg, then ~68)
 CROSS_DEG = 55        # an areas' bearing this far from both azimuths the record's own inclination allows gives way;
                       # nearer, it is a dog-leg (PSLV 39 deg, Jiuquan and Yellow Sea sun-synchronous 21-50, the Cape's
                       # polar corridor 36) and stands
@@ -476,6 +479,20 @@ def _target_inc(inc, inc_note, orbit_code, orbit) -> tuple[float | None, str | N
     return None, None, False
 
 
+def _going_north(pad, az: float, inc: float, site: str | None) -> bool | None:
+    """Whether a launch leaving the pad on bearing `az` is on the north-going branch of an orbit of inclination `inc`:
+    the branch whose azimuth from the pad is nearer, or, when the two are within 10 deg of each other, the way the
+    site's launches go (P.SITE_DIRECTION). None when the inclination has one branch from there."""
+    opts, direct = branches(pad[1], inc)
+    if not direct or len(opts) < 2:
+        return None
+    d = [_adiff(o, az) for o in opts]
+    way = P.SITE_DIRECTION.get(site or "")
+    if abs(d[0] - d[1]) < 10 and way:
+        return way == "N"
+    return math.cos(math.radians(opts[0] if d[0] <= d[1] else opts[1])) > 0
+
+
 def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None, inc_note=None,
                orbit_code=None, orbit=None, suborbital=False, coarse=False, time=None, others=None) -> dict | None:
     """{kind, az, nm, basis} for a record, or None; kind is always "estimated". `areas`: [{azimuth, downrange_nm}],
@@ -541,9 +558,23 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
                                  + set_aside}
             many = len({round(x["azimuth"]) for x in kept}) > 1
             basis = ("bearing from the pad to its farthest closure area"
-                     + (f" ({n_areas} areas on one line)" if many else "") + set_aside)
-            return {"kind": "estimated", "az": az, "nm": round(max(200, far["downrange_nm"] * 1.15)), "basis": basis,
-                    "_by": "areas", "_n": n_areas}
+                     + (f" ({n_areas} areas on one line)" if many else ""))
+            if own and target is not None and pts:
+                leg = A.final_bearing(pad, pts[-1])
+                t_opts, t_direct = branches(pts[-1][1], target)
+                best = min(t_opts, key=lambda o: _adiff(o, leg))
+                north = _going_north(pad, history.bearing(pad[1], pad[0], pts[-1][1], pts[-1][0]), target, site)
+                if north is not None and len(t_opts) == 2:
+                    # the launch stays on the branch it left the pad on (north- or south-going on its orbit)
+                    best = next((o for o in t_opts if (math.cos(math.radians(o)) > 0) == north), best)
+                if t_direct and TURN_DEG < _adiff(best, leg) <= 45:
+                    return {"kind": "estimated", "az": round(best, 1),
+                            "nm": round(A.legs_nm(pad, pts[-1:]) + max(100.0, 0.15 * far["downrange_nm"])),
+                            "via": pts[-1:], "_by": "areas", "_n": n_areas,
+                            "basis": basis + f", then on the heading of {what} there ({_adiff(best, leg):.0f}° off the "
+                                             "areas' line: a dog-leg)" + set_aside}
+            return {"kind": "estimated", "az": az, "nm": round(max(200, far["downrange_nm"] * 1.15)),
+                    "basis": basis + set_aside, "_by": "areas", "_n": n_areas}
     elif aside:
         gave_way = "; its closure areas set aside: " + ", ".join(f"{n} {A.WHY[k]}" for k, n in aside.items())
     if gave_way and own and direct:
