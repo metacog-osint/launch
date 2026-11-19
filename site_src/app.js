@@ -52,32 +52,12 @@ function table(head, rows, onRow) {
 }
 const put = (box, node) => { box.textContent = ""; box.appendChild(node); };
 const muted = (t) => el("p", "muted small", t);
-// On a phone a table of more than FOLD + 2 rows shows its first FOLD (each table lists the soonest or largest first)
-// and a "Show all" button; wider screens show every row. The fold is CSS (style.css, .fold-box), so nothing is
-// hidden from a wide screen or a printout. Same rule as Cordon, Elements and Headwind. The History tab's list has
-// its own paging and is left.
-const FOLD = 10;
-function foldLong(box, rows) {
-  const old = box.nextElementSibling;
-  if (old && old.classList.contains("fold-more")) old.remove();
-  box.classList.remove("fold-box", "open");
-  if (rows.length <= FOLD + 2) return;
-  rows.forEach((r, n) => r.classList.toggle("fold", n >= FOLD));
-  box.classList.add("fold-box");
-  const btn = el("button", "fold-more", "Show all " + rows.length);
-  btn.type = "button";
-  btn.setAttribute("aria-expanded", "false");
-  btn.addEventListener("click", () => {
-    const open = box.classList.toggle("open");
-    btn.setAttribute("aria-expanded", String(open));
-    btn.textContent = open ? "Show the first " + FOLD : "Show all " + rows.length;
-    if (!open) box.scrollIntoView({ block: "nearest" });
-  });
-  box.after(btn);
-}
-const folds = (panel) => $(panel).querySelectorAll(".tbl-wrap").forEach((box) => {
-  const t = box.querySelector(":scope > table");
-  foldLong(box, t ? [...t.querySelectorAll(":scope > tbody > tr")] : []);
+// Long tables fold with the hub's tic-fold.js at every width: the first 10 rows on a phone and 15 wider (each table
+// lists the soonest or largest first), then "Show all"; a find box over 25 or more. It re-applies when a table is
+// redrawn. The History tab's list has its own paging and is left.
+const folds = (panel) => $(panel).querySelectorAll(".tbl-wrap > table").forEach((t) => {
+  t.setAttribute("data-tic-fold", "");
+  t.setAttribute("data-tic-fold-find", "");
 });
 const poly = (ring, props) => ({ type: "Feature", properties: props, geometry: { type: "Polygon", coordinates: [N.geodesic(ring)] } }); // edges as great circles
 
