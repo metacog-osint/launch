@@ -14,6 +14,20 @@
       },
       "check": "Both closure areas (NOTAMs A4456/26 and A4457/26) lie on one bearing from Taiyuan, 188 deg at 330 and 518 NM, the launch azimuth of a 97.5 deg orbit from Taiyuan (about 190 deg); from Jiuquan they lie at 129 and 140 deg.",
       "reviewed": "2026-11-18"
+    },
+    {
+      "tag": "2024-009",
+      "gcat_site_code": "YJ",
+      "gcat_pad": "LP1",
+      "site_code": "HHAI",
+      "source": {
+        "publisher": "CGTN",
+        "title": "Gravity-1 succeeds in maiden flight from the sea",
+        "url": "https://news.cgtn.com/news/2024-01-11/Gravity-1-succeeds-in-maiden-flight-from-the-sea-1qhzyqUigJG/p.html",
+        "date": "2024-01-11"
+      },
+      "check": "CGTN: launched from the waters surrounding Haiyang, Shandong (the Yellow Sea). The charted launch point lies off Haiyang, 104 NM from GCAT's Huang Hai point and 1,039 NM from Yangjiang, and the launch's closure areas run south-east from it.",
+      "reviewed": "2026-11-19"
     }
   ]
 }
