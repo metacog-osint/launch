@@ -10,7 +10,7 @@ Public file, lasting facts only (old text in git history). Notes, decisions, sta
 
 ## Commands
 ```bash
-python tools/launch.py history [KML]   # map export -> history/history.json + patterns.json; needs history/source/terms.json
+python tools/launch.py history [KML]   # map export -> history/history.json + patterns.json
 python tools/launch.py backfill DIR    # GCAT tables -> history/ledger.json (committed baseline)
 python tools/launch.py collect         # tfr, orbit, cordon, nms lanes -> data/snapshot.json, data/ledger.json
 python tools/launch.py nfc fetch|build|links  # NotamForChina (pinned) -> history/nfc.json, history/nsf_links.json
@@ -73,15 +73,16 @@ the cache, the published copies and this run, so a lost cache loses nothing.
   areas by distance (`via` once it bends 25 NM: a dog-leg), then the inclination's heading. Set aside, said in the
   basis: off-window or off-schedule, a later pass, far and untied, window-joined off the tied bearing, a 40-deg
   kink. Over `CROSS_DEG` (55) off the inclination: areas give way. Else a sibling's path (`borrow_paths()`),
-  textbook azimuth, GTO east, main corridor; Cape polar `POLAR_CORRIDOR`. Suborbital: farthest area, else none.
+  textbook azimuth, GTO and deep space east (not `NO_EAST`), main corridor; Cape polar `POLAR_CORRIDOR`.
+  Suborbital: farthest area, else none.
 - **Path crosses** (`overfly.py`): `over`, `[[{cc, from, to}]]` in NM, kit's de facto borders, 5 NM samples, land
   only, gaps under 25 NM closed. A ground track is not airspace. Filter `ovf=`.
 - **Ranges** (`history.js` `RANGES`, `inc=`, `far=` as `lo-hi`): payload inclination; farthest area from the pad
   (`catalog.farthest_nm()`). A launch without the number hides while its range is set.
 - **Downloads** (`export.js`): CSV, GeoJSON, KML of the filtered launches, only data the page holds; antimeridian
   cut; UTC plus the viewer's named zone; formula-guarded CSV; sources and licences in every file.
-- **Maps:** great-circle edges (`geodesic()`), globe toggle (`launch.projection`), `fitCoords()`. Filters live in
-  the address (`#history?veh=...`); `history.js` `LEGACY` and `OLD_PATH` read old words.
+- **Maps:** great-circle edges, globe toggle, `fitCoords()`. Filters live in the address (`#history?veh=...`);
+  `history.js` `LEGACY` and `OLD_PATH` read old words.
 - **Paste tab:** trajectory from a pad (`traj.js`, dog-leg flag at 25 NM off its great circle); saved notices
   stay in the browser (`launch.saved`).
 - **Source rules:** NotamForChina (Apache-2.0, `nfc.SHA`) and Joey0609/notams (MIT, `joey.SHA`) are fetched into
