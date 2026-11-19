@@ -28,6 +28,6 @@ then deploys `site/` to Cloudflare Pages.
 
 ## Licence
 
-Copyright © 2026 Thomas Brummer, The Intelligence Company. Launch's code is licensed under the GNU Affero General
+Copyright © 2026 The Intelligence Company. Launch's code is licensed under the GNU Affero General
 Public License v3.0 (`LICENSE`). Third-party and shared files keep their own licences, and data keeps its sources'
 terms; both are listed in `NOTICE`.
