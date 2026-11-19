@@ -14,14 +14,14 @@
            estimated flight path with the basis of its azimuth.
 
 Flight paths. Every path is estimated one way (the lines on the charted map are an analyst's guesses, not flight
-paths, so none is taken as one). The azimuth, best basis first: the bearing from the pad to the closure areas
-between MIN_AREA_NM and AREA_NM (any source; the farthest of the largest group within SPREAD_DEG of one bearing),
-checked against the record's own inclination (CROSS_DEG); the payloads' inclination (GCAT) or the orbit's usual
-inclination (sun-synchronous, a space station), with the direction (north- or south-going) taken from the pad's
-closure history; GTO and GEO launches go east; else the pad's most-used corridor. cos i = cos(latitude) x sin(az)
-holds for a launch without a dog-leg. An estimated path is a great circle from the pad on that azimuth, drawn to the
-farthest closure area or to DEFAULT_PATH_NM; it is not a ground track. A suborbital launch or a missile has no orbit
-to infer an azimuth from: its path is the bearing to its farthest closure area (drawn to that area, at any
+paths, so none is taken as one). Best basis first: the launch's ascent areas (ascent.py says which of its closure
+areas those are), the path running through them in order of distance and on at the orbit's heading, checked
+against the record's own inclination (CROSS_DEG); else the path a launch from the same site to the same
+inclination took through its own areas (borrow_paths()); else the payloads' inclination (GCAT) or the orbit's usual
+one (sun-synchronous, a space station), with the direction (north- or south-going) from the pad's closure history;
+GTO and GEO launches go east; else the pad's most-used corridor. cos i = cos(latitude) x sin(az) holds for a launch
+without a dog-leg. An estimated path is great circles, not a ground track. A suborbital launch or a missile has no
+orbit to infer an azimuth from: its path is the bearing to its farthest closure area (drawn to that area, at any
 distance), else none.
 """
 from __future__ import annotations
@@ -31,6 +31,7 @@ import math
 import re
 from datetime import datetime, timedelta, timezone
 
+from . import ascent as A
 from . import gcat, history, notam, overfly
 from . import nfc as NFC
 from . import programs as P
@@ -400,6 +401,68 @@ def main_area(near: list[dict]) -> dict:
     return max(group(best), key=lambda y: y["downrange_nm"])
 
 
+BORROW_INC_DEG = 1.0   # a path from the inclination alone takes the path of a launch from the same site within this
+
+
+def borrow_paths(recs: list[dict], world=None) -> int:
+    """A path set by the inclination alone (no closure areas, or its own set aside) takes the path of the launch
+    from the same site to the same inclination (within BORROW_INC_DEG, the same direction) whose own closure areas
+    (two or more) set its path, nearest in time, drawn to at least DEFAULT_PATH_NM: that site's practice, dog-legs included, rather than the textbook azimuth
+    (Starlink at 53 deg from Vandenberg runs south-east along the coast, not across Baja). Pops the internal keys.
+    Returns how many paths were borrowed."""
+    donors: dict[str, list[dict]] = {}
+    for r in recs:
+        p = r.get("path")
+        if (p and p.get("_by") == "areas" and p.get("_n", 0) >= 2 and r.get("status") == "launched" and p.get("_inc")
+                and r.get("site")):
+            donors.setdefault(r["site"], []).append(r)
+    n = 0
+    for r in recs:
+        p = r.get("path")
+        if not (p and p.get("_by") == "inc" and p.get("_inc") and r.get("site") and r.get("pad")):
+            continue
+        cands = []
+        for d in donors.get(r["site"], []):
+            dp = d["path"]
+            if d is r or abs(dp["_inc"] - p["_inc"]) > BORROW_INC_DEG or not d.get("pad"):
+                continue
+            first = (history.bearing(d["pad"][1], d["pad"][0], dp["via"][0][1], dp["via"][0][0])
+                     if dp.get("via") else dp["az"])
+            if _adiff(first, p["az"]) > 60 or notam.haversine_nm(r["pad"][1], r["pad"][0], d["pad"][1], d["pad"][0]) > 30:
+                continue
+            h = _hours_apart(r.get("time"), d.get("time"))
+            cands.append((h if h is not None else 1e9, d))
+        if not cands:
+            continue
+        d = min(cands, key=lambda c: c[0])[1]
+        dp = d["path"]
+        i = p["basis"].find("; its closure areas")
+        why = p["basis"][i + 2:] if i >= 0 else ""
+        own = "its own closure areas set aside" if why else "no closure areas of its own"
+        r["path"] = {k: v for k, v in dp.items() if k in ("kind", "az", "nm", "via")}
+        r["path"]["nm"] = max(dp["nm"], DEFAULT_PATH_NM)
+        r["path"]["basis"] = (f"the path of the {d.get('vehicle') or 'launch'} of {(d.get('time') or '')[:10]} "
+                              f"({d['id']}) from this site to {dp['_inc']:g}°, set by its closure areas ({own})"
+                              + (f": {why}" if why else ""))
+        r["path"]["borrowed"] = d["id"]
+        if world is not None:
+            over = overfly.overflight(world, r)
+            if over is not None:
+                r["over"] = over
+            else:
+                r.pop("over", None)
+        n += 1
+    for r in recs:
+        for k in ("_by", "_inc", "_n"):
+            (r.get("path") or {}).pop(k, None)
+    return n
+
+
+def kept_first_az(pad, pts: list[list[float]]) -> float:
+    """The bearing from the pad to the nearest ascent point."""
+    return round(history.bearing(pad[1], pad[0], pts[0][1], pts[0][0]), 1)
+
+
 def _target_inc(inc, inc_note, orbit_code, orbit) -> tuple[float | None, str | None, bool]:
     """The inclination a path is aimed at, what it is, and whether it is the record's own (its payloads', its
     station's or its orbit class's; not one borrowed from an earlier launch)."""
@@ -413,18 +476,19 @@ def _target_inc(inc, inc_note, orbit_code, orbit) -> tuple[float | None, str | N
 
 
 def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None, inc_note=None,
-               orbit_code=None, orbit=None, suborbital=False, coarse=False) -> dict | None:
-    """{kind, az, nm, basis} for a record, or None; kind is always "estimated". `areas`: [{azimuth, downrange_nm}];
-    an estimated south-going path from a site in P.POLAR_CORRIDOR also has `via` ([[lon, lat]]): it runs from the pad
-    to that turn point and on from there on `az` (the inclination's azimuth at the turn point), `nm` in all.
-    `inc_note` says where an inclination came from when it is not the record's own payloads. A suborbital launch
-    (`suborbital`) takes the bearing to its farthest closure area at any distance (its impact or recovery area),
-    drawn to that area, and nothing else: no orbit sets its azimuth and the site's corridors are its orbital ones.
-    The areas' bearing is checked against the record's own inclination: when it is more than CROSS_DEG from both
-    azimuths that inclination allows (a closure area of another event, or one off the ascent track), the nearer of
-    those is taken and the basis says so (Shenzhou-20 from Jiuquan: 162 deg to an area, ~97 for the station).
-    `coarse`: the pad is a coarse site point (a region, a sea launch), so nearer areas than COARSE_MIN_NM count for
-    nothing."""
+               orbit_code=None, orbit=None, suborbital=False, coarse=False, time=None) -> dict | None:
+    """{kind, az, nm, basis} for a record, or None; kind is always "estimated". `areas`: [{azimuth, downrange_nm}],
+    optionally with centroid, tie, notice, windows and schedule (`ascent.select()`). A path through its closure
+    areas that bends (`ascent.bends()`) has `via` ([[lon, lat]], the ascent areas in order of distance) and runs on
+    from the last of them on `az`, `nm` in all; so does an estimated south-going path from a site in
+    P.POLAR_CORRIDOR (its turn point). `time`: the launch time (UTC), for the areas' windows; None for a launch known
+    only to the day. `inc_note` says where an inclination came from when it is not the record's own payloads. A
+    suborbital launch (`suborbital`) takes the bearing to its farthest closure area at any distance (its impact or
+    recovery area), drawn to that area, and nothing else: no orbit sets its azimuth and the site's corridors are its
+    orbital ones. The areas' overall bearing is checked against the record's own inclination: when it is more than
+    CROSS_DEG from both azimuths that inclination allows, the areas give way (Shenzhou-20 from Jiuquan: 162 deg to an
+    area, ~97 for the station). `coarse`: the pad is a coarse site point (a region, a sea launch), so nearer areas
+    than COARSE_MIN_NM count for nothing. An internal `_by` key ("areas", "inc", ...) is popped by build_index."""
     if not pad:
         return None
     ar = [x for x in (areas or []) if x.get("azimuth") is not None and x.get("downrange_nm")]
@@ -434,26 +498,58 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
         far = max(ar, key=lambda x: x["downrange_nm"])
         return {"kind": "estimated", "az": far["azimuth"], "nm": round(far["downrange_nm"]),
                 "basis": "bearing from the pad to its farthest closure area, drawn to it (a suborbital flight)"}
-    # Ascent areas (booster and fairing drops, second stage) lie within AREA_NM; a farther area (a splashdown
-    # half a world away, a reentry box) can bear the other way round the globe, so it sets no azimuth.
     target, what, own = _target_inc(inc, inc_note, orbit_code, orbit)
-    near = [x for x in ar if (COARSE_MIN_NM if coarse else MIN_AREA_NM) <= x["downrange_nm"] <= AREA_NM]
-    if near:
-        far = main_area(near)
+    lo_nm = COARSE_MIN_NM if coarse else MIN_AREA_NM
+    near = [x for x in ar if lo_nm <= x["downrange_nm"] <= AREA_NM]
+    beyond = [x for x in ar if x["downrange_nm"] > AREA_NM]
+    opts, direct = branches(pad[1], target) if target is not None else (None, False)
+    kept, aside = A.select(pad, near, beyond, time=time, inc=target, own=own, area_nm=AREA_NM, spread=SPREAD_DEG,
+                           branch_az=opts if (own and direct) else None)
+    set_aside = "; set aside: " + ", ".join(f"{n} {A.WHY[k]}" for k, n in aside.items()) if aside else ""
+    gave_way = None
+    if kept:
+        far = max(kept, key=lambda x: x["downrange_nm"])
         az = far["azimuth"]
-        basis = "bearing from the pad to its farthest closure area" + (
-            "" if far is max(near, key=lambda x: x["downrange_nm"]) else
-            f" on the bearing most of its areas share ({sum(1 for y in near if _adiff(az, y['azimuth']) <= SPREAD_DEG)}"
-            f" of {len(near)}; the others, off that track, may be another event's)")
-        if own:
-            opts, direct = branches(pad[1], target)
-            best = min(opts, key=lambda o: _adiff(o, az))
-            if direct and _adiff(best, az) > CROSS_DEG:
-                basis = (f"{what} from the pad's latitude, the azimuth nearer the bearing to its farthest closure area "
-                         f"({az:g}°, {_adiff(best, az):.0f}° off both azimuths that inclination allows: more than a dog-leg, "
-                         "so taken as an area off the ascent track)")
-                az = best
-        return {"kind": "estimated", "az": az, "nm": round(max(200, far["downrange_nm"] * 1.15)), "basis": basis}
+        if own and direct and min(_adiff(o, az) for o in opts) > CROSS_DEG:
+            gave_way = (f"; its closure areas' bearing ({az:g}°) is {min(_adiff(o, az) for o in opts):.0f}° off both "
+                        "azimuths that inclination allows: more than a dog-leg, so taken as areas off the ascent track")
+        else:
+            pts, off_line = A.route(pad, A.points(pad, kept))
+            n_areas = len(kept)
+            if off_line:
+                set_aside += (f"; {off_line} area point{'' if off_line == 1 else 's'} not drawn through (the path "
+                              f"would turn more than {A.MAX_TURN_DEG}° there: areas side by side, not a dog-leg)")
+            if A.bends(pad, pts):
+                done = A.legs_nm(pad, pts)
+                tail = max(100.0, 0.15 * far["downrange_nm"])
+                leg = A.final_bearing(([pad] + pts)[-2], pts[-1])
+                head, how = leg, "the last leg's heading"
+                if own and target is not None:
+                    t_opts, t_direct = branches(pts[-1][1], target)
+                    best = min(t_opts, key=lambda o: _adiff(o, leg))
+                    if t_direct and _adiff(best, leg) <= 45:
+                        head, how = best, f"the heading of {what} there"
+                dists = sorted(round(x["downrange_nm"]) for x in kept)
+                return {"kind": "estimated", "az": round(head, 1), "nm": round(done + tail), "via": pts, "_by": "areas",
+                        "_n": n_areas,
+                        "basis": f"through its closure areas in order of distance ({n_areas} area"
+                                 f"{'' if n_areas == 1 else 's'}, {dists[0]:,}-{dists[-1]:,} NM out; the bearing from the pad "
+                                 f"goes from {kept_first_az(pad, pts):g}° to {az:g}°, so the path bends: a dog-leg), "
+                                 f"then on {how}"
+                                 + set_aside}
+            many = len({round(x["azimuth"]) for x in kept}) > 1
+            basis = ("bearing from the pad to its farthest closure area"
+                     + (f" ({n_areas} areas on one line)" if many else "") + set_aside)
+            return {"kind": "estimated", "az": az, "nm": round(max(200, far["downrange_nm"] * 1.15)), "basis": basis,
+                    "_by": "areas", "_n": n_areas}
+    elif aside:
+        gave_way = "; its closure areas set aside: " + ", ".join(f"{n} {A.WHY[k]}" for k, n in aside.items())
+    if gave_way and own and direct:
+        if kept:
+            best = min(opts, key=lambda o: _adiff(o, max(kept, key=lambda x: x["downrange_nm"])["azimuth"]))
+            return {"kind": "estimated", "az": best, "nm": DEFAULT_PATH_NM, "_by": "inc",
+                    "basis": f"{what} from the pad's latitude, the azimuth nearer its closure areas" + gave_way + set_aside}
+    note_aside = gave_way or ""
     if target is not None:
         opts, direct = branches(pad[1], target)
         az, how = choose(opts, bands, site, polar=target >= 80)
@@ -462,10 +558,10 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
         if turn and direct and _adiff(az, 180) <= 45:
             t_opts, _ = branches(turn[1], target)
             t_az = min(t_opts, key=lambda o: _adiff(o, az))
-            return {"kind": "estimated", "az": t_az, "nm": DEFAULT_PATH_NM, "via": [list(turn)],
-                    "basis": f"{what} from the turn point's latitude; {how}; {P.CORRIDOR_NOTE}"}
-        return {"kind": "estimated", "az": az, "nm": DEFAULT_PATH_NM,
-                "basis": f"{what} from the pad's latitude; {how}{note}"}
+            return {"kind": "estimated", "az": t_az, "nm": DEFAULT_PATH_NM, "via": [list(turn)], "_by": "inc",
+                    "basis": f"{what} from the turn point's latitude; {how}; {P.CORRIDOR_NOTE}{note_aside}"}
+        return {"kind": "estimated", "az": az, "nm": DEFAULT_PATH_NM, "_by": "inc",
+                "basis": f"{what} from the pad's latitude; {how}{note}{note_aside}"}
     if orbit == "GTO / GEO":
         near = [b for b in bands or [] if _adiff((b["from"] + b["to"]) / 2, 90) <= 30 and b["events"] >= 2]
         if near:
@@ -1061,10 +1157,15 @@ def nsf_join(recs: list[dict], doc: dict | None, chart_topics: dict[str, set]) -
 def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[dict], now: str,
                 nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None,
                 world: "overfly.World | None" = None, nsf_doc: dict | None = None,
-                site_fixes: list[dict] | None = None) -> dict:
+                site_fixes: list[dict] | None = None, published: list[dict] | None = None) -> dict:
     """The History tab's list (data/launches.json). `world` (overfly.World): when given, each record with a flight
     path gets `over`, the countries its ground track crosses (overfly.py). `site_fixes`: history/site_fixes.json's
-    list (apply_site_fixes())."""
+    list (apply_site_fixes()). `published`: history/published_notices.json's list, closure areas no other source
+    carries, each checked against a published copy of its notice and given to its GCAT launch by tag
+    (`published_notices`; their areas are the launch's own, `ascent.TIE_NOTAM`)."""
+    pub_by: dict[str, list] = {}
+    for x in published or []:
+        pub_by.setdefault(x["tag"], []).append(x)
     sites = ledger.get("sites") or {}
     nowdt = _dt(now)
     events = [orient_paths(e, sites) for e in chart_events(hist)]
@@ -1390,7 +1491,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         for n in nn:
             if n.get("ring"):
                 la, lo = notam.centroid(n["ring"])
-                out.append({"ring": n["ring"], "centroid": [round(lo, 4), round(la, 4)]})
+                out.append({"ring": n["ring"], "centroid": [round(lo, 4), round(la, 4)], "tie": A.TIE_NOTAM,
+                            "notice": "nfc:" + (n.get("number") or str(len(out))),
+                            "windows": [[n.get("start"), n.get("end")]] if n.get("start") and n.get("end") else []})
         return out
 
     def add_wayback(r: dict, tag: str | None) -> list[dict]:
@@ -1402,9 +1505,28 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         r["sources"].append("wayback")
         out = []
         for x in xs:
+            ws = ([[w["start"], w["end"]] for w in x.get("windows") or []] if x.get("windows")
+                  else [[x.get("start"), x.get("end")]] if x.get("start") and x.get("end") else [])
             for ring in x.get("rings") or []:
                 la, lo = notam.centroid(ring)
-                out.append({"ring": ring, "centroid": [round(lo, 4), round(la, 4)]})
+                out.append({"ring": ring, "centroid": [round(lo, 4), round(la, 4)], "tie": A.TIE_WINDOW,
+                            "notice": f"{x['kind']}:{x['id']}", "windows": ws})
+        return out
+
+    def add_published(r: dict, tag: str | None) -> list[dict]:
+        """history/published_notices.json's notices for the launch; returns their areas (for the path estimate)."""
+        xs = pub_by.get(tag or "", [])
+        if not xs:
+            return []
+        r["published_notices"] = [{k: x[k] for k in ("kind", "issuer", "number", "stage", "hazard", "windows", "schedule",
+                                                     "note", "ring", "source", "reviewed") if x.get(k)} for x in xs]
+        r["sources"].append("published")
+        out = []
+        for x in xs:
+            la, lo = notam.centroid(x["ring"])
+            out.append({"ring": x["ring"], "centroid": [round(lo, 4), round(la, 4)], "tie": A.TIE_NOTAM,
+                        "notice": "published:" + x["number"], "windows": x.get("windows") or [],
+                        "schedule": x.get("schedule")})
         return out
 
     def add_joey(r: dict, targets: list[str], evs: list[dict]) -> list[dict]:
@@ -1420,7 +1542,10 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         for n in jn:
             for ring in n.get("rings") or []:
                 la, lo = notam.centroid(ring)
-                out.append({"ring": ring, "centroid": [round(lo, 4), round(la, 4)]})
+                out.append({"ring": ring, "centroid": [round(lo, 4), round(la, 4)],
+                            "tie": A.TIE_NOTAM if (n.get("join") or {}).get("by") == "notam" else A.TIE_WINDOW,
+                            "notice": "joey:" + n["id"], "windows": [[n.get("start"), n.get("end")]],
+                            "schedule": n.get("schedule")})
         return out
 
     def finish(r: dict, *, areas=None, orbit_code=None, path=True):
@@ -1450,8 +1575,10 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             inc, note = borrowed_inc(site, r.get("programmes"), r.get("vehicle"), r.get("time") or "9999")
         path = infer_path(r.get("pad"), site, bands_by_site.get(site or "", []), areas=areas, inc=inc,
                           inc_note=note, orbit_code=orbit_code, orbit=r.get("orbit"),
-                          coarse=coarse_site(r) and r.get("pad_basis") != "chart")
+                          coarse=coarse_site(r) and r.get("pad_basis") != "chart",
+                          time=r.get("time") if r.get("time_basis") == "time" else None)
         if path:
+            path["_inc"] = _target_inc(inc, note, orbit_code, r.get("orbit"))[0]
             r["path"] = path
             if world is not None:
                 over = overfly.overflight(world, r)
@@ -1481,7 +1608,9 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
 
     def chart_parts(grp: list[dict]) -> tuple[list, list]:
         """(areas, every copy of each event) of the charted events in `grp`."""
-        return ([a for m in grp for a in (m.get("areas") or [])], [c for m in grp for c in all_copies.get(m["id"], [m])])
+        return ([dict(a, tie=A.TIE_NOTAM, notice="chart:" + (a.get("notam") or f"{m['id']}#{i}"))
+                 for m in grp for i, a in enumerate(m.get("areas") or [])],
+                [c for m in grp for c in all_copies.get(m["id"], [m])])
 
     def attach_chart(r: dict, grp: list[dict]):
         """The charted events joined to a launch record: their ids (the page reads their notices, areas and texts from
@@ -1561,6 +1690,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         extra = add_nfc(r, nfc_by_tag.get(g["tag"], []) + [x for m in grp for x in nfc_by_chart.get(m["id"], [])], copies)
         extra += add_joey(r, ["gcat:" + g["tag"]] + ["chart:" + m["id"] for m in grp], copies)
         extra += add_wayback(r, g["tag"])
+        extra += add_published(r, g["tag"])
         finish(r, areas=list(cl) + _bear(r["pad"], areas + extra),
                orbit_code=P.gcat_orbit_code(g.get("category")))
 
@@ -1621,6 +1751,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         r, cl = ll2_rec(u, "upcoming", False)
         finish(r, areas=cl)
 
+    borrow_paths(recs, world)
     recs.sort(key=lambda r: (r.get("time") or "0000", r["id"]))
     kinds = {k: sum(1 for r in recs if r.get("kind") == k) for k in P.KINDS}
     gcat_kinds = {k: sum(1 for gi in g_info.values() if gi["kind"] == k) for k in P.KINDS if k != P.NOT_KNOWN}

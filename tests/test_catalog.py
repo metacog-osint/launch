@@ -153,8 +153,12 @@ class Azimuths(unittest.TestCase):
 
     def test_infer_path_order(self):
         pad = [110.95, 19.61]
-        area = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400}, {"azimuth": 125.0, "downrange_nm": 900}], inc=50)
-        self.assertEqual((area["az"], area["nm"]), (125.0, 1035))
+        line = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 125.0, "downrange_nm": 400}, {"azimuth": 125.0, "downrange_nm": 900}], inc=50)
+        self.assertEqual((line["az"], line["nm"]), (125.0, 1035))
+        self.assertNotIn("via", line)  # areas on one line: one great circle
+        bend = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400}, {"azimuth": 125.0, "downrange_nm": 900}], inc=50)
+        self.assertEqual(len(bend["via"]), 2)  # 400 NM out, 35 NM off the line to the far area: through both
+        self.assertIn("dog-leg", bend["basis"])
         far = catalog.infer_path(pad, "Wenchang", [], areas=[{"azimuth": 120.0, "downrange_nm": 400},
                                                                {"azimuth": 290.0, "downrange_nm": 9500}])
         self.assertEqual(far["az"], 120.0)  # a splashdown half a world away sets no azimuth
@@ -200,7 +204,7 @@ class Azimuths(unittest.TestCase):
                  {"azimuth": 237.0, "downrange_nm": 1459}, {"azimuth": 56.0, "downrange_nm": 0.4}]
         p = catalog.infer_path(xichang, "Xichang", [], areas=areas, orbit="GTO / GEO")
         self.assertEqual((p["az"], p["nm"]), (99.0, round(1437 * 1.15)))
-        self.assertIn("4 of 5", p["basis"])  # the area at the pad (0.4 NM) counts for nothing
+        self.assertIn("set aside: 1 joined by window alone", p["basis"])  # the area at the pad (0.4 NM) counts for nothing
         ksc = catalog.infer_path([-80.60, 28.61], "Kennedy (KSC)", [], areas=[{"azimuth": 299.6, "downrange_nm": 2}], inc=45.05)
         self.assertIn("payload inclination", ksc["basis"])  # a TFR round the pad sets no azimuth
         sea = [{"azimuth": 0.0, "downrange_nm": 104}, {"azimuth": 1.0, "downrange_nm": 106}, {"azimuth": 127.0, "downrange_nm": 450}]

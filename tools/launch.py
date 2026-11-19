@@ -320,9 +320,12 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     # Sites where GCAT's row is contradicted by the launching state's own report (history/site_fixes.json, reviewed).
     fix_path = root / "history" / "site_fixes.json"
     fixes = json.loads(fix_path.read_text(encoding="utf-8"))["fixes"] if fix_path.exists() else None
+    # Closure areas no other source carries, each checked against a published copy (history/published_notices.json).
+    pub_path = root / "history" / "published_notices.json"
+    published = json.loads(pub_path.read_text(encoding="utf-8"))["notices"] if pub_path.exists() else None
     index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
                                 snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries),
-                                nsf_doc=nsf_doc, site_fixes=fixes)
+                                nsf_doc=nsf_doc, site_fixes=fixes, published=published)
     for tag in (index.get("site_fixes") or {}).get("stale") or []:
         print(f"site_fixes.json: {tag} no longer has the site its fix names in GCAT; review and drop the fix")
     files = {"data/snapshot.json": dump(snap), "data/feed.geojson": dump(feed.build_feed(snap)),

@@ -16,6 +16,8 @@ const nfcRings = (r) => (r.nfc_notices || []).filter((n) => n.ring && n.ring.len
   .concat((r.joey_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)))
   // FAA TFRs and NGA warnings from Internet Archive copies
   .concat((r.archive_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)))
+  // reviewed copies of published notices (history/published_notices.json)
+  .concat((r.published_notices || []).map((n) => n.ring).filter((x) => x && x.length >= 3))
   // notices saved in this browser from the Paste tab (saved.js)
   .concat((r.saved_notices || []).flatMap((n) => (n.rings || []).filter((x) => x.length >= 3)));
 

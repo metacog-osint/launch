@@ -35,7 +35,7 @@ function mark(cc) {
 }
 
 const STATUS = { launched: "Launched", upcoming: "Scheduled (next 14 days)", notice: "Notices with no identified launch" };
-const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina", joey: "Joey0609/notams", wayback: "FAA and NGA notices (Internet Archive)", saved: "Saved in this browser" };
+const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina", joey: "Joey0609/notams", wayback: "FAA and NGA notices (Internet Archive)", published: "Published notices (reviewed copies)", saved: "Saved in this browser" };
 const OUTCOME = { success: "Success", failure: "Failure", "": "Not known" };
 const NK = "Not known";
 /* Launch kinds (catalog.py, from GCAT's launch code): the page's own list until data/launches.json gives its own. */
@@ -547,7 +547,9 @@ function detail(r) {
   fact(dl, "Orbit", r.orbit + (r.inc ? ` · payload inclination ${r.inc}° (GCAT)` : ""));
   if (r.outcome) fact(dl, "Outcome", r.outcome);
   if (r.far_nm !== undefined) fact(dl, "Farthest closure area", `${r.far_nm.toLocaleString("en-US")} NM from the pad`);
-  if (r.path) fact(dl, "Flight path", `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM · ${r.path.basis}`);
+  if (r.path) fact(dl, "Flight path", (r.path.via && r.path.via.length
+    ? `estimated: through ${r.path.via.length} point${r.path.via.length === 1 ? "" : "s"}, then on ${r.path.az}°, drawn ${r.path.nm} NM in all`
+    : `estimated: azimuth ${r.path.az}°, drawn ${r.path.nm} NM`) + ` · ${r.path.basis}`);
   else if (r.notice_set) fact(dl, "Flight path", "none: a set of notices, not a launch");
   else if (r.kind && r.kind !== "Orbital" && r.kind !== NK) fact(dl, "Flight path", "none: a suborbital flight's path is drawn only towards its closure areas, and this one has none");
   else fact(dl, "Flight path", r.pad ? "none: no closure area, inclination or corridor history to infer an azimuth from" : "none: no pad position");
@@ -612,6 +614,7 @@ function detail(r) {
   }
   if (joeyN.some((x) => !x.chart)) joeySection(box, r, joeyN, nfcN);
   if ((r.archive_notices || []).length) archiveSection(box, r.archive_notices);
+  if ((r.published_notices || []).length) publishedSection(box, r.published_notices);
   if (r.nfc) nfcSection(box, r, nfcN);
   if ((r.saved_notices || []).length) savedSection(box, r);
 }
@@ -688,6 +691,21 @@ function archiveSection(box, all) {
     box.appendChild(d);
   });
   box.appendChild(el("p", "small muted", "Read from the Internet Archive's copies of tfr.faa.gov and msi.nga.mil: samples, not a complete record."));
+}
+/* Closure areas no other source carries, each copied from a published copy of its notice (history/published_notices.json). */
+function publishedSection(box, all) {
+  box.appendChild(el("h4", "", `Published notices: ${all.length} area${all.length === 1 ? "" : "s"}`));
+  all.forEach((n) => {
+    const d = el("details", "notam");
+    const w = (n.windows || [])[0];
+    d.appendChild(el("summary", "", `${n.number} · ${n.issuer}` + (n.stage ? ` · ${n.stage}` : "") + (w ? ` · ${fmt(w[0])} to ${fmt(w[1])}` : "")));
+    if (n.schedule) d.appendChild(el("p", "small", `Daily ${n.schedule} UTC.`));
+    if (n.note) d.appendChild(el("p", "small muted", n.note));
+    const s = n.source || {};
+    if (s.url) { const p = el("p", "small"); p.appendChild(document.createTextNode("Copied from: ")); const a = el("a", "", `${s.publisher}, ${s.title}` + (s.date ? ` (${s.date})` : "")); a.href = s.url; a.rel = "noopener"; p.appendChild(a); d.appendChild(p); }
+    box.appendChild(d);
+  });
+  box.appendChild(el("p", "small muted", "Checked against the published copy " + (all[0].reviewed || "") + "; the notice's own text is the record."));
 }
 function joeySection(box, r, all, nfcN) {
   const own = all.filter((x) => !x.chart);
