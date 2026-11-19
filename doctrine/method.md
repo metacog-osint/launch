@@ -19,4 +19,8 @@ history, and says which scheduled launches coincide with them. Observations only
    None says an area is for a launch.
 5. **Live lanes:** FAA space-operations TFRs; Orbit's published snapshot. FAA NMS waits for access. The
    NASASpaceflight forum is linked, not collected.
+   **Scheduled launches** (19 Nov 2026, from Orbit): one record per expected launch from one or more sources (Launch
+   Library 2 first), with Launch's own id; each kind of evidence is named ("listed" so far), none is a forecast.
+   Headlines are links only. The LL2 ledger is verified and extended each run; its launches GCAT has not listed are
+   provisional until a GCAT launch joins them.
 6. **Not for navigation.**

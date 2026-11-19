@@ -14,13 +14,35 @@
     },
     {
       "id": "orbit-snapshot",
-      "name": "Orbit (The Intelligence Company): scheduled launches (Launch Library 2) and GCAT launches; its NGA warnings only until Cordon's lane has run",
+      "name": "Orbit (The Intelligence Company): scheduled launches (Launch Library 2) and GCAT launches; its NGA warnings only until Cordon's lane has run; its launch ledger file (orbit releases/ledger), read to begin Launch's own and for the side-by-side check while both run (Ascent move, 19 Nov 2026)",
       "url": "https://orbit.theintelligence.company/data/snapshot.json",
       "licence": "Each item keeps its source's terms: GCAT CC BY 4.0; Launch Library 2 free access, no licence stated; NGA US Government work; Japan Coast Guard Government Standard Terms of Use 2.0",
       "use": "ingest",
       "grade": "B2",
       "independence_group": "orbit",
       "commercial_ok": "unknown"
+    },
+    {
+      "id": "ll2-thespacedevs",
+      "name": "Launch Library 2, The Space Devs: upcoming launches (the schedule lane) and every launch since 1 Jan 2024 (the LL2 ledger), read directly from 19 Nov 2026 (Ascent move, from Orbit)",
+      "url": "https://thespacedevs.com/llapi",
+      "licence": "Free access to the whole database (\"the entire database is accessible to everyone, for free\", thespacedevs.com/llapi, read 16 Nov 2026), 15 requests an hour without a key. No separate data licence is stated; decided 15 Nov 2026: freely available, so it is used and republished with credit (Orbit's ledger release, now Launch's). Images not used: each carries its own licence.",
+      "use": "ingest",
+      "grade": "B2",
+      "independence_group": "thespacedevs",
+      "commercial_ok": "unknown",
+      "note": "Two or three requests a Launch run (one upcoming, one ledger pull, at most one by-id lookup). While Orbit's lanes still run (1-2 an hour plus 4 a day), the two programs together stay well under 15 an hour."
+    },
+    {
+      "id": "snapi-thespacedevs",
+      "name": "Spaceflight News API (Spaceflight News API and The Space Devs): headlines tied to Launch Library 2 launches, links only",
+      "url": "https://www.spaceflightnewsapi.net/",
+      "licence": "No licence, terms of use or rate limit stated (site read 15 Nov 2026; footer 'Copyright 2026 Spaceflight News API & The Space Devs'). Links only: headline, outlet, time and the link to the outlet's page; no summaries, no images.",
+      "use": "ingest",
+      "grade": "B3",
+      "independence_group": "thespacedevs",
+      "commercial_ok": "unknown",
+      "note": "One request a run, filtered to the scheduled launches' Launch Library 2 ids (Orbit's rule, orbit-2.5, decided 15 Nov 2026: links only). The API usually links the right launch (B); the headlines are the outlets' own reporting, not checked (3)."
     },
     {
       "id": "cordon-feed",
