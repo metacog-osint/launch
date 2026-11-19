@@ -78,7 +78,7 @@ the cache, the published copies and this run, so a lost cache loses nothing.
 - **Path crosses** (`overfly.py`): `over`, `[[{cc, from, to}]]` in NM, kit's de facto borders, 5 NM samples, land
   only, gaps under 25 NM closed. A ground track is not airspace. Filter `ovf=`.
 - **Ranges** (`history.js` `RANGES`, `inc=`, `far=` as `lo-hi`): payload inclination; farthest area from the pad
-  (`catalog.farthest_nm()`). A launch without the number hides while its range is set.
+  (`catalog.farthest_nm()`), not one set aside as another event's (`ascent.select(others=)`). A launch without the number hides while its range is set.
 - **Downloads** (`export.js`): CSV, GeoJSON, KML of the filtered launches, only data the page holds; antimeridian
   cut; UTC plus the viewer's named zone; formula-guarded CSV; sources and licences in every file.
 - **Maps:** great-circle edges, globe toggle, `fitCoords()`. Filters live in the address (`#history?veh=...`);

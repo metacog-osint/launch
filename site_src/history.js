@@ -66,7 +66,7 @@ const RANGES = [
     about: "GCAT's payload inclination (launches GCAT lists)",
     presets: [["Near-equatorial", null, 10], ["Prograde 10-85", 10, 85], ["Near-polar 85-95", 85, 95], ["Sun-synchronous range", 96, 102], ["Retrograde", 90, null]] },
   { k: "far", label: "Farthest closure area", unit: "NM", step: "1", get: (r) => r.far_nm,
-    about: "from the pad to the centre of the launch's farthest charted or NotamForChina area",
+    about: "from the pad to the centre of the launch's farthest closure area; an area set aside as another event's does not count",
     presets: [["Under 500 NM", null, 500], ["500-2,500 NM", 500, 2500], ["Over 2,500 NM", 2500, null]] },
 ];
 const num = (v) => (v === "" || v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
