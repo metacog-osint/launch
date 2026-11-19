@@ -164,6 +164,11 @@ class Azimuths(unittest.TestCase):
         self.assertEqual(far["az"], 120.0)  # a splashdown half a world away sets no azimuth
         geo = catalog.infer_path(pad, "Wenchang", [], orbit="GTO / GEO")
         self.assertEqual(geo["az"], 90.0)
+        # Deep space goes east like GTO (Lucy, 2021, from the Cape: only a TFR round the pad), not from Vandenberg.
+        lucy = catalog.infer_path([-80.5774, 28.5619], "Cape Canaveral", [], orbit="Deep space / lunar",
+                                  areas=[{"azimuth": 300.0, "downrange_nm": 5}])
+        self.assertEqual((lucy["az"], lucy["basis"]), (90.0, "bound for deep space or the Moon: due east"))
+        self.assertIsNone(catalog.infer_path([-120.61, 34.63], "Vandenberg", [], orbit="Deep space / lunar"))
         self.assertIsNone(catalog.infer_path(pad, "Wenchang", [{"from": 100, "to": 105, "events": 2}]))  # too few to use
         self.assertIsNone(catalog.infer_path(None, None, [], inc=50))
 
