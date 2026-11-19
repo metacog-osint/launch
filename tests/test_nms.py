@@ -2,11 +2,12 @@
 import json
 import sys
 import unittest
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from launch import nms, timing  # noqa: E402
+from launch import gnss, nms, timing  # noqa: E402
 
 NOW = datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc)
 
@@ -83,45 +84,140 @@ class Store(unittest.TestCase):
         self.assertEqual(res["notices"], {})
 
 
-class FakeClient:
-    env_name, host = "staging", "https://example.invalid"
-
-    def __init__(self):
-        self.requests, self.calls = 0, []
-
-    def classification(self, name):
-        self.calls.append(("bulk", name))
-        return [feat(icao())] if name == "INTERNATIONAL" else []
-
-    def delta(self, since):
-        self.calls.append(("delta", since))
-        return []
+INDEX = {"env": "prod", "lane_status": "ok", "bulk_at": "2026-11-17T00:30:00Z", "pulled_to": "2026-11-17T11:40:00Z",
+         "subsets": [{"name": "launch-areas", "file": "launch-areas.json"}, {"name": "gnss", "file": "gnss.json"}]}
 
 
-class Pull(unittest.TestCase):
-    def test_bulk_then_delta(self):
-        c = FakeClient()
-        st = nms.pull(c, {}, [], NOW)
-        self.assertEqual(st["mode"], "bulk")
-        self.assertEqual([x[1] for x in c.calls], list(nms.CLASSES))
-        self.assertEqual(len(st["notices"]), 1)
-        c2 = FakeClient()
-        st2 = nms.pull(c2, st, [], NOW + timedelta(hours=5))
-        self.assertEqual(st2["mode"], "delta")
-        self.assertEqual(c2.calls, [("delta", NOW - timedelta(seconds=nms.OVERLAP_S))])
-        self.assertEqual(len(st2["notices"]), 1)
-        c3 = FakeClient()
-        self.assertEqual(nms.pull(c3, st2, [], NOW + timedelta(hours=25))["mode"], "bulk")
+class FromCordon(unittest.TestCase):
+    def test_set_is_whole_active_set(self):
+        st = nms.from_set([feat(icao()), feat(icao(num="A5898/26", q="QFALC", e="AD CLSD"))], INDEX, [], NOW)
+        self.assertEqual((st["mode"], st["requests"], st["env"]), ("cordon", 0, "prod"))
+        self.assertEqual((st["bulk_at"], st["pulled_to"]), (INDEX["bulk_at"], INDEX["pulled_to"]))
+        self.assertEqual([n["number"] for n in st["notices"]], ["A5897/26"])
+        self.assertEqual(st["counts"]["kept_by_rule"], {"cn-area": 1})
+        self.assertIn("Not FAA data", st["source_note"])
 
-    def test_waiting_without_keys(self):
-        with self.assertRaises(nms.Waiting):
-            nms.Client(env={})
+    def test_no_faa_client_left(self):
+        self.assertFalse(hasattr(nms, "Client") or hasattr(nms, "pull") or hasattr(nms, "HOSTS"))
+        self.assertTrue(nms.CORDON_NOTAMS.startswith("https://cordon.theintelligence.company/"))
+
+    def test_lane_reads_cordon_files(self):
+        import runpy
+        import tempfile
+        mod = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tools" / "launch.py"), run_name="lane_test")
+        site = {nms.CORDON_NOTAMS + "index.json": INDEX,
+                nms.CORDON_NOTAMS + "launch-areas.json": {"type": "FeatureCollection", "features": [feat(icao())]},
+                nms.CORDON_NOTAMS + "gnss.json": {"type": "FeatureCollection", "features": []}}
+        asked = []
+
+        def getter(url, timeout=0):
+            asked.append(url)
+            if url not in site:   # Launch's own published GNSS files: none yet
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            return json.dumps(site[url]).encode()
+        with tempfile.TemporaryDirectory() as t:
+            raw = Path(t) / "data" / "raw"
+            result, recs = mod["_lane_nms"](raw, {}, getter)
+            self.assertTrue((Path(t) / "data" / "gnss" / "store.json").exists())
+        self.assertEqual([u for u in asked if u in site], list(site))
+        self.assertTrue(all(u in site or u.startswith(gnss.PUBLISHED) for u in asked))
+        self.assertTrue(all("faa.gov" not in u for u in asked))
+        self.assertEqual(len(result["nms"]["notices"]), 1)
+        self.assertEqual(len(recs), 3)
 
     def test_areas_leave_fdc_to_tfr_lane(self):
         st = {"notices": [{"number": "6/7113", "classification": "FDC", "fir": None, "start": "2026-11-18T00:00:00Z",
                            "end": "2026-11-18T02:00:00Z", "rings": [[[0, 0], [1, 0], [1, 1], [0, 0]]], "kept": "words"}]}
         self.assertEqual(nms.areas(st, {"6/7113"}), [])
         self.assertEqual(len(nms.areas(st, set())), 1)
+
+
+class Ledger(unittest.TestCase):
+    """Every closure notice ever kept stays (data/nms-closures.json), each version once."""
+
+    N = {"number": "A5897/26", "fir": "ZXXX", "last_updated": "2026-11-17T10:00:00.000Z", "start": "2026-11-18T00:00Z",
+         "text": "ROCKET LAUNCH. CTC OPS" + chr(64) + "EXAMPLE.CN"}   # an address, built so no file holds one
+
+    def test_union_and_versions(self):
+        one = nms.ledger([], [self.N], "2026-11-17T12:00:00Z")
+        self.assertEqual(one["n"], 1)
+        self.assertNotIn("@", one["notices"][0]["text"])
+        # later: the same version again (".000Z" written as "Z"), and a new version of it
+        two = nms.ledger([one], [{**self.N, "last_updated": "2026-11-17T10:00:00Z"},
+                                 {**self.N, "last_updated": "2026-11-17T18:00:00.000Z"}], "2026-11-17T18:00:00Z")
+        self.assertEqual(two["n"], 2)
+        first = next(e for e in two["notices"] if e["last_updated"].startswith("2026-11-17T10"))
+        self.assertEqual((first["first_seen"], first["last_seen"]), ("2026-11-17T12:00:00Z", "2026-11-17T18:00:00Z"))
+        # the live set is empty now (ended): the ledger keeps both
+        three = nms.ledger([two, None], [], "2026-12-30T00:00:00Z")
+        self.assertEqual(three["n"], 2)
+        self.assertIn("Not FAA data", three["source_note"])
+
+    def lane(self, getter, cached=None, lane=None):
+        import runpy
+        import tempfile
+        mod = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tools" / "launch.py"), run_name="ledger_test")
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+            if cached:
+                (d / "nms-closures.json").write_text(json.dumps(cached), encoding="utf-8")
+            snap = {"generated_at": "2026-11-19T00:11:00Z",
+                    "lanes": {"nms": lane or {"status": "ok", "fetched_at": "2026-11-19T00:11:00Z"}},
+                    "nms": {"notices": [self.N]}}
+            st = mod["update_nms_ledger"](snap, d, getter)
+            return st, json.loads((d / "nms-closures.json").read_text(encoding="utf-8"))
+
+    def test_lane_unions_published_copy(self):
+        old = nms.ledger([], [{**self.N, "number": "A0001/26"}], "2026-11-01T00:00:00Z")
+        st, led = self.lane(lambda url, timeout=0: json.dumps(old).encode())
+        self.assertEqual((st["status"], led["n"], st["added"]), ("ok", 2, 1))
+
+    def test_failed_lane_keeps_the_carried_copy_at_its_read_time(self):
+        def none(url, timeout=0):
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        st, led = self.lane(none, lane={"status": "failed", "from_previous": True,
+                                        "fetched_at": "2026-11-18T23:30:00Z"})
+        self.assertEqual(led["n"], 1)
+        self.assertEqual((led["notices"][0]["first_seen"], led["generated_at"]),
+                         ("2026-11-18T23:30:00Z", "2026-11-19T00:11:00Z"))
+
+    def test_first_run_404(self):
+        def none(url, timeout=0):
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        st, led = self.lane(none)
+        self.assertEqual(led["n"], 1)
+
+    def test_no_cache_and_site_down_stops(self):
+        def down(url, timeout=0):
+            raise urllib.error.URLError("down")
+        with self.assertRaises(RuntimeError):
+            self.lane(down)
+        st, led = self.lane(down, cached=nms.ledger([], [{**self.N, "number": "A0002/26"}], "2026-11-01T00:00:00Z"))
+        self.assertEqual((st["status"], led["n"]), ("failed", 2))
+
+
+class SiteSize(unittest.TestCase):
+    """check warns as a site file nears Cloudflare Pages' 25 MiB limit and fails before it."""
+
+    def test_warn_then_fail(self):
+        import runpy
+        import tempfile
+        mod = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tools" / "launch.py"), run_name="size_test")
+        with tempfile.TemporaryDirectory() as t:
+            site = Path(t) / "site"
+            (site / "data").mkdir(parents=True)
+            (site / "data" / "small.json").write_bytes(b"{}")
+            self.assertEqual(mod["site_size_problems"](site), ([], []))
+            with open(site / "data" / "nms-closures.json", "wb") as fh:
+                fh.truncate(mod["SIZE_WARN"] + 1)
+            errs, notes = mod["site_size_problems"](site)
+            self.assertEqual((errs, len(notes)), ([], 1))
+            self.assertIn("data/nms-closures.json", notes[0])
+            with open(site / "data" / "nms-closures.json", "wb") as fh:
+                fh.truncate(mod["SIZE_FAIL"] + 1)
+            errs, _ = mod["site_size_problems"](site)
+            self.assertEqual(len(errs), 1)
+            self.assertIn("split it", errs[0])
 
 
 class Timing(unittest.TestCase):
