@@ -142,7 +142,8 @@ def orbit_read(body: bytes) -> dict:
     s = json.loads(body)
     up = [{k: u.get(k) for k in ("id", "name", "net", "net_precision", "window_start", "window_end", "status",
                                  "provider", "provider_countries", "vehicle", "mission", "mission_type", "orbit", "pad",
-                                 "location", "lat", "lon", "pad_country", "ll2_url")} for u in s.get("upcoming") or []]
+                                 "location", "lat", "lon", "pad_country", "ll2_url", "last_updated")}
+          for u in s.get("upcoming") or []]
     areas = []
     for w in (s.get("navwarn") or {}).get("areas") or []:
         for a in w.get("areas") or []:
@@ -161,7 +162,10 @@ def orbit_read(body: bytes) -> dict:
                 | {"payloads": [{k: p.get(k) for k in ("name", "state", "owner", "op_orbit", "inc", "jcat") if k in p}
                                 for p in l.get("payloads") or []]}
                 for l in s.get("launches") or []]
-    return {"generated_at": s.get("generated_at"), "upcoming": up, "areas": areas, "launches": launches}
+    # When Orbit read LL2 (its upcoming lane), for the side-by-side check with Launch's own read (launch/compare.py).
+    read = ((s.get("lanes") or {}).get("upcoming") or {}).get("fetched_at")
+    return {"generated_at": s.get("generated_at"), "upcoming": up, "upcoming_read_at": read, "areas": areas,
+            "launches": launches}
 
 
 # ---------- Cordon ----------

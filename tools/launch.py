@@ -2,7 +2,8 @@
 
     python tools/launch.py history [KML]   # the charted notices -> history/history.json and history/patterns.json
     python tools/launch.py backfill DIR    # GCAT tables in DIR -> history/ledger.json (every launch since 2012)
-    python tools/launch.py collect         # live lanes -> data/snapshot.json; new launches -> data/ledger.json
+    python tools/launch.py collect         # live lanes -> data/snapshot.json; new launches -> data/ledger.json;
+                                           # schedule, LL2 ledger, comparison -> data/*.json for the release
     python tools/launch.py build           # site/ from history/ and data/snapshot.json
     python tools/launch.py check           # registers + feed lint + public gate + privacy check
 
@@ -21,16 +22,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
-from launch import catalog, feed, fetch, gcat, gnss, history, joey, live, nfc, nms, nsf, overfly, patterns, privacy, public, timing, wayback  # noqa: E402
+from launch import (catalog, compare, feed, fetch, gcat, gnss, history, joey, live, ll2ledger, news, nfc, nms, nsf,  # noqa: E402
+                    overfly, patterns, privacy, public, schedule, timing, wayback)
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
 # Not imported: the exercise layer holds scenario text, not public notices.
 EXCLUDED_LAYERS = {"Previous Exercise NOTAMs"}
-LANE_FIELDS = {"tfr": ["tfr"], "orbit": ["orbit"], "cordon": ["cordon"], "nms": ["nms"]}
+LANE_FIELDS = {"tfr": ["tfr"], "orbit": ["orbit"], "cordon": ["cordon"], "nms": ["nms"], "schedule": ["schedule"],
+               "news": ["news"]}
 # The published ledger, read back on each run so a lost Actions cache loses no launch (merge is a union).
 LIVE_LEDGER = "https://launch.theintelligence.company/data/ledger.json"
-EMPTY = {"tfr": [], "orbit": {}, "cordon": {}, "nms": {}}
+EMPTY = {"tfr": [], "orbit": {}, "cordon": {}, "nms": {}, "schedule": {}, "news": {}}
+# The Ascent move's stores (19 Nov 2026), kept for good on this repository's public release `ledger`: the workflow
+# uploads them after each collect, and collect reads them back from there (a local copy, when there is one, too).
+STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "ascent-compare.json"}
 
 
 def dump(obj, compact: bool = False) -> str:
@@ -115,8 +121,11 @@ def _sites_from_orbit(launches: list[dict]) -> dict:
     return out
 
 
-def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, getter=None) -> dict:
-    """Baseline (committed) + last run's ledger (Actions cache) + the published copy + this run's launches."""
+def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, getter=None,
+                  ll2_led: dict | None = None) -> dict:
+    """Baseline (committed) + last run's ledger (Actions cache) + the published copy + this run's launches. The LL2
+    ledger's launches since GCAT's newest launch go in as provisional records (catalog.flown_from_ll2), which a GCAT
+    launch joins once GCAT lists it."""
     def read(p: Path):
         try:
             return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
@@ -132,8 +141,12 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
         status = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:200], "failed_at": snap["generated_at"]}
     orb = snap.get("orbit") or {}
     now = snap["generated_at"]
-    fresh = {"launches": catalog.from_orbit(orb.get("launches") or [], now)
-             + catalog.flown_from_ll2(orb.get("upcoming") or [], now),
+    gcat_now = catalog.from_orbit(orb.get("launches") or [], now)
+    gcat_last = max((r.get("date") or "" for lg in (base, prev, published, {"launches": gcat_now}) if lg
+                     for r in lg.get("launches") or [] if r.get("source") == "gcat"), default="")
+    since_gcat = ll2ledger.after(ll2_led, gcat_last) if ll2_led and gcat_last else []
+    fresh = {"launches": gcat_now + catalog.flown_from_ll2(orb.get("upcoming") or [], now)
+             + catalog.flown_from_ll2(since_gcat, now),
              "closures": catalog.closures_from_matches(snap.get("matches") or [], areas, now),
              "sites": _sites_from_orbit(orb.get("launches") or [])}
     before = len({r["id"] for lg in (base, prev, published) if lg for r in lg.get("launches") or []})
@@ -142,8 +155,123 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
     (data_dir / "ledger.json").write_text(dump(led, compact=True), encoding="utf-8", newline="\n")
     status.update({"records": len(led["launches"]), "added": len(led["launches"]) - before,
                    "base": len((base or {}).get("launches") or []), "cache": prev is not None,
-                   "published": published is not None})
+                   "published": published is not None, "gcat_last": gcat_last or None,
+                   "ll2_since_gcat": len(since_gcat)})
     return status
+
+
+def _read_json(p: Path):
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    except ValueError:
+        return None
+
+
+def load_store(name: str, data_dir: Path, getter=None, must: bool = True) -> tuple[dict | None, dict | None]:
+    """(local copy, release copy) of one of the Ascent stores. The release copy is the durable one. With no local
+    copy and the release unreadable (anything but a 404, which is a first run) a `must` store stops the run, so a
+    smaller store is never written over the release's."""
+    local = _read_json(data_dir / name)
+    try:
+        body, _ = fetch.fetch("launch-release", ll2ledger.RELEASE + name, data_dir / "raw", "json", getter=getter,
+                              gz=True)
+        return local, json.loads(body)
+    except Exception as exc:  # noqa: BLE001
+        if must and local is None and getattr(exc, "code", None) != 404:
+            raise RuntimeError(f"{name}: no local copy and the release copy is unreadable "
+                               f"({type(exc).__name__}: {exc}); not writing a smaller store") from exc
+        return local, None
+
+
+def _write(p: Path, doc) -> None:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
+
+
+def _err(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"[:300]
+
+
+def update_schedule(snap: dict, data_dir: Path, now: datetime, getter=None) -> dict:
+    """The multi-source upcoming store (launch/schedule.py): this run's LL2 read, when the schedule lane read it,
+    applied to the store; the live view and each record's headlines go into the snapshot."""
+    local, rel = load_store(STORE["upcoming"], data_dir, getter)
+    store = schedule.union(rel, local)
+    sch, lane = snap.get("schedule") or {}, snap["lanes"].get("schedule") or {}
+    if lane.get("status") == "ok" and isinstance(sch.get("rows"), list):
+        rep = schedule.ingest(store, "ll2", sch["rows"], sch["read_at"], link_key="ll2_url")
+        lane["ingest"] = {k: len(v) if isinstance(v, (list, dict)) else v for k, v in rep.items()}
+    _write(data_dir / STORE["upcoming"], store)
+    records = schedule.active(store, now)
+    heads = news.for_records(snap.get("news") or {}, records)
+    for r in records:
+        r["news"] = heads.get(r["id"], [])
+    snap["schedule"] = {"read_at": (store.get("reads") or {}).get("ll2"), "attribution": schedule.ATTRIBUTION,
+                        "held": len(store["records"]), "records": records}
+    return store
+
+
+def update_ll2_ledger(data_dir: Path, getter=None) -> tuple[dict | None, dict | None, dict]:
+    """One verify-and-extend pull of the LL2 ledger (launch/ll2ledger.py): one request and at most one by-id
+    lookup. Begun from Orbit's published ledger when Launch holds none. A failed pull changes nothing and is not
+    retried. Returns (ledger, Orbit's ledger for the comparison, lane status)."""
+    import copy
+    import urllib.error
+    get = getter or fetch.get
+    raw = data_dir / "raw"
+    local, rel = load_store(STORE["ll2"], data_dir, getter)
+    led = ll2ledger.union(rel, local)
+    status = {"status": "ok", "from_release": rel is not None, "local": local is not None}
+    orbit_doc, orbit_sha = None, None
+    try:
+        body, rec = fetch.fetch("orbit-ledger", ll2ledger.ORBIT_LEDGER, raw, "json", getter=getter, gz=True)
+        orbit_doc, orbit_sha = json.loads(body), rec["sha256"]
+    except Exception as exc:  # noqa: BLE001  (only the seed and the comparison need it)
+        status["orbit_ledger_error"] = _err(exc)
+    if led is None:
+        if orbit_doc is None:
+            status.update({"status": "failed", "error": "no ledger held and Orbit's unreadable: not starting over "
+                                                          "from 1 Jan 2024; the next run tries again"})
+            return None, None, status
+        led = ll2ledger.seed(orbit_doc, orbit_sha, fetch.now_utc())
+        status["seeded"] = led["seeded_from"]
+
+    def lookup(launch_id):
+        try:
+            return get(ll2ledger.id_url(launch_id), 120)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            raise
+
+    work = copy.deepcopy(led)
+    try:
+        body, _ = fetch.fetch("ll2-previous", ll2ledger.next_url(work), raw, "json", getter=get, gz=True)
+        status["check"] = ll2ledger.step(work, body, fetch.now_utc(), lookup)
+        led = work
+    except Exception as exc:  # noqa: BLE001  a 429 included: nothing changes, the next run tries again
+        status.update({"status": "failed", "error": "Launch Library 2 pull: " + _err(exc) + "; ledger unchanged"})
+    _write(data_dir / STORE["ll2"], led)
+    status["summary"] = ll2ledger.summary(led)
+    return led, orbit_doc, status
+
+
+def update_compare(snap: dict, store: dict, led: dict | None, orbit_doc: dict | None, data_dir: Path,
+                   getter=None) -> dict:
+    """One row of the side-by-side check with Orbit (launch/compare.py), kept with the earlier rows."""
+    local, rel = load_store(STORE["compare"], data_dir, getter, must=False)
+    doc = compare.union(rel, local)
+    orb = snap.get("orbit") or {}
+    mine = [{**(r["by_source"]["ll2"].get("fields") or {}), "id": r["refs"]["ll2"],
+             "last_updated": r["by_source"]["ll2"].get("last_updated")}
+            for r in store.get("records") or [] if (r.get("refs") or {}).get("ll2")
+            and (r.get("by_source") or {}).get("ll2", {}).get("listed")]
+    up = compare.upcoming(orb.get("upcoming") or [], orb.get("upcoming_read_at"), mine,
+                          (store.get("reads") or {}).get("ll2"))
+    row = compare.row(snap["generated_at"], up, compare.ledger(orbit_doc, led))
+    doc = compare.union(doc, {"runs": [row]})
+    _write(data_dir / STORE["compare"], doc)
+    return {"status": "ok", "verdict": row["verdict"], "runs": len(doc["runs"]), "started_at": doc["started_at"]}
 
 
 def update_nms_ledger(snap: dict, data_dir: Path, getter=None) -> dict:
@@ -238,7 +366,32 @@ def _lane_nms(raw_dir: Path, prev: dict, getter):
     return {"nms": state}, recs
 
 
-LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit, "cordon": _lane_cordon, "nms": _lane_nms}
+def _lane_schedule(raw_dir: Path, prev: dict, getter, snap=None):
+    """Launch Library 2 upcoming launches (launch/schedule.py): one request. Applied to the upcoming store after the
+    lanes (update_schedule)."""
+    now = datetime.now(timezone.utc)
+    body, rec = fetch.fetch("ll2-upcoming", schedule.ll2_url(now), raw_dir, "json", getter=getter, gz=True)
+    rows = [{k: v for k, v in r.items() if k != "mission_description"}
+            for r in schedule.within(schedule.ll2_parse(body), now)]
+    return {"schedule": {"read_at": rec["fetched_at"], "rows": rows}}, [rec]
+
+
+def _lane_news(raw_dir: Path, prev: dict, getter, snap=None):
+    """Spaceflight News API headlines for the scheduled launches (launch/news.py), links only: one request, none
+    when nothing is scheduled. The LL2 ids are this run's read, else the last live view's."""
+    sch = (snap or {}).get("schedule") or {}
+    ids = [r["id"] for r in sch.get("rows") or [] if r.get("id")] or [
+        (r.get("refs") or {}).get("ll2") for r in ((prev.get("schedule") or {}).get("records") or [])
+        if (r.get("refs") or {}).get("ll2")]
+    if not ids:
+        return {"news": {"read_at": fetch.now_utc(), "articles": [], "by_launch": {},
+                         "note": "no scheduled launches"}}, []
+    body, rec = fetch.fetch("snapi-articles", news.url(ids), raw_dir, "json", getter=getter)
+    return {"news": {"read_at": rec["fetched_at"], "source": news.SITE, **news.parse(body, ids)}}, [rec]
+
+
+LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit, "cordon": _lane_cordon, "nms": _lane_nms,
+         "schedule": _lane_schedule, "news": _lane_news}
 
 
 def collect(root: Path = ROOT, getter=None, only=None) -> dict:
@@ -256,7 +409,7 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
             snap["lanes"][lane] = {**prev_lane, "from_previous": True} if prev_lane else {"status": "not run"}
             continue
         try:
-            result, recs = fn(raw_dir, prev, getter)
+            result, recs = fn(raw_dir, prev, getter, snap) if lane == "news" else fn(raw_dir, prev, getter)
             snap.update(result)
             snap["lanes"][lane] = {"status": "ok", "fetched_at": now, "from_previous": False,
                                    "fetches": [{k: r[k] for k in ("url", "sha256", "bytes")} for r in recs]}
@@ -282,7 +435,16 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     snap["areas"] = [{k: v for k, v in a.items() if k != "detail"} for a in areas]
     snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [])
     data_dir.mkdir(parents=True, exist_ok=True)
-    snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter)
+    # The Ascent move (19 Nov 2026): Launch's own schedule, LL2 ledger and the side-by-side check with Orbit's.
+    ll2_led = None
+    if not only or "schedule" in only:
+        store = update_schedule(snap, data_dir, datetime.now(timezone.utc), getter)
+        ll2_led, orbit_doc, snap["lanes"]["ll2_ledger"] = update_ll2_ledger(data_dir, getter)
+        try:
+            snap["lanes"]["compare"] = update_compare(snap, store, ll2_led, orbit_doc, data_dir, getter)
+        except Exception as exc:  # noqa: BLE001  the check never fails the run
+            snap["lanes"]["compare"] = {"status": "failed", "error": _err(exc)}
+    snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter, ll2_led)
     if not only or "nms" in only:
         snap["lanes"]["nms_ledger"] = update_nms_ledger(snap, data_dir, getter)
     # GPS/GNSS NOTAMs from the nms lane's pulls, for Noisefloor: data/gnss/ -> site/data/gnss-notams/.
@@ -390,6 +552,18 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     if nl_path.exists():
         files["data/nms-closures.json"] = nl_path.read_text(encoding="utf-8")
     files.update(gnss.site_files(root / "data" / "gnss"))
+    # Scheduled launches, Launch's own multi-source record (launch/schedule.py), each with its headlines (links only),
+    # and the side-by-side check with Orbit's lanes while both run (launch/compare.py). The stores themselves are on
+    # the release `ledger`.
+    sch = snap.get("schedule") or {}
+    files["data/upcoming.json"] = dump({
+        "schema": schedule.SCHEMA, "generated_at": snap["generated_at"], "read_at": sch.get("read_at"),
+        "attribution": [schedule.ATTRIBUTION, "Headlines: Spaceflight News API (spaceflightnewsapi.net), links only"],
+        "store": ll2ledger.RELEASE + STORE["upcoming"], "ledger": ll2ledger.PUBLIC_URL,
+        "records": sch.get("records") or []})
+    cmp_path = root / "data" / STORE["compare"]
+    if cmp_path.exists():
+        files["data/ascent-compare.json"] = cmp_path.read_text(encoding="utf-8")
     if nfc_doc:
         files[catalog.NFC_LICENCE_FILE] = lic_path.read_text(encoding="utf-8")
     if joey_doc:
@@ -557,7 +731,8 @@ def main(argv=None) -> int:
                   f"{' (' + st['error'] + ')' if st.get('error') else ''}")
         from collections import Counter
         print(f"{len(snap.get('tfr') or [])} space-operations TFRs; {len(snap['areas'])} live areas; "
-              f"{len((snap.get('orbit') or {}).get('upcoming') or [])} scheduled launches; matches "
+              f"{len((snap.get('orbit') or {}).get('upcoming') or [])} scheduled launches (Orbit), "
+              f"{len((snap.get('schedule') or {}).get('records') or [])} (Launch); matches "
               f"{dict(Counter(m['level'] for m in snap['matches']))}")
         return 0 if any(s.get("status") == "ok" for s in snap["lanes"].values()) else 1
     if a.cmd == "build":
