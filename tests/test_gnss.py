@@ -99,9 +99,10 @@ class Days(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         out = None
         for i, t in enumerate(runs):
-            if i == 0 and feats is not None:
+            if feats is not None:     # every run reads the active set (the first a bulk, then empty deltas)
                 (d).mkdir(exist_ok=True)
-                s = gnss.update(gnss.load(d / "store.json"), feats, "bulk", t, "staging")
+                s = gnss.update(gnss.load(d / "store.json"), feats if i == 0 else [], "bulk" if i == 0 else "delta",
+                                t, "staging")
                 (d / "store.json").write_text(json.dumps(s), encoding="utf-8")
             out = gnss.publish(d, t, OK if feats is not None else {"status": "waiting", "note": "no keys"},
                                NOTE, getter=self.site({}))   # nothing published yet (404)
@@ -126,10 +127,30 @@ class Days(unittest.TestCase):
         self.assertTrue(idx["days"][0]["url"].endswith("/data/gnss-notams/2026-11-18.json"))
 
     def test_zero_day_while_waiting(self):
-        d, _ = self.run_day(None, [datetime(2026, 11, 18, 6, tzinfo=timezone.utc),
-                                   datetime(2026, 11, 19, 6, tzinfo=timezone.utc)])
+        d, out = self.run_day(None, [datetime(2026, 11, 18, 6, tzinfo=timezone.utc),
+                                     datetime(2026, 11, 19, 6, tzinfo=timezone.utc)])
+        self.assertEqual(out["held"], ["2026-11-18"])                 # no data past the day's end yet
+        out = gnss.publish(d, datetime(2026, 11, 20, 1, tzinfo=timezone.utc), {"status": "waiting"}, NOTE,
+                           getter=self.site({}))                       # HOLD_HOURS later: written as it is
         doc = json.loads((d / "days" / "2026-11-18.json").read_text(encoding="utf-8"))
         self.assertEqual((doc["n"], doc["runs_that_day"], doc["lane_status"]), (0, {"waiting": 1}, "waiting"))
+
+    def test_day_held_until_data_passes_its_end(self):
+        """A lane waiting on Cordon (no read since 06:00) writes no partial first copy of the day."""
+        d = Path(tempfile.mkdtemp())
+        t0 = datetime(2026, 11, 18, 6, tzinfo=timezone.utc)
+        s = gnss.update(gnss.empty(), [feat()], "bulk", t0, "prod")
+        (d / "store.json").write_text(json.dumps(s), encoding="utf-8")
+        gnss.publish(d, t0, OK, NOTE, getter=self.site({}))
+        out = gnss.publish(d, datetime(2026, 11, 19, 1, tzinfo=timezone.utc), {"status": "failed"}, NOTE,
+                           getter=self.site({}))
+        self.assertEqual((out["written"], out["held"]), ([], ["2026-11-18"]))
+        self.assertFalse((d / "days" / "2026-11-18.json").exists())
+        t2 = datetime(2026, 11, 19, 2, tzinfo=timezone.utc)                # Cordon's set arrives, past the day's end
+        s = gnss.update(gnss.load(d / "store.json"), [feat(), feat("A0009/26")], "bulk", t2, "prod")
+        (d / "store.json").write_text(json.dumps(s), encoding="utf-8")
+        out = gnss.publish(d, t2, OK, NOTE, getter=self.site({}))
+        self.assertEqual(out["written"], ["2026-11-18"])
 
     def test_late_cancel_revises(self):
         d, _ = self.run_day([feat(start="2026-11-18T00:00:00Z", end="2026-11-25T00:00:00Z")],
