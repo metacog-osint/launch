@@ -159,7 +159,7 @@ def update_nms_ledger(snap: dict, data_dir: Path, getter=None) -> dict:
     published, status = None, {"status": "ok"}
     try:
         body, _ = fetch.fetch("launch-nms-closures", nms.LEDGER_URL, data_dir / "raw", "json", getter=getter)
-        published = json.loads(body)
+        published = gnss.published_json(body)   # Pages' 200 HTML fallback for an undeployed path = not published
     except Exception as exc:  # noqa: BLE001
         if prev is None and getattr(exc, "code", None) != 404:
             raise RuntimeError(f"NMS closure ledger: no cached copy and the published one is unreadable "

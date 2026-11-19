@@ -187,6 +187,11 @@ class Ledger(unittest.TestCase):
         st, led = self.lane(none)
         self.assertEqual(led["n"], 1)
 
+    def test_pages_html_fallback_is_not_published(self):
+        """Cloudflare Pages answers an undeployed path with the index page, 200 text/html (19 Nov 2026)."""
+        st, led = self.lane(lambda url, timeout=0: b"<!doctype html>\n<html lang=\"en\"><head>")
+        self.assertEqual((st["status"], led["n"], st["published"]), ("ok", 1, False))
+
     def test_no_cache_and_site_down_stops(self):
         def down(url, timeout=0):
             raise urllib.error.URLError("down")

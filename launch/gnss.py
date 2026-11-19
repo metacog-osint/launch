@@ -352,6 +352,21 @@ class Unreachable(RuntimeError):
 _RESTORED: set[str] = set()
 
 
+class NotPublished(Exception):
+    """The site answered, but not with the file: a 404, or Cloudflare Pages' 200 HTML fallback page."""
+    code = 404
+
+
+def published_json(body: bytes):
+    """A published JSON file's content. Cloudflare Pages answers a path that is not deployed with the site's index
+    page (HTTP 200, text/html; measured 19 Nov 2026), so an HTML body means not published (NotPublished), not an
+    unreadable site."""
+    head = body.lstrip()[:15].lower()
+    if head.startswith((b"<!doctype", b"<html")):
+        raise NotPublished("the site answered with its HTML page: not published")
+    return json.loads(body)
+
+
 def _missing(exc: Exception) -> bool:
     return getattr(exc, "code", None) == 404
 
@@ -370,7 +385,7 @@ def restore(gdir: Path, getter) -> int:
     have_index, have_store = (gdir / "index.json").exists(), (gdir / "store.json").exists()
     got = 0
     try:
-        idx = json.loads(getter(PUBLISHED + "index.json", 60))
+        idx = published_json(getter(PUBLISHED + "index.json", 60))
     except Exception as exc:  # noqa: BLE001
         if not have_index and not _missing(exc):
             raise Unreachable(f"published GNSS index unreadable and no local copy: {type(exc).__name__}: {exc}")
@@ -382,14 +397,14 @@ def restore(gdir: Path, getter) -> int:
         if (gdir / "days" / (name + ".json")).exists():
             continue
         try:
-            doc = json.loads(getter(PUBLISHED + name + ".json", 60))
+            doc = published_json(getter(PUBLISHED + name + ".json", 60))
         except Exception as exc:  # noqa: BLE001
             raise Unreachable(f"published GNSS day file {name} unreadable: {type(exc).__name__}: {exc}")
         if isinstance(doc, dict) and doc.get("day") == name:
             _write(gdir / "days" / (name + ".json"), doc)
             got += 1
     try:
-        pub = json.loads(getter(PUBLISHED + "all.json", 60))
+        pub = published_json(getter(PUBLISHED + "all.json", 60))
     except Exception as exc:  # noqa: BLE001
         if idx and not _missing(exc) and not have_store:
             raise Unreachable(f"published GNSS all.json unreadable and no local store: {type(exc).__name__}: {exc}")

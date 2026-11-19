@@ -200,6 +200,19 @@ class Days(unittest.TestCase):
             gnss.publish(d, NOW, OK, NOTE, getter=down)
         self.assertFalse((d / "index.json").exists())
 
+    def test_pages_html_fallback_is_not_published(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "store.json").write_text(json.dumps(gnss.empty()), encoding="utf-8")
+        pub = {gnss.PUBLISHED + "index.json": {"days": []}}
+
+        def get(url, timeout=0):
+            return json.dumps(pub[url]).encode() if url in pub else b"<!DOCTYPE html><html><head>"
+        out = gnss.publish(d, NOW, OK, NOTE, getter=get)          # all.json not deployed yet: no stop
+        self.assertTrue((d / "all.json").exists())
+        d2 = Path(tempfile.mkdtemp())
+        out = gnss.publish(d2, NOW, OK, NOTE, getter=lambda url, timeout=0: b"<!doctype html>")
+        self.assertEqual(out["restored"], 0)                       # nothing published at all: a first run
+
     def test_first_run_404_starts_afresh(self):
         d = Path(tempfile.mkdtemp())
         out = gnss.publish(d, NOW, OK, NOTE, getter=self.site({}))
