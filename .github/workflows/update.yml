@@ -17,9 +17,10 @@ name: update
 #
 # Secrets: CLOUDFLARE_PAGES_TOKEN and repo variable CLOUDFLARE_ACCOUNT_ID. No FAA NMS-API keys: Cordon is the
 # suite's one NMS reader (18 Nov 2026), and the nms lane reads Cordon's published NOTAM subsets (launch/nms.py).
-# The GPS/GNSS NOTAM files (launch/gnss.py, for Noisefloor) keep their state and day files in data/gnss/, and the
-# ledger of every NMS closure notice ever kept is data/nms-closures.json; both are kept for good, cached with the
-# rest, and unioned with the published copies each run, so a lost cache loses nothing.
+# The GPS/GNSS NOTAM files (launch/gnss.py, for Noisefloor) keep their state and day files in data/gnss/, cached
+# with the rest. The ledger of every NMS closure notice ever kept (data/nms-closures.json) is not cached: each run
+# unions it with the published copy. Both are kept for good. Never change the path list below: actions/cache keys
+# an entry's version on it, so a changed list finds no earlier state (19 Nov 2026, run 44461432466).
 on:
   push:
     branches: [main]
@@ -50,7 +51,6 @@ jobs:
           path: |
             data/snapshot.json
             data/ledger.json
-            data/nms-closures.json
             data/gnss
           key: launch-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: launch-state-
@@ -69,7 +69,6 @@ jobs:
           path: |
             data/snapshot.json
             data/ledger.json
-            data/nms-closures.json
             data/gnss
           key: launch-state-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Deploy site/ to Cloudflare Pages
