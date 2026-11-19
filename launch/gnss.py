@@ -28,7 +28,9 @@ copied by `build`):
                       day (to its end, or to the cancel that ended it), and the cancels and replaces issued that
                       day. Rewritten for REVISE_HOURS after the day ends when a late cancel changes it
                       (`revised_at`). Written for every day the lane ran, n=0 included, with the lane's runs that
-                      day, so a day with no pull says so. Kept for good (until 19 Nov 2026, 14 days);
+                      day, so a day with no pull says so. The first copy waits until the lane's data
+                      reaches past the day's end (pulled_to), or HOLD_HOURS after it, so a lane waiting on
+                      Cordon writes no partial first copy. Kept for good (until 19 Nov 2026, 14 days);
   all.json            every GNSS NOTAM Launch has kept, ended ones included (the store, without the run log);
   index.json          the day files, with n and when each was written.
 The FAA's terms allow redistribution but not calling it FAA data, and NMS is not the authoritative source for
@@ -44,6 +46,7 @@ from pathlib import Path
 RULE = "gnss-1.0"
 RUNS_KEEP_DAYS = 16     # the run log only; NOTAMs and day files are kept for good
 REVISE_HOURS = 48
+HOLD_HOURS = 24         # a day's first file waits for data past the day's end (pulled_to) up to this long
 NEAR = 60
 PUBLISHED = "https://launch.theintelligence.company/data/gnss-notams/"
 Q_SUBJECTS = ("GA", "GW")
@@ -445,12 +448,18 @@ def publish(gdir: Path, now: datetime, lane: dict, source_note: str, getter=None
     ran = sorted({(_dt(r["at"]) or now).replace(hour=0, minute=0, second=0, microsecond=0)
                   for r in s.get("runs") or []})
     written, revised = [], []
+    held = []
+    pulled = _dt(s.get("pulled_to"))
     for d0 in ran:
         if d0 >= today or now >= d0 + timedelta(days=1, hours=REVISE_HOURS):
             continue
         p = days_dir / (d0.strftime("%Y-%m-%d") + ".json")
-        new = day_doc(s, d0, lane, source_note, now)
         old = _read(p)
+        d1 = d0 + timedelta(days=1)
+        if old is None and not (pulled and pulled >= d1) and now < d1 + timedelta(hours=HOLD_HOURS):
+            held.append(p.stem)        # no data past the day's end yet: no partial first copy
+            continue
+        new = day_doc(s, d0, lane, source_note, now)
         if old is None:
             _write(p, new)
             written.append(p.stem)
@@ -471,7 +480,7 @@ def publish(gdir: Path, now: datetime, lane: dict, source_note: str, getter=None
     _write(gdir / "index.json", {**header(s, lane, source_note), "generated_at": iso(now), "kept": "for good",
                                  "active": PUBLISHED + "active.json", "all": PUBLISHED + "all.json", "days": days})
     return {"active": len(pub), "kept": len(s["notices"]), "days": len(days), "written": written,
-            "revised": revised, "restored": restored, "rule": RULE}
+            "revised": revised, "held": held, "restored": restored, "rule": RULE}
 
 
 def site_files(gdir: Path) -> dict[str, str]:
