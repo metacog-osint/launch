@@ -69,12 +69,12 @@ the cache, the published copies and this run, so a lost cache loses nothing.
   GCAT's, or, for a region, when nearer the charted areas.
   `history/site_fixes.json`: sourced fixes of GCAT sites (`site_fix`), dropped once GCAT changes the row.
   `history/published_notices.json`: reviewed notices no source carries (North Korea), `published_notices`.
-- **Flight paths** (`infer_path()`, `ascent.py` docstring; charted lines are never drawn): through the ascent
-  areas by distance (`via` once it bends 25 NM: a dog-leg), then the inclination's heading. Set aside, said in the
-  basis: off-window or off-schedule, a later pass, far and untied, window-joined off the tied bearing, a 40-deg
-  kink. Over `CROSS_DEG` (55) off the inclination: areas give way. Else a sibling's path (`borrow_paths()`),
-  textbook azimuth, GTO and deep space east (not `NO_EAST`), main corridor; Cape polar `POLAR_CORRIDOR`.
-  Suborbital: farthest area, else none.
+- **Flight paths** (`infer_path()`, `ascent.py`; charted lines never drawn): through the ascent areas by
+  distance (`via` once it bends 25 NM, or a line `TURN_DEG` off the orbit: a dog-leg), then the inclination's
+  heading, same branch as at the pad. Set aside, said in the basis: off-window or off-schedule, a later pass, far
+  and untied, window-joined off bearing, a 40-deg kink. Over `CROSS_DEG` (55) off the inclination: areas give
+  way. Else a sibling's path (`borrow_paths()`), textbook azimuth, GTO and deep space east (not `NO_EAST`), main
+  corridor; Cape polar `POLAR_CORRIDOR`. Suborbital: farthest area, else none.
 - **Path crosses** (`overfly.py`): `over`, `[[{cc, from, to}]]` in NM, kit's de facto borders, 5 NM samples, land
   only, gaps under 25 NM closed. A ground track is not airspace. Filter `ovf=`.
 - **Ranges** (`history.js` `RANGES`, `inc=`, `far=` as `lo-hi`): payload inclination; farthest area from the pad
@@ -83,8 +83,7 @@ the cache, the published copies and this run, so a lost cache loses nothing.
   cut; UTC plus the viewer's named zone; formula-guarded CSV; sources and licences in every file.
 - **Maps:** great-circle edges, globe toggle, `fitCoords()`. Filters live in the address (`#history?veh=...`);
   `history.js` `LEGACY` and `OLD_PATH` read old words.
-- **Paste tab:** trajectory from a pad (`traj.js`, dog-leg flag at 25 NM off its great circle); saved notices
-  stay in the browser (`launch.saved`).
+- **Paste tab:** pad trajectory (`traj.js`, dog-leg at 25 NM); saved notices stay in the browser (`launch.saved`).
 - **Source rules:** NotamForChina (Apache-2.0, `nfc.SHA`) and Joey0609/notams (MIT, `joey.SHA`) are fetched into
   git-ignored folders; `build_site` refuses without their licence files and publishes them. `joey.launch_related`
   never keeps a cancellation, a window over 62 days or GA/aerobatics; SOURCE lines dropped. `wayback`: one request

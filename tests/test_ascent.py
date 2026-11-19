@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from launch import ascent as A  # noqa: E402
 from launch import catalog, history, notam  # noqa: E402
-from tests.test_catalog import NOW, SITES, gcat_rec  # noqa: E402
+from tests.test_catalog import NOW, SITES, first_leg, gcat_rec  # noqa: E402
 
 
 def area(pad, az, nm, **kw):
@@ -80,7 +80,7 @@ class Selection(unittest.TestCase):
         kept, _ = A.select(jq, near, [], inc=89.0, own=True, branch_az=opts)
         self.assertTrue(len(kept) == 2 and all(185 < a["azimuth"] < 188 for a in kept))
         p = catalog.infer_path(jq, "Jiuquan", [], areas=near, inc=89.0)
-        self.assertAlmostEqual(p["az"], 186.5, delta=1)
+        self.assertAlmostEqual(first_leg(jq, p), 186.5, delta=1)
 
     def test_a_notices_areas_stand_together(self):
         # HYDROPAC 2699/23 (Chollima-1, 23 Aug 2023): two Yellow Sea areas at 191 deg and one east of Luzon at 170.
@@ -156,7 +156,7 @@ class Published(unittest.TestCase):
         r = catalog.build_index({"events": []}, ledger, [], [], NOW, published=pub)["records"][0]
         self.assertEqual((r["published_notices"][0]["number"], "published" in r["sources"]), ("HYDROPAC 1779/23", True))
         self.assertIn("closure area", r["path"]["basis"])
-        self.assertTrue(160 < r["path"]["az"] < 180)
+        self.assertTrue(160 < first_leg(r["pad"], r["path"]) < 180)
 
 
 if __name__ == "__main__":
