@@ -105,8 +105,11 @@ class FromCordon(unittest.TestCase):
         import runpy
         import tempfile
         mod = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tools" / "launch.py"), run_name="lane_test")
+        # the lane uses the real clock, so the notice's window is built from it (a fixed date expires)
+        t0 = datetime.now(timezone.utc)
+        soon = ((t0 - timedelta(hours=1)).strftime("%y%m%d%H%M"), (t0 + timedelta(days=2)).strftime("%y%m%d%H%M"))
         site = {nms.CORDON_NOTAMS + "index.json": INDEX,
-                nms.CORDON_NOTAMS + "launch-areas.json": {"type": "FeatureCollection", "features": [feat(icao())]},
+                nms.CORDON_NOTAMS + "launch-areas.json": {"type": "FeatureCollection", "features": [feat(icao(b=soon[0], c=soon[1]))]},
                 nms.CORDON_NOTAMS + "gnss.json": {"type": "FeatureCollection", "features": []}}
         asked = []
 
