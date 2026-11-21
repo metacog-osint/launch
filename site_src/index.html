@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-tic-layer="space">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,6 +7,7 @@
 <meta name="description" content="Launch and reentry closure areas from NOTAMs and navigational warnings: live areas, which scheduled launches coincide with them, every launch since 2012 on a map with flight paths and filters, and each pad's closure patterns.">
 <link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="tic-shell.css">
 <link rel="stylesheet" href="tic-time.css">
 <link rel="stylesheet" href="tic-nav.css">
 <link rel="stylesheet" href="tic-related.css">
@@ -20,7 +21,7 @@
 <body data-tab="live">
 <header class="top">
   <div class="wrap top-row">
-    <div class="brand"><strong>Launch</strong><span class="muted">The Intelligence Company</span></div>
+    <div class="brand"><strong>Launch</strong><a class="tic-layer" href="https://theintelligence.company/#layers">Space layer</a><span class="muted">The Intelligence Company</span></div>
     <nav class="top-nav" aria-label="Launch">
       <div class="tabs" role="tablist" aria-label="Views">
         <a href="#live" role="tab" id="tab-live" aria-controls="live">Live</a>
@@ -48,7 +49,8 @@
         which scheduled launches coincide with it, every launch since 2012, and where each pad's closures fall.
         Every area shows the issuer's own text. A closure announces intent: some are cancelled, some are never
         used. <span id="asof"></span></p>
-      <div class="tiles" id="tiles" aria-live="polite"></div>
+      <p class="tic-reading" id="reading" aria-live="polite"></p>
+      <div class="tiles tic-tiles" id="tiles" aria-live="polite"></div>
       <p class="legend small muted" aria-label="Country colours">
         <span><span class="sw g-us"></span>United States</span>
         <span><span class="sw g-cn"></span>China</span>
