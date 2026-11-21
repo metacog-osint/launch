@@ -1295,6 +1295,16 @@ def _bear(pad, areas: list[dict]) -> list[dict]:
             for a in areas]
 
 
+def _new_closure_areas(pad, cl: list[dict], listed: list[dict], time: str | None) -> list[dict]:
+    """_closure_areas() less those another source already has at that place (within NFC_AGREE_NM) in a window that
+    holds the launch: one notice from two sources is one area. An area there whose window misses the launch is
+    another event's and does not count."""
+    t = _dt(time)
+    known = [a["centroid"] for a in listed if a.get("centroid") and A.time_holds(a, t)]
+    return [a for a in _closure_areas(pad, cl)
+            if not any(notam.haversine_nm(a["centroid"][1], a["centroid"][0], c[1], c[0]) <= NFC_AGREE_NM for c in known)]
+
+
 # ---------- NASASpaceflight forum threads (nsf.py: NotamForChina's link list; the forum is never read) ----------
 # A thread whose title gives a date joins a Chinese launch (record actor CN, launched): with a UTC time, the nearest
 # launch within NSF_HOURS of it whose vehicle does not differ (LM-11H is LM-11); without one, the only launch that
@@ -1896,7 +1906,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         extra += add_joey(r, ["gcat:" + g["tag"]] + ["chart:" + m["id"] for m in grp], copies)
         extra += add_wayback(r, g["tag"])
         extra += add_published(r, g["tag"])
-        finish(r, areas=list(cl) + _bear(r["pad"], areas + extra),
+        listed = _bear(r["pad"], areas + extra)
+        finish(r, areas=_new_closure_areas(r["pad"], cl, listed, r.get("time")) + listed,
                orbit_code=P.gcat_orbit_code(g.get("category")))
 
     # NotamForChina's launches that joined nothing. Before ledger_since GCAT's list here does not reach, so the
