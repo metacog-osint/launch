@@ -571,7 +571,7 @@ function detail(r) {
   (r.programmes || []).forEach((p) => q.appendChild(quick(p, "prog", p)));
   if (r.actor) q.appendChild(quick(countryName(r.actor), "cc", r.actor));
   box.appendChild(q);
-  (r.closures || []).forEach((c) => box.appendChild(el("p", "small", `Closure area ${c.area} coincided in ${c.level}` + (c.window ? ` (${fmt(c.window[0])} to ${fmt(c.window[1], { date: false })})` : "") + ". Coincidence, not proof the area was for this launch.")));
+  [...new Map((r.closures || []).map((c) => [`${c.area}|${(c.window || []).join()}`, c])).values()].forEach((c) => box.appendChild(el("p", "small", `Closure area ${c.area} coincided in ${c.level}` + (c.window ? ` (${fmt(c.window[0])} to ${fmt(c.window[1], { date: false })})` : "") + ". Coincidence, not proof the area was for this launch.")));
   const evs = (r.chart || []).flatMap((id) => chartById.get(id) || []);
   const nfcN = r.nfc_notices || [];
   const nfcFor = (num) => nfcN.find((x) => x.chart && x.number === num);
