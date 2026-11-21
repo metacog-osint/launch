@@ -153,7 +153,7 @@ function pickLive(key) {
     return;
   }
   const a = x.a;
-  box.append(el("b", "", (a.source === "faa-tfr" ? "FAA TFR " : a.source === "faa-nms" ? "NOTAM " : "") + (a.key || a.id)), document.createTextNode(" · " + (a.hazard || a.label || "")));
+  box.append(el("b", "", (a.source === "faa-tfr" ? "FAA TFR " : a.source === "faa-nms" ? "NOTAM " : "") + (a.key || a.id)), document.createTextNode(" · " + (a.hazard || a.label || "") + ((a.detail || {}).activity ? " · " + a.detail.activity : "")));
   if (a.source === "faa-nms") box.append(el("br"), document.createTextNode("Kept: " + (KEPT[a.kept] || a.kept) + (a.expect ? "; " + expectText(a.expect) : "") + ". " + ((snap.nms || {}).source_note || "")));
   map.fit({ type: "FeatureCollection", features: [poly(a.ring, {})] });
 }
