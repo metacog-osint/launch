@@ -80,6 +80,13 @@ function tiles() {
   ];
   items.forEach(([k, v]) => { const t = el("div", "tile"); t.append(el("span", "k", k), el("span", "v", String(v))); box.appendChild(t); });
   $("asof").textContent = "Live areas read " + fmt(snap.generated_at) + ".";
+  // Today's reading (tic-shell): this run's counts. A closure announces intent, so a coincidence is only that.
+  const num = (v) => el("b", "", String(v));
+  const areas = (snap.areas || []).length, tfr = (snap.tfr || []).length, up = ((snap.orbit || {}).upcoming || []).length, both = lv["time and place"] || 0;
+  $("reading").replaceChildren(el("span", "tic-reading-k", "Today\u2019s reading"),
+    num(areas), ` live closure area${areas === 1 ? "" : "s"}, `, num(tfr), ` FAA space-operations TFR${tfr === 1 ? "" : "s"} and `,
+    num(up), ` launch${up === 1 ? "" : "es"} scheduled in the next 14 days. `, num(both),
+    ` coincidence${both === 1 ? "" : "s"} between a scheduled launch and a closure, in both time and place.`);
 }
 
 function liveModel() {
