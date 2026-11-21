@@ -362,6 +362,43 @@ class StoredClosures(unittest.TestCase):
         la, lo = catalog.notam.centroid(self.R1)
         self.assertAlmostEqual(first_leg(self.PAD, r["path"]), catalog.history.bearing(self.PAD[1], self.PAD[0], la, lo), delta=1)
 
+    def joined(self, closures, inc=50.0):
+        """A GCAT launch from Wenchang joined to the LL2 record its closures are stored under."""
+        t = "2026-11-20T12:00:00Z"
+        g = gcat_rec("2026-300", t, "CZ-8A", "Test", "WEN", inc=inc)
+        s = SITES["WEN"]
+        f = {"id": "ll2:u1", "source": "ll2", "ll2": "u1", "time": t, "date": t[:10], "status": "Launch Successful",
+             "name": "Long March 8A | Test", "net_precision": "Minute", "lat": s["lat"], "lon": s["lon"], "updated": NOW}
+        ledger = {"since": "2023-01-01", "sites": SITES, "launches": [g, f], "closures": closures}
+        recs = catalog.build_index({"events": []}, ledger, [], [], "2026-11-21T00:00:00Z")["records"]
+        self.assertEqual([r["id"] for r in recs], ["gcat:2026-300"])  # the LL2 record folds into GCAT's
+        return recs[0]
+
+    WEN1 = [[114.0, 16.0], [115.0, 16.0], [115.0, 17.0], [114.0, 16.0]]
+
+    def test_gcat_joined_launch_keeps_a_path_through_held_closures(self):
+        held = self.closure("u1|A", self.WEN1, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        slipped = self.closure("u1|B", self.R2, "2026-11-12T11:50:00Z", "2026-11-12T12:20:00Z")
+        r = self.joined([held, slipped])
+        self.assertEqual([c["area"] for c in r["closures"]], ["A"])
+        self.assertIn("closure area", r["path"]["basis"])
+        la, lo = catalog.notam.centroid(self.WEN1)
+        pad = r["pad"]
+        self.assertAlmostEqual(first_leg(pad, r["path"]), catalog.history.bearing(pad[1], pad[0], la, lo), delta=1)
+        self.assertAlmostEqual(r["far_nm"], catalog.notam.haversine_nm(pad[1], pad[0], la, lo), delta=2)
+
+    def test_one_notice_from_two_sources_is_one_area(self):
+        pad = [SITES["WEN"]["lon"], SITES["WEN"]["lat"]]
+        t = "2026-11-20T12:00:00Z"
+        c = self.closure("u1|A", self.WEN1, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        la, lo = catalog.notam.centroid(self.WEN1)
+        same = {"centroid": [lo, la], "windows": [["2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z"]]}
+        self.assertEqual(catalog._new_closure_areas(pad, [c], [same], t), [])
+        other_day = {**same, "windows": [["2026-11-12T11:50:00Z", "2026-11-12T12:20:00Z"]]}
+        self.assertEqual(len(catalog._new_closure_areas(pad, [c], [other_day], t)), 1)
+        elsewhere = {**same, "centroid": [lo + 3, la]}
+        self.assertEqual(len(catalog._new_closure_areas(pad, [c], [elsewhere], t)), 1)
+
 
 class Index(unittest.TestCase):
     def build(self, events, launches, upcoming=(), corridors=()):
