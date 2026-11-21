@@ -285,7 +285,7 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
             continue
         net = _dt(u["net"])
         bands = corridor_bands(corridors, u["lat"], u["lon"])
-        for a in areas:
+        for i, a in enumerate(areas):
             hit = time_match(net, _windows_of(a))
             if not hit:
                 continue
@@ -314,7 +314,7 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
                             grouped = {"launch_tag": g["launch_tag"], "time": g["time"], "vehicle": g["vehicle"]}
                             level = "grouped"
             rows.append({"launch": u["id"], "launch_name": u["name"], "net": u["net"], "area": a.get("key") or a.get("id"),
-                         "area_source": a.get("source"), "window": [_iso(hit[0]), _iso(hit[1])], "level": level,
+                         "area_i": i, "area_source": a.get("source"), "window": [_iso(hit[0]), _iso(hit[1])], "level": level,
                          "azimuth": round(az, 1), "distance_nm": round(dist), "place_basis": place_basis,
                          "inclination_est": history.inclination(u["lat"], az), "grouped_with": grouped})
     return rows

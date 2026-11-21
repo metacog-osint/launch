@@ -494,7 +494,8 @@ def _going_north(pad, az: float, inc: float, site: str | None) -> bool | None:
 
 
 def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None, inc_note=None,
-               orbit_code=None, orbit=None, suborbital=False, coarse=False, time=None, others=None) -> dict | None:
+               orbit_code=None, orbit=None, suborbital=False, coarse=False, time=None, others=None,
+               used: list | None = None) -> dict | None:
     """{kind, az, nm, basis} for a record, or None; kind is always "estimated". `areas`: [{azimuth, downrange_nm}],
     optionally with centroid, tie, notice, windows and schedule (`ascent.select()`). A path through its closure
     areas that bends (`ascent.bends()`) has `via` ([[lon, lat]], the ascent areas in order of distance) and runs on
@@ -507,7 +508,8 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
     CROSS_DEG from both azimuths that inclination allows, the areas give way (Shenzhou-20 from Jiuquan: 162 deg to an
     area, ~97 for the station). `coarse`: the pad is a coarse site point (a region, a sea launch), so nearer areas
     than COARSE_MIN_NM count for nothing. `others`: a list that gains the areas set aside as another event's
-    (ascent.select()). An internal `_by` key ("areas", "inc", ...) is popped by build_index."""
+    (ascent.select()). `used`: a list that gains the areas a path was drawn through (live_paths()). An internal `_by`
+    key ("areas", "inc", ...) is popped by build_index."""
     if not pad:
         return None
     ar = [x for x in (areas or []) if x.get("azimuth") is not None and x.get("downrange_nm")]
@@ -515,6 +517,8 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
         if not ar:
             return None
         far = max(ar, key=lambda x: x["downrange_nm"])
+        if used is not None:
+            used.append(far)
         return {"kind": "estimated", "az": far["azimuth"], "nm": round(far["downrange_nm"]),
                 "basis": "bearing from the pad to its farthest closure area, drawn to it (a suborbital flight)"}
     target, what, own = _target_inc(inc, inc_note, orbit_code, orbit)
@@ -533,6 +537,8 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
             gave_way = (f"; its closure areas' bearing ({az:g}°) is {min(_adiff(o, az) for o in opts):.0f}° off both "
                         "azimuths that inclination allows: more than a dog-leg, so taken as areas off the ascent track")
         else:
+            if used is not None:
+                used.extend(kept)
             pts, off_line = A.route(pad, A.points(pad, kept))
             n_areas = len(kept)
             if off_line:
@@ -609,6 +615,94 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
         return {"kind": "estimated", "az": b["from"] + 2.5, "nm": DEFAULT_PATH_NM,
                 "basis": f"the site's most-used corridor ({b['events']} charted events)"}
     return None
+
+
+# ---------- Live tab: scheduled launches through their coinciding closure areas ----------
+# A scheduled launch's NET falling in an area's window (live.match) is a coincidence, and one window can hold launches
+# on different continents: on 21 Nov 2026 NAVAREA XII 811/26, off Vandenberg, also "matched" an Ariane 6 at Kourou,
+# 4,000 NM away. So a time-only match counts only on the bearing the launch was already expected to take.
+
+LIVE_TIME_DEG = SPREAD_DEG      # a time-only match this near the launch's expected first bearing can set its path
+LIVE_NET_PRECISE = {None, "Second", "Minute", "Hour"}   # a NET known only to the day or coarser ties nothing
+
+
+def _expected_az(r: dict) -> float | None:
+    """The first bearing of the record's estimate before any live area is read."""
+    p, pad = r.get("path"), r.get("pad")
+    if not p or not pad:
+        return None
+    if p.get("via"):
+        return history.bearing(pad[1], pad[0], p["via"][0][1], p["via"][0][0])
+    return p.get("az")
+
+
+def live_paths(recs: list[dict], matches: list[dict], areas: list[dict], bands_by_site: dict, world=None) -> int:
+    """Each upcoming record with live.match() rows gains `live.closures`: every coinciding area with its role, `path`
+    (the estimate runs through it), `pad` (nearer the pad than MIN_AREA_NM) or `coincidence` (with `why`). When any
+    area sets a path, it replaces the record's estimate, so History and Live draw one line. Without one, the record
+    keeps its estimate and the Live tab draws no line. Roles describe geometry: none says an area is for the launch.
+    Returns how many paths run through live areas."""
+    by: dict[str, list[dict]] = {}
+    for m in matches or []:
+        by.setdefault(m.get("launch"), []).append(m)
+    n = 0
+    for r in recs:
+        if r.get("status") != "upcoming" or not r.get("pad") or r.get("ll2") not in by:
+            continue
+        pad = r["pad"]
+        expected = _expected_az(r)
+        precise = r.get("net_precision") in LIVE_NET_PRECISE
+        rows, cands = [], []
+        for m in by[r["ll2"]]:
+            i = m.get("area_i")
+            a = areas[i] if isinstance(i, int) and 0 <= i < len(areas) else None
+            if not a or not a.get("ring"):
+                continue
+            la, lo = notam.centroid(a["ring"])
+            az, nm = history.bearing(pad[1], pad[0], la, lo), notam.haversine_nm(pad[1], pad[0], la, lo)
+            row = {"i": i, "area": m.get("area"), "source": m.get("area_source"), "level": m.get("level"),
+                   "window": m.get("window"), "azimuth": round(az, 1), "nm": round(nm), "role": "coincidence"}
+            rows.append(row)
+            if not precise:
+                row["why"] = "the launch's time is known only to the day or coarser"
+            elif nm < MIN_AREA_NM:
+                row["role"] = "pad"
+            elif nm > AREA_NM:
+                row["why"] = f"{nm:,.0f} NM from the pad, farther than an ascent's closure areas are read"
+            elif m.get("level") == "time" and expected is None:
+                row["why"] = "the time fits, and no expected bearing to test the place against"
+            elif m.get("level") == "time" and _adiff(az, expected) > LIVE_TIME_DEG:
+                row["why"] = f"the time fits, but it lies {_adiff(az, expected):.0f}\u00b0 off the launch's expected bearing"
+            else:
+                cands.append({"ring": a["ring"], "centroid": [round(lo, 4), round(la, 4)], "azimuth": round(az, 1),
+                              "downrange_nm": round(nm, 1), "tie": A.TIE_WINDOW, "notice": m.get("area"),
+                              "windows": [[w["start"], w["end"]] for w in a.get("windows") or []
+                                          if w.get("start") and w.get("end")], "_row": row})
+        if not rows:
+            continue
+        used: list[dict] = []
+        sub = r.get("kind") not in (P.ORBITAL, P.NOT_KNOWN)
+        p = infer_path(pad, r.get("site"), bands_by_site.get(r.get("site") or "", []), areas=cands,
+                       orbit=None if sub else r.get("orbit"), suborbital=sub, time=r.get("time"),
+                       used=used) if cands else None
+        if p and used:
+            for c in used:
+                c["_row"]["role"] = "path"
+            for k in ("_by", "_n", "_inc"):
+                p.pop(k, None)
+            r["path"] = p
+            if world is not None:
+                over = overfly.overflight(world, r)
+                if over is not None:
+                    r["over"] = over
+                else:
+                    r.pop("over", None)
+            n += 1
+        for c in cands:
+            if c["_row"]["role"] == "coincidence":
+                c["_row"]["why"] = "the time and place fit, but it is off the line of this launch's other areas"
+        r["live"] = {"closures": sorted(rows, key=lambda x: (x["nm"], x["i"]))}
+    return n
 
 
 # ---------- NotamForChina ----------
@@ -1191,12 +1285,14 @@ def nsf_join(recs: list[dict], doc: dict | None, chart_topics: dict[str, set]) -
 def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[dict], now: str,
                 nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None,
                 world: "overfly.World | None" = None, nsf_doc: dict | None = None,
-                site_fixes: list[dict] | None = None, published: list[dict] | None = None) -> dict:
+                site_fixes: list[dict] | None = None, published: list[dict] | None = None,
+                live: dict | None = None) -> dict:
     """The History tab's list (data/launches.json). `world` (overfly.World): when given, each record with a flight
     path gets `over`, the countries its ground track crosses (overfly.py). `site_fixes`: history/site_fixes.json's
     list (apply_site_fixes()). `published`: history/published_notices.json's list, closure areas no other source
     carries, each checked against a published copy of its notice and given to its GCAT launch by tag
-    (`published_notices`; their areas are the launch's own, `ascent.TIE_NOTAM`)."""
+    (`published_notices`; their areas are the launch's own, `ascent.TIE_NOTAM`). `live`: {matches, areas} of this
+    run's snapshot, for the scheduled launches' paths through their live closure areas (live_paths())."""
     pub_by: dict[str, list] = {}
     for x in published or []:
         pub_by.setdefault(x["tag"], []).append(x)
@@ -1790,6 +1886,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         finish(r, areas=cl)
 
     borrow_paths(recs, world)
+    live_n = live_paths(recs, (live or {}).get("matches") or [], (live or {}).get("areas") or [], bands_by_site, world)
     recs.sort(key=lambda r: (r.get("time") or "0000", r["id"]))
     kinds = {k: sum(1 for r in recs if r.get("kind") == k) for k in P.KINDS}
     gcat_kinds = {k: sum(1 for gi in g_info.values() if gi["kind"] == k) for k in P.KINDS if k != P.NOT_KNOWN}
@@ -1798,7 +1895,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
               "chart_notice_sets": notice_sets, "gcat_joined": len(g_to_chart),
               "provisional": sum(1 for r in recs if r.get("provisional")),
               "upcoming": sum(1 for r in recs if r["status"] == "upcoming"),
-              "paths": {"estimated": sum(1 for r in recs if r.get("path"))}}
+              "paths": {"estimated": sum(1 for r in recs if r.get("path")), "live": live_n}}
     if nfc_doc:
         nn = [n for r in recs for n in r.get("nfc_notices") or []]
         counts["nfc"] = {**nfc_counts, "own_records": len(nfc_loose),

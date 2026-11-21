@@ -17,6 +17,10 @@ history, and says which scheduled launches coincide with them. Observations only
    to 1 h before it opens); time and place (also inside an azimuth band the pad's history has, or within 1,500
    NM where the pad has no history); grouped (GCAT has since dated a launch from that site inside the window).
    None says an area is for a launch.
+   **Live paths** (`catalog.live_paths()`, 21 Nov 2026): a scheduled launch's estimated path runs through the matched
+   areas within 2,500 NM of its pad, by the same rule as History's paths. A time-only match counts only within 15
+   degrees of the launch's expected bearing, and a NET known only to the day ties nothing. A launch with no area on
+   its ascent has no line on the Live map.
 5. **Live lanes:** FAA space-operations TFRs; Orbit's published snapshot. FAA NMS waits for access. The
    NASASpaceflight forum is linked, not collected.
    **Scheduled launches** (19 Nov 2026, from Orbit): one record per expected launch from one or more sources (Launch
