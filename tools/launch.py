@@ -542,7 +542,8 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     published = json.loads(pub_path.read_text(encoding="utf-8"))["notices"] if pub_path.exists() else None
     index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
                                 snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries),
-                                nsf_doc=nsf_doc, site_fixes=fixes, published=published)
+                                nsf_doc=nsf_doc, site_fixes=fixes, published=published,
+                                live={"matches": snap.get("matches") or [], "areas": snap.get("areas") or []})
     for tag in (index.get("site_fixes") or {}).get("stale") or []:
         print(f"site_fixes.json: {tag} no longer has the site its fix names in GCAT; review and drop the fix")
     files = {"data/snapshot.json": dump(snap), "data/feed.geojson": dump(feed.build_feed(snap)),

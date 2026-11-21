@@ -301,3 +301,18 @@ tr.up td { border-bottom-style: dashed; }
 .traj { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 4px; }
 .traj-pick select { max-width: 100%; }
 .traj-pick label { font-weight: 600; margin-right: 4px; }
+
+/* Live tab: a scheduled launch's card under the map, and the on-path mark in the coincidence table. */
+.launch-card { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 10px; }
+.launch-card h3 { font-size: 1rem; margin: 0 0 8px; overflow-wrap: anywhere; }
+.launch-card dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0 0 8px; }
+.launch-card dt { color: var(--muted); }
+.launch-card dd { margin: 0; overflow-wrap: anywhere; }
+.launch-card .lc-areas { margin: 0; padding: 0; list-style: none; }
+.launch-card .lc-areas li + li { margin-top: 3px; }
+.lvl { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.badge-path { background: var(--accent); color: var(--panel); }
+@media (max-width: 480px) {
+  .launch-card dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .launch-card dd { margin-bottom: 6px; }
+}

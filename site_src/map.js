@@ -1,7 +1,8 @@
 // Launch's map, on the suite's stack (Orbit, COP, Blackout): vendored MapLibre GL JS 6.14.0, Natural Earth land
 // from this site at world zoom, OpenFreeMap's vector map past DETAIL_ZOOM, Natural Earth alone if OpenFreeMap
 // can't be reached. Colours come from style.css tokens through MapLibre paint (no inline styles, CSP).
-// Layers: live closure areas (Orbit's navigational warnings, FAA space-operations TFRs), scheduled launch pads,
+// Layers: live closure areas (Orbit's navigational warnings, FAA space-operations TFRs), scheduled launches' estimated
+// paths through them, scheduled launch pads,
 // recurring drop zones, pasted notices. The History tab has its own map (hmap.js).
 import * as ml from "./vendor/maplibre-gl/maplibre-gl.mjs";
 
@@ -173,7 +174,7 @@ export async function createMap(container, model, { onPick }) {
   addProjectionToggle(map);
   collapseAttribution(map);
   map.getCanvas().setAttribute("aria-label", "Map of launch and reentry closure areas. Every item on it is also listed on this page.");
-  const data = { live: model.live, pads: model.pads, zones: EMPTY, paste: EMPTY, traj: EMPTY, trajpad: EMPTY };
+  const data = { live: model.live, paths: model.paths || EMPTY, pads: model.pads, zones: EMPTY, paste: EMPTY, traj: EMPTY, trajpad: EMPTY };
   const note = (on) => {
     container.parentElement.querySelectorAll(".fallback-note").forEach((e) => e.remove());
     if (on) { const p = document.createElement("p"); p.className = "fallback-note small muted"; p.textContent = "Detailed base map unavailable: showing outline land."; container.parentElement.append(p); }
@@ -187,8 +188,14 @@ export async function createMap(container, model, { onPick }) {
     for (const [k, v] of Object.entries(data)) map.addSource("la_" + k, { type: "geojson", data: v });
     map.addLayer({ id: "zones-fill", type: "fill", source: "la_zones", paint: { "fill-color": warn, "fill-opacity": 0.14 } });
     map.addLayer({ id: "zones-line", type: "line", source: "la_zones", paint: { "line-color": warn, "line-width": 1, "line-dasharray": [2, 2] } });
-    map.addLayer({ id: "live-fill", type: "fill", source: "la_live", paint: { "fill-color": ink, "fill-opacity": 0.07 } });
-    map.addLayer({ id: "live-line", type: "line", source: "la_live", paint: { "line-color": ink, "line-width": 1.3, "line-opacity": 0.8 } });
+    // A live area on a scheduled launch's estimated path takes that launch's country colour; any other stays grey.
+    const tied = ["==", ["get", "tied"], 1];
+    map.addLayer({ id: "live-fill", type: "fill", source: "la_live", paint: { "fill-color": ["case", tied, actor, ink], "fill-opacity": ["case", tied, 0.24, 0.07] } });
+    map.addLayer({ id: "live-line", type: "line", source: "la_live", paint: { "line-color": ["case", tied, actor, ink], "line-width": ["case", tied, 1.8, 1.3], "line-opacity": 0.85 } });
+    // Scheduled launches' estimated paths: a wide invisible line takes the click, so a phone can hit it.
+    map.addLayer({ id: "path-hit", type: "line", source: "la_paths", layout: { "line-cap": "round" }, paint: { "line-color": ink, "line-width": 16, "line-opacity": 0.001 } });
+    map.addLayer({ id: "path-casing", type: "line", source: "la_paths", layout: { "line-cap": "round" }, paint: { "line-color": panel, "line-width": 4.6 } });
+    map.addLayer({ id: "path-line", type: "line", source: "la_paths", layout: { "line-cap": "round" }, paint: { "line-color": actor, "line-width": 2.2, "line-dasharray": [2.4, 1.4] } });
     map.addLayer({ id: "paste-fill", type: "fill", source: "la_paste", paint: { "fill-color": accent, "fill-opacity": 0.2 } });
     map.addLayer({ id: "paste-line", type: "line", source: "la_paste", paint: { "line-color": accent, "line-width": 2 } });
     map.addLayer({ id: "pads", type: "circle", source: "la_pads", paint: { "circle-radius": 5.5, "circle-color": panel, "circle-stroke-color": actor, "circle-stroke-width": 2.6 } });
@@ -199,10 +206,12 @@ export async function createMap(container, model, { onPick }) {
   }
   map.on("style.load", addLayers);
   dark.addEventListener("change", async () => { const n = await buildStyle(); note(n.fellBack); map.setStyle(n.style, { diff: false }); });
-  const CLICK = ["pads", "live-fill", "zones-fill", "paste-fill"];
+  const CLICK = ["pads", "path-hit", "live-fill", "zones-fill", "paste-fill"]; // in the order a click prefers them
   const pick = (pt) => {
     const f = map.queryRenderedFeatures([[pt.x - 6, pt.y - 6], [pt.x + 6, pt.y + 6]], { layers: CLICK.filter((l) => map.getLayer(l)) });
-    return f.length ? f[0].properties.key : null;
+    if (!f.length) return null;
+    const rank = (x) => CLICK.indexOf(x.layer.id);
+    return f.reduce((best, x) => (rank(x) < rank(best) ? x : best)).properties.key;
   };
   // pickPoint(): the next click on the map gives its position (the Paste tab's "click the map" for a pad) instead
   // of picking an item; pickPoint(null) cancels.
