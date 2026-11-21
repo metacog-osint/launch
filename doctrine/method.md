@@ -21,6 +21,10 @@ history, and says which scheduled launches coincide with them. Observations only
    450 NM of a site with launch-timing history, with no exactly dated listed launch within 100 NM of that site in any
    of the notice's windows, and no time-and-place match to a listed launch elsewhere. A listing dated only to a day or
    month is named beside it. It says the schedule shows nothing for a closure, not that a launch is coming.
+   **Live paths** (`catalog.live_paths()`, 21 Nov 2026): a scheduled launch's estimated path runs through the matched
+   areas within 2,500 NM of its pad, by the same rule as History's paths. A time-only match counts only within 15
+   degrees of the launch's expected bearing, and a NET known only to the day ties nothing. A launch with no area on
+   its ascent has no line on the Live map.
 5. **Live lanes:** FAA space-operations TFRs; Orbit's published snapshot. FAA NMS waits for access. The
    NASASpaceflight forum is linked, not collected.
    **Scheduled launches** (19 Nov 2026, from Orbit): one record per expected launch from one or more sources (Launch
