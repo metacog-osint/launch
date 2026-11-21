@@ -126,7 +126,19 @@ function liveTables() {
     ((a.windows || []).slice(0, 2).map((w) => fmt(w.start) + " to " + fmt(w.end, { date: false })).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
       + (a.expect ? "; " + expectText(a.expect) : "")] }));
   put($("area-table"), rows.length ? table(["Source", "Notice", "Where", "Windows"], rows, (r) => pickLive(r.key)) : muted("No live areas."));
+  unlistedTable();
   folds("live");
+}
+
+// Closure with no listing (launch/unlisted.py): a closure and a schedule that shows nothing for it, never a launch.
+function unlistedTable() {
+  const us = snap.unlisted || [];
+  put($("unlisted-table"), us.length ? table(["Nearest site", { label: "NM", num: true }, "Window", "Notices", "Schedule"],
+    us.map((u) => ({ u, cells: [u.site, u.expect.nm, fmt(u.start) + " to " + fmt(u.end, { date: false }) + (u.more_windows ? ` and ${u.more_windows} more` : ""),
+      u.notices.map((n) => n.key).join(", "),
+      u.maybe_listed.length ? "None in this window. Dated only roughly: " + u.maybe_listed.join(", ") : "None listed"] })),
+    (r) => { const k = [...byKey.keys()].find((x) => x.startsWith("live:" + r.u.notices[0].key + ":")); if (k) pickLive(k); })
+    : muted("No closure near a launch site is without a listed launch."));
 }
 
 // Elsewhere today (tic-related.js from the hub): the countries of the pads with launches scheduled in the next 14

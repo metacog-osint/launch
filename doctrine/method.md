@@ -17,6 +17,10 @@ history, and says which scheduled launches coincide with them. Observations only
    to 1 h before it opens); time and place (also inside an azimuth band the pad's history has, or within 1,500
    NM where the pad has no history); grouped (GCAT has since dated a launch from that site inside the window).
    None says an area is for a launch.
+   **Closure with no listing** (`launch/unlisted.py`, 21 Nov 2026): a window of 6 h or less in the next 14 days, within
+   450 NM of a site with launch-timing history, with no exactly dated listed launch within 100 NM of that site in any
+   of the notice's windows, and no time-and-place match to a listed launch elsewhere. A listing dated only to a day or
+   month is named beside it. It says the schedule shows nothing for a closure, not that a launch is coming.
 5. **Live lanes:** FAA space-operations TFRs; Orbit's published snapshot. FAA NMS waits for access. The
    NASASpaceflight forum is linked, not collected.
    **Scheduled launches** (19 Nov 2026, from Orbit): one record per expected launch from one or more sources (Launch
