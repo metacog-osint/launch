@@ -62,13 +62,25 @@
     <section class="card" id="map-card" aria-labelledby="map-h">
       <div class="card-head">
         <h2 id="map-h">Map</h2>
-        <p class="muted small" id="map-note">Grey outlines: live closure areas. Amber dashed: recurring drop zones,
-          when shown. Purple: what you paste. Rings: pads of launches scheduled in the next 14 days. Ctrl and scroll
-          (or two fingers) to zoom.</p>
+        <p class="muted small" id="map-note">Dashed lines: estimated paths of scheduled launches through the live
+          closure areas that coincide with them; those areas take the launch's country colour. A closure on a path
+          fits in time and place, which does not show it is for that launch. Grey: closure areas on no launch's path.
+          Rings: pads scheduled in the next 14 days. Click a line or pad for the launch. Amber dashed: recurring drop
+          zones. Purple: what you paste. Ctrl and scroll (or two fingers) to zoom.</p>
         <p class="small"><label><input type="checkbox" id="show-zones"> Show recurring drop zones</label></p>
       </div>
       <div class="map-stage"><div id="map" class="map"></div></div>
       <div class="small" id="map-info" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="past-h">
+      <div class="card-head">
+        <h2 id="past-h">Past 7 days</h2>
+        <p class="muted small">Launches flown in the seven days to this page's last data read, newest first. Each opens
+          in History with its path and notices. The newest come from Launch Library 2 and are marked provisional
+          until GCAT lists them.</p>
+      </div>
+      <div class="tbl-wrap" id="past-table"></div>
     </section>
 
     <section class="card" aria-labelledby="live-h">
@@ -77,7 +89,8 @@
         <p class="muted small">A coincidence is named by its level. <b>Time</b>: a launch's scheduled time falls in an
           area's window of four hours or less, or up to an hour before it opens. <b>Time and place</b>: also, the area
           lies in an azimuth band and at a distance where the pad's history has closures. <b>Grouped</b>: GCAT has
-          since dated a launch from that site inside the window. None says an area is for a launch.</p>
+          since dated a launch from that site inside the window. <b>On path</b>: Launch's estimated path for that launch
+          runs through the area. None says an area is for a launch.</p>
       </div>
       <div class="tbl-wrap" id="match-table"></div>
       <h3 class="sub-h">Areas in force or announced</h3>
