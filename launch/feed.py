@@ -73,17 +73,21 @@ def _tfr_item(t: dict, generated: str, accessed: str) -> dict:
     alt = "; ".join(f"{a.get('name') or 'area'}: {a['lower']} to {a['upper']}" for a in d.get("areas") or [])
     issued = d.get("issued_utc")
     is_new = bool(issued and _dt(issued) >= _dt(generated) - timedelta(hours=NEW_HOURS))
+    activity = d.get("activity")
     props = {
         **_base(generated),
         "tier": "anomaly" if is_new else "routine",
         "id": f"launch:tfr:{t['id']}",
-        "title": f"FAA space operations TFR FDC {t['id']}: {t.get('description') or ''}".strip(),
+        "title": (f"FAA space operations TFR FDC {t['id']}" + (f", {activity}" if activity else "")
+                  + f": {t.get('description') or ''}").strip(),
         "summary": (f"The FAA lists FDC {t['id']} (space operations, {t.get('facility')}, {t.get('state')}), created "
                     f"{t.get('created')}: {t.get('description')}."
                     + (f" Limits: {alt}." if alt else "")
                     + (" In force " + "; ".join(f"{w['start']} to {w['end']}" for w in d["windows"][:3])
                        + (f" and {len(d['windows']) - 3} more windows" if len(d["windows"]) > 3 else "") + " (UTC)."
                        if d.get("windows") else "")
+                    + (" The notice names an amateur rocketry group as its contact: high-power hobby rocketry, not an "
+                       "orbital launch closure." if activity else "")
                     + " Not for navigation."),
         "data_as_of": accessed,
         "countries": ["US"],
@@ -92,7 +96,8 @@ def _tfr_item(t: dict, generated: str, accessed: str) -> dict:
         "precision_class": "area",
         "visual": {"type": "map", "url": f"{SITE}/#live"},
         "sources": [{**SRC_TFR, "url": t.get("page") or SRC_TFR["url"], "accessed_at": accessed}],
-        "measures": {"notam_id": t["id"], "new": is_new, **({"issued": issued} if issued else {})},
+        "measures": {"notam_id": t["id"], "new": is_new, **({"issued": issued} if issued else {}),
+                     **({"activity": activity} if activity else {})},
     }
     if is_new:
         props["baseline_ref"] = {"id": "faa-space-ops-tfrs-in-force", "type": "rolling", "version": "1",

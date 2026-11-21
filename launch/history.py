@@ -175,7 +175,18 @@ def vehicle_state(vehicle: str | None) -> str | None:
     return None
 
 
+def _notam_year(nm: dict, notams: list[dict]) -> int | None:
+    """The year of the event's own NOTAM when the name gives the same month and day (one day either side) in another
+    year: "29 Dec 26_~0613 UTC_Jielong-3" holds A4790/25, in force 29 Dec 2025. The name is kept as charted."""
+    if not (nm["year"] and nm["month"] and nm["day"]) or nm["year"] == 2099:
+        return nm["year"]
+    years = [int(n["start"][:4]) for n in notams if n.get("start") and int(n["start"][5:7]) == nm["month"]
+             and abs(int(n["start"][8:10]) - nm["day"]) <= 1]
+    return years[0] if years and nm["year"] not in years else nm["year"]
+
+
 def _when(nm: dict, notams: list[dict]) -> tuple[str | None, str]:
+    nm = {**nm, "year": _notam_year(nm, notams)}
     if nm["month"] and not nm["year"]:  # "17 Aug_0302 UTC_LM-2C": the year from the first NOTAM's window
         for n in notams:
             if n.get("start") and int(n["start"][5:7]) == nm["month"]:

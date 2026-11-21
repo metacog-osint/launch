@@ -140,6 +140,14 @@ class History(unittest.TestCase):
         e = self.ev["Dec 25_2326 UTC_LM-8A_Xingwang"]
         self.assertEqual((e["time"], e["time_basis"]), ("2025-12-25T23:26:00Z", "from notam"))
 
+    def test_notam_year_corrects_a_mistyped_chart_year(self):
+        nm = history.parse_name("29 Dec 26_~0613 UTC_Jielong-3_PRCS-EO?")
+        kept = [{"start": "2025-12-29T06:07:00Z", "end": "2025-12-29T07:08:00Z"}]
+        self.assertEqual(history._when(nm, kept), ("2025-12-29T06:13:00Z", "time"))
+        self.assertEqual(history._when(nm, []), ("2026-12-29T06:13:00Z", "time"))  # no NOTAM: the name stands
+        other_day = [{"start": "2025-12-20T06:07:00Z", "end": "2025-12-20T07:08:00Z"}]
+        self.assertEqual(history._when(nm, other_day)[0], "2026-12-29T06:13:00Z")  # not the same day: the name stands
+
     def test_non_public_notes_withheld(self):
         blob = json.dumps(self.doc)
         for word in ("ZQDETECT", "QQVIEW", "DRILLX"):
@@ -219,6 +227,31 @@ class Matching(unittest.TestCase):
       EFFECTIVE 2611151701 UTC (1201 LOCAL 11/15/26) UNTIL 2611151850 UTC (1350 LOCAL 11/15/26). ...
       2611151701-2611151850</txtDescrTraditional>
     </Not></Add></Group></XNOTAM-Update>"""
+
+    # FDC 6/8694 as the FAA's XML gave it on 20 Nov 2026 (cut down, telephone numbers removed).
+    XNOTAM_8694 = b"""<XNOTAM-Update><Group><Add><Not>
+      <dateIssued>2026-11-18T15:00:00</dateIssued><dateEffective>2026-11-21T17:00:00</dateEffective>
+      <dateExpire>2026-11-21T21:00:00</dateExpire><codeTimeZone>MST</codeTimeZone>
+      <txtDescrTraditional>!FDC 6/8694 ZLC ID..AIRSPACE 94 ZLC AIRSPACE BOISE, ID..TEMPORARY FLIGHT RESTRICTION.
+      PURSUANT TO 14 CFR SECTION 91.143, SPACE OPS AREA, ACFT OPS ARE PROHIBITED WI AN AREA DEFINED AS 2NM RADIUS OF
+      431415N1161927W (BOI180020.0) SFC-FL440 EFFECTIVE 2611211700 UTC UNTIL 2611212100 UTC. TO PROVIDE A SAFE
+      ENVIRONMENT FOR ROCKET LAUNCH ACTIVITY TRIPOLI IDAHO ROCKETRY IS THE POINT OF CONTACT. 2611211700-2611212100
+      </txtDescrTraditional>
+    </Not></Add></Group></XNOTAM-Update>"""
+
+    def test_amateur_rocketry_tfr_is_labelled_and_kept(self):
+        d = live.tfr_detail(self.XNOTAM_8694)
+        self.assertEqual(d["activity"], live.AMATEUR_LABEL)
+        self.assertEqual(d["windows"], [{"start": "2026-11-21T17:00:00Z", "end": "2026-11-21T21:00:00Z"}])
+        self.assertNotIn("TRIPOLI", json.dumps(d))  # the label only; the notice's text and contacts are not kept
+        self.assertIsNone(live.tfr_detail(self.XNOTAM_7113)["activity"])  # a Cape launch TFR carries no label
+        sq = [[-116.4, 43.2], [-116.3, 43.2], [-116.3, 43.3], [-116.4, 43.2]]
+        item = feed._tfr_item({"id": "6/8694", "facility": "ZLC", "state": "ID", "description": "Boise, ID",
+                               "created": "11/18/2026", "rings": [sq], "detail": d},
+                              "2026-11-20T00:00:00Z", "2026-11-20T00:00:00Z")["properties"]
+        self.assertIn(live.AMATEUR_LABEL, item["title"])
+        self.assertIn("not an orbital launch closure", item["summary"])
+        self.assertEqual(item["measures"]["activity"], live.AMATEUR_LABEL)
 
     def test_tfr_windows_are_utc_and_match_the_launch(self):
         d = live.tfr_detail(self.XNOTAM_7113)
