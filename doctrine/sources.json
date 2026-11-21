@@ -114,7 +114,14 @@
       "use": "ingest",
       "grade": "B2",
       "independence_group": "joey0609",
-      "commercial_ok": true
+      "commercial_ok": true,
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "question": "Is the repository's live update timely enough for a live lane? Launch reads it at a pinned commit, for history only.",
+        "lead_time": "19 of 19 Chinese orbital launches, 13 Sep - 12 Nov 2026 (GCAT), had a notice of 6 h or less holding the launch within 1 h and within 2,800 km of the pad. Earliest notice's CREATED time before launch: median 142 h, range 97.5-252 h.",
+        "pickup": "13 launch-related notices created since 16 Nov 2026 reached the repository within 0.1-0.3 h of CREATED. Commit gaps over the last 14 days: median 1.6 h, longest 74.5 h. Earlier history was loaded in bulk, so it cannot show pickup.",
+        "sample": "A6096/26 (ZLHW), created 03:03Z 20 Nov, window 21:06-21:36Z 29 Nov 2026: no Chinese Launch Library 2 record in that window at Launch's 01:15Z 21 Nov read. A closure, not a confirmed launch."
+      }
     },
     {
       "id": "internet-archive-faa-nga",
@@ -126,6 +133,295 @@
       "grade": "A2",
       "independence_group": "faa",
       "commercial_ok": true
+    },
+    {
+      "id": "rocketlaunch-live",
+      "name": "Candidate, not read by any lane: RocketLaunch.Live JSON API, free tier (next 5 launches)",
+      "url": "https://www.rocketlaunch.live/api",
+      "licence": "No licence stated; the API page asks for the credit \"Data by RocketLaunch.Live\" near the data",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "rocketlaunch-live",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "API page read. /terms answers 404; no terms of use found.",
+        "robots": "Allows /api and /json/launches/next/5 for all agents; names no AI agents.",
+        "lead_time": "Not measurable from the free tier, which holds no history.",
+        "sample": "Next 5 read 21 Nov 2026: a CASC launch from Taiyuan at 03:50Z 21 Nov (record modified 18 Nov) was not among the 16 Launch Library 2 records Launch published from its 01:15Z read. USSF-266 is 23 Nov here and 24 Nov in Launch Library 2."
+      }
+    },
+    {
+      "id": "next-spaceflight",
+      "name": "Candidate, not read by any lane: Next Spaceflight",
+      "url": "https://nextspaceflight.com/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "next-spaceflight",
+      "commercial_ok": false,
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read, because robots.txt bars this kind of client.",
+        "robots": "Disallows ClaudeBot, anthropic-ai and other AI agents on the whole site; Content-Signal use=reference, ai-train=no.",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "telegram-public-preview",
+      "name": "Candidate, not read by any lane: Telegram public channels through t.me/s/ preview pages",
+      "url": "https://telegram.org/tos/content-licensing",
+      "licence": "Telegram's Content Licensing and AI Scraping Terms; each post stays its author's",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "telegram",
+      "commercial_ok": false,
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Telegram's terms prohibit data scraping for all users and third-party services; the limited exception covers clients, bots and mini apps, and only as far as needed to run them.",
+        "robots": "t.me/robots.txt answers 404.",
+        "lead_time": "Not measured; no channel page was read.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "ru-altai-republic-gov",
+      "name": "Candidate, not read by any lane: Altai Republic government notices",
+      "url": "https://altai-republic.ru/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "ru-altai-republic-gov",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read: the site did not answer this client (HTTP 403).",
+        "robots": "Not read: the site did not answer this client (HTTP 403).",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "ru-altai-krai-gov",
+      "name": "Candidate, not read by any lane: Altai Krai government notices",
+      "url": "https://www.altairegion22.ru/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "ru-altai-krai-gov",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read: the site did not answer this client (timed out).",
+        "robots": "Not read: the site did not answer this client (timed out).",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "ru-komi-gov",
+      "name": "Candidate, not read by any lane: Komi Republic government notices",
+      "url": "https://rkomi.ru/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "ru-komi-gov",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read: the site did not answer this client (timed out).",
+        "robots": "Not read: the site did not answer this client (timed out).",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "ru-arkhangelsk-gov",
+      "name": "Candidate, not read by any lane: Arkhangelsk Oblast government notices",
+      "url": "https://dvinaland.ru/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "ru-arkhangelsk-gov",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read: the site did not answer this client (timed out).",
+        "robots": "Not read: the site did not answer this client (timed out).",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "ru-yakutia-gov",
+      "name": "Candidate, not read by any lane: Sakha (Yakutia) government notices",
+      "url": "https://www.sakha.gov.ru/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "ru-yakutia-gov",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read: the site did not answer this client (timed out).",
+        "robots": "Not read: the site did not answer this client (timed out).",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "ru-khmao-gov",
+      "name": "Candidate, not read by any lane: Khanty-Mansi government notices",
+      "url": "https://admhmao.ru/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "ru-khmao-gov",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read: the site did not answer this client (HTTP 447).",
+        "robots": "Not read: the site did not answer this client (HTTP 447).",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "ru-mchs-altai-krai",
+      "name": "Candidate, not read by any lane: EMERCOM (MChS) Altai Krai notices; other regional MChS sites not tried",
+      "url": "https://22.mchs.gov.ru/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "ru-mchs-altai-krai",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read: the site did not answer this client (timed out).",
+        "robots": "Not read: the site did not answer this client (timed out).",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "amic-ru",
+      "name": "Candidate, not read by any lane: Amitel news agency (amic.ru), Altai fall-zone reports",
+      "url": "https://www.amic.ru/",
+      "licence": "All rights reserved by default; the site footer requires a hyperlink to Amitel on any full or partial use",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "amic",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Footer and /rules read. Use requires a hyperlink; automated collection is not addressed.",
+        "robots": "Allows / and /news/; refuses the site search path.",
+        "lead_time": "Not measured: the search path is refused.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "altapress-ru",
+      "name": "Candidate, not read by any lane: Altapress (altapress.ru), Altai fall-zone reports",
+      "url": "https://altapress.ru/a_tos",
+      "licence": "Copyright; the terms allow downloads for personal use and bar publishing or passing on content without permission",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "altapress",
+      "commercial_ok": false,
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Terms (/a_tos) read. Links are the most Launch could use without written permission.",
+        "robots": "Allows / and /story/; refuses the site search path.",
+        "lead_time": "Not measured: the search path is refused.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "jaxa",
+      "name": "Candidate, not read by any lane: JAXA launch pages",
+      "url": "https://global.jaxa.jp/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "jaxa",
+      "commercial_ok": "unknown",
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read: the site did not answer this client (HTTP 403).",
+        "robots": "Not read: the site did not answer this client (HTTP 403).",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "isro",
+      "name": "Candidate, not read by any lane: ISRO launch pages",
+      "url": "https://www.isro.gov.in/",
+      "licence": "ISRO Website Policy: material may be reproduced free of charge without specific permission, accurately, not in a misleading context, with the source prominently acknowledged; third-party material excepted",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "isro",
+      "commercial_ok": true,
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Website Policy read.",
+        "robots": "robots.txt answers 404.",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "arianespace",
+      "name": "Candidate, not read by any lane: Arianespace mission updates",
+      "url": "https://www.arianespace.com/mission-updates/",
+      "licence": "Arianespace Terms and Conditions: personal use only; reproduction without express authorization forbidden",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "arianespace",
+      "commercial_ok": false,
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Terms read. Links only without Arianespace's authorization.",
+        "robots": "Allows / and /mission-updates/ for all agents.",
+        "lead_time": "One case: a release of 18 Nov 2026 gave the 23 Nov window for VA271 (5 days).",
+        "sample": "Home page read 21 Nov 2026."
+      }
+    },
+    {
+      "id": "rocket-lab",
+      "name": "Candidate, not read by any lane: Rocket Lab mission pages",
+      "url": "https://rocketlabcorp.com/missions/",
+      "licence": "Not read",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "rocket-lab",
+      "commercial_ok": false,
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Not read, because robots.txt bars this kind of client.",
+        "robots": "Disallows ClaudeBot, anthropic-ai and other AI agents on the whole site; Content-Signal use=reference, ai-train=no.",
+        "lead_time": "Not measured.",
+        "sample": "None taken."
+      }
+    },
+    {
+      "id": "faa-licences",
+      "name": "Candidate, not read by any lane: FAA commercial space licences, permits and approvals",
+      "url": "https://www.faa.gov/space/licenses",
+      "licence": "US Government work (17 U.S.C. 105)",
+      "use": "excluded",
+      "grade": "F6",
+      "independence_group": "faa",
+      "commercial_ok": true,
+      "vetting": {
+        "read": "20-21 Nov 2026",
+        "terms": "Page read; no separate terms found (/web-policies answers 404).",
+        "robots": "Allows the licence pages for all agents.",
+        "lead_time": "Not a schedule: a licence shows what may fly, not when.",
+        "sample": "Pages read 21 Nov 2026; no records taken."
+      }
     }
   ]
 }
