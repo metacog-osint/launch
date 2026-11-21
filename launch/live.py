@@ -116,9 +116,21 @@ def tfr_windows(text: str | None, pairs: list[tuple[str | None, str | None]]) ->
     return sorted(out, key=lambda w: w["start"]), (basis if out else None)
 
 
+# The FAA issues amateur high-power rocketry TFRs under 14 CFR 91.143 too, in the same SPACE OPERATIONS class: FDC 6/8694
+# (Boise, 21 Nov 2026) names Tripoli Idaho Rocketry as its point of contact. The operator's words in the text mark them.
+AMATEUR_ROCKETRY = re.compile(r"\b(?:ROCKETRY|TRIPOLI|ROCKET (?:CLUB|SOCIETY))\b", re.I)
+AMATEUR_LABEL = "amateur/high-power rocketry (FAA 91.143)"
+
+
+def tfr_activity(text: str | None) -> str | None:
+    """The label for a TFR whose text names an amateur rocketry operator, else None. The TFR is kept either way."""
+    return AMATEUR_LABEL if AMATEUR_ROCKETRY.search(text or "") else None
+
+
 def tfr_detail(body: bytes) -> dict:
     """Altitudes and the schedule from a TFR's XNOTAM XML. `windows` are UTC (see tfr_windows); `effective`,
-    `expires` and `time_zone` are kept as the XML writes them."""
+    `expires` and `time_zone` are kept as the XML writes them. `activity` is tfr_activity's label; the text itself,
+    which carries contact telephone numbers, is not kept."""
     root = ET.fromstring(body)
     def first(tag):
         el = root.find(".//" + tag)
@@ -133,7 +145,8 @@ def tfr_detail(body: bytes) -> dict:
                       "lower": f"{a.findtext('valDistVerLower')} {a.findtext('uomDistVerLower')} {a.findtext('codeDistVerLower')}"})
     return {"issued_utc": (first("dateIssued") or "") + "Z" if first("dateIssued") else None,
             "effective": first("dateEffective"), "expires": first("dateExpire"), "time_zone": first("codeTimeZone"),
-            "windows": windows, "window_basis": basis, "local_name": first("txtLocalName"), "areas": areas}
+            "windows": windows, "window_basis": basis, "local_name": first("txtLocalName"), "areas": areas,
+            "activity": tfr_activity(first("txtDescrTraditional"))}
 
 
 # ---------- Orbit ----------
