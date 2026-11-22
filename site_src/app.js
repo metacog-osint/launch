@@ -23,6 +23,9 @@ function el(tag, cls, text) {
   return e;
 }
 const fmt = (iso, o) => (!iso ? "" : T ? T.format(iso, o || {}) : iso.replace("T", " ").replace(":00Z", "Z"));
+// A window "start to end": the end's date is left off only when it falls on the start's day in the viewer's zone, so
+// a window over midnight or over several days does not read as ending before it opens.
+const span = (a, b) => fmt(a) + " to " + fmt(b, fmt(a, { time: false }) === fmt(b, { time: false }) ? { date: false } : {});
 function mark(cc) {
   const s = el("span", "cc g-" + group(cc));
   if (!cc) { s.textContent = "?"; s.title = "Not known"; return s; }
@@ -130,12 +133,13 @@ function liveTables() {
   const lvlBadge = (m) => {
     const s = el("span", "lvl");
     s.append(el("span", "badge" + (m.level === "time" ? "" : " badge-warn"), m.level));
+    if (m.named) { const n = el("span", "badge badge-warn", "names it"); n.title = `The notice's text has "${m.named}"`; s.append(n); }
     if (onPath(m)) s.append(el("span", "badge badge-path", "on path"));
     return s;
   };
   put($("match-table"), ms.length ? table(
     ["Scheduled launch", "NET", "Area", "Window (UTC shown in your zone)", "Level", { label: "Az / NM", num: true }, "Why"],
-    ms.map((m) => ({ m, cells: [m.launch_name, fmt(m.net), m.area, fmt(m.window[0]) + " to " + fmt(m.window[1], { date: false }),
+    ms.map((m) => ({ m, cells: [m.launch_name, fmt(m.net), m.area, span(m.window[0], m.window[1]),
       lvlBadge(m), `${m.azimuth}° / ${m.distance_nm}`, m.level === "grouped" ? "GCAT launch " + m.grouped_with.launch_tag : m.place_basis] })),
     (row) => {
       const rec = recOf.get(row.m.launch);
@@ -150,7 +154,7 @@ function liveTables() {
     }) : muted("No scheduled launch coincides with a live closure area."));
   const rows = (snap.areas || []).map((a, i) => ({ key: "live:" + (a.key || a.id) + ":" + i, cells: [
     srcLabel(a), a.key || a.id, a.label || (a.regions || []).join(", ") || "",
-    ((a.windows || []).slice(0, 2).map((w) => fmt(w.start) + " to " + fmt(w.end, { date: false })).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
+    ((a.windows || []).slice(0, 2).map((w) => span(w.start, w.end)).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
       + (a.expect ? "; " + expectText(a.expect) : "")] }));
   put($("area-table"), rows.length ? table(["Source", "Notice", "Where", "Windows"], rows, (r) => pickLive(r.key)) : muted("No live areas."));
   pastWeek();
@@ -224,7 +228,7 @@ function launchCard(r, fit = true) {
   fact("Vehicle", r.ll2_vehicle || r.vehicle);
   fact("Payload", r.payload);
   fact("NET", fmt(r.time) + (r.net_precision && !["Second", "Minute"].includes(r.net_precision) ? ` (to the ${r.net_precision.toLowerCase()})` : "") + (r.ll2_status ? ` · ${r.ll2_status}` : ""));
-  if (u.window_start && u.window_end) fact("Window", fmt(u.window_start) + " to " + fmt(u.window_end, { date: false }));
+  if (u.window_start && u.window_end) fact("Window", span(u.window_start, u.window_end));
   fact("Pad", [r.pad_name, r.site].filter(Boolean).join(", "));
   const cl = (r.live || {}).closures || [];
   const sourceNames = [...new Set(cl.map((c) => SRC_LABEL[c.source] || c.source))];
@@ -238,7 +242,7 @@ function launchCard(r, fit = true) {
       const li = el("li"), b = el("button", "linkish", c.area + (a && /^[A-Z]$/.test(a.label || "") ? ` area ${a.label}` : "")); b.type = "button";
       if (a) b.addEventListener("click", () => map.fit({ type: "FeatureCollection", features: [poly(a.ring, {})] }));
       const role = c.role === "path" ? "on the path" : c.role === "pad" ? "at the pad" : "not on the path: " + c.why;
-      li.append(b, document.createTextNode(` · ${c.level} · ${c.azimuth}° / ${whole(c.nm)} NM · ${fmt(c.window[0])} to ${fmt(c.window[1], { date: false })} · ${role}`));
+      li.append(b, document.createTextNode(` · ${c.level} · ${c.azimuth}° / ${whole(c.nm)} NM · ${span(c.window[0], c.window[1])} · ${role}`));
       ul.appendChild(li);
     });
     fact("Closures", ul);
@@ -504,7 +508,12 @@ async function main() {
   });
   const shown = showTab();
   const model = liveM = liveModel();
-  map = await createMap($("map"), model, { onPick: (k) => { if (k.startsWith("live:") || k.startsWith("pad:") || k.startsWith("path:")) pickLive(k); } });
+  try {
+    map = await createMap($("map"), model, { onPick: (k) => { if (k.startsWith("live:") || k.startsWith("pad:") || k.startsWith("path:")) pickLive(k); } });
+  } catch (err) { // no map (no WebGL 2, or the map failed): every tab still works, and every area is in the tables
+    $("map").textContent = "The map could not load: " + err.message + ". Every area and launch is listed on this page.";
+    map = { set() {}, fit() {}, pickPoint() {}, resize() {} };
+  }
   if (document.body.dataset.tab !== "live") map.set("paths", null);
   patterns(); paste(); trajSetup(); savedSetup();
   map.resize();

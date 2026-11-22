@@ -2,7 +2,7 @@
 // (estimated from an inferred azimuth: dashed; scheduled: dotted) and, if asked, their closure areas. The selected launch is drawn on top with its pad. Same base map as map.js. Colours come from the
 // style.css actor tokens through MapLibre paint (no inline styles, CSP).
 import * as ml from "./vendor/maplibre-gl/maplibre-gl.mjs";
-import { buildStyle, addProjectionToggle, collapseAttribution, fitCoords, worldZoom } from "./map.js";
+import { buildStyle, addProjectionToggle, collapseAttribution, fitCoords, worldZoom, hasWebGL2, NO_WEBGL2 } from "./map.js";
 import { estimatedLine, geodesic } from "./notam.js";
 
 const dark = matchMedia("(prefers-color-scheme: dark)");
@@ -31,6 +31,7 @@ function pathLines(r) {
 }
 
 export async function createHistoryMap(container, IX, { onPick, onSite }) {
+  if (!hasWebGL2()) throw new Error(NO_WEBGL2);
   const first = await buildStyle();
   const map = new ml.Map({
     container, style: first.style, center: [100, 30], zoom: worldZoom(container),
