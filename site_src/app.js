@@ -77,7 +77,7 @@ function tiles() {
   const lv = {};
   (snap.matches || []).forEach((m) => { lv[m.level] = (lv[m.level] || 0) + 1; });
   const items = [
-    ["Live closure areas", (snap.areas || []).length],
+    ["Live closure areas", (snap.areas || []).filter((a) => !a.off_live).length],
     ["FAA space-operations TFRs", (snap.tfr || []).length],
     ["Scheduled launches, 14 days", ((snap.orbit || {}).upcoming || []).length],
     ["Coincidences: time / time and place / grouped", `${lv.time || 0} / ${lv["time and place"] || 0} / ${lv.grouped || 0}`],
@@ -88,13 +88,16 @@ function tiles() {
   $("asof").textContent = "Live areas read " + fmt(snap.generated_at) + ".";
   // Today's reading (tic-shell): this run's counts. A closure announces intent, so a coincidence is only that.
   const num = (v) => el("b", "", String(v));
-  const areas = (snap.areas || []).length, tfr = (snap.tfr || []).length, up = ((snap.orbit || {}).upcoming || []).length, both = lv["time and place"] || 0;
+  const areas = (snap.areas || []).filter((a) => !a.off_live).length, tfr = (snap.tfr || []).length, up = ((snap.orbit || {}).upcoming || []).length, both = lv["time and place"] || 0;
   $("reading").replaceChildren(el("span", "tic-reading-k", "Today\u2019s reading"),
     num(areas), ` live closure area${areas === 1 ? "" : "s"}, `, num(tfr), ` FAA space-operations TFR${tfr === 1 ? "" : "s"} and `,
     num(up), ` launch${up === 1 ? "" : "es"} scheduled in the next 14 days. `, num(both),
     ` coincidence${both === 1 ? "" : "s"} between a scheduled launch and a closure, in both time and place.`);
 }
 
+// NOTAMs whose text says they are not a launch (nms.off_live: exercises, airdrops, missile firings...) are areas with
+// `off_live`. They match no launch, and the map and the area list leave them out until the viewer turns them on.
+let showOff = false;
 function liveModel() {
   const live = { type: "FeatureCollection", features: [] };
   const tied = LP.tiedAreas(upcomingRecs());
@@ -102,6 +105,7 @@ function liveModel() {
     const key = "live:" + (a.key || a.id) + ":" + i;
     const on = tied.get(i) || [];
     byKey.set(key, { kind: "live", a, launches: on });
+    if (a.off_live && !showOff) return;
     live.features.push(poly(a.ring, { key, tied: on.length ? 1 : 0, group: on.length ? group(on[0].actor) : a.source === "faa-tfr" ? "us" : "other" }));
   });
   const paths = { type: "FeatureCollection", features: LP.livePathRecords(upcomingRecs()).map((r) => {
@@ -152,11 +156,14 @@ function liveTables() {
       const k = row.m.area_i !== undefined ? `live:${row.m.area}:${row.m.area_i}` : [...byKey.keys()].find((x) => x.startsWith("live:" + row.m.area + ":"));
       if (k) pickLive(k);
     }) : muted("No scheduled launch coincides with a live closure area."));
-  const rows = (snap.areas || []).map((a, i) => ({ key: "live:" + (a.key || a.id) + ":" + i, cells: [
-    srcLabel(a), a.key || a.id, a.label || (a.regions || []).join(", ") || "",
+  const rows = (snap.areas || []).map((a, i) => ({ a, key: "live:" + (a.key || a.id) + ":" + i, cells: [
+    srcLabel(a), a.key || a.id, (a.off_live ? `Not a launch (${a.off_live}): ` : "") + (a.label || (a.regions || []).join(", ") || ""),
     ((a.windows || []).slice(0, 2).map((w) => span(w.start, w.end)).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
       + (a.expect ? "; " + expectText(a.expect) : "")] }));
-  put($("area-table"), rows.length ? table(["Source", "Notice", "Where", "Windows"], rows, (r) => pickLive(r.key)) : muted("No live areas."));
+  const off = (snap.areas || []).filter((a) => a.off_live).length, shown = rows.filter((r) => showOff || !r.a.off_live);
+  $("off-count").textContent = `(${off})`;
+  put($("area-table"), shown.length ? table(["Source", "Notice", "Where", "Windows"], shown, (r) => pickLive(r.key)) : muted("No live areas."));
+  if (off && !showOff) $("area-table").append(muted(`${off} non-launch NOTAM${off === 1 ? " is" : "s are"} hidden (exercises, airdrops, missile firings and the like): turn them on with "Show non-launch NOTAMs" on the map.`));
   pastWeek();
   folds("live");
 }
@@ -209,6 +216,7 @@ function pickLive(key) {
   }
   const a = x.a;
   box.append(el("b", "", (a.source === "faa-tfr" ? "FAA TFR " : a.source === "faa-nms" ? "NOTAM " : "") + (a.key || a.id)), document.createTextNode(" · " + (a.hazard || a.label || "") + ((a.detail || {}).activity ? " · " + a.detail.activity : "")));
+  if (a.off_live) box.append(el("br"), document.createTextNode(`Not a launch notice (${a.off_live}): it matches no launch.`));
   if (a.source === "faa-nms") box.append(el("br"), document.createTextNode("Kept: " + (KEPT[a.kept] || a.kept) + (a.expect ? "; " + expectText(a.expect) : "") + ". " + ((snap.nms || {}).source_note || "")));
   (x.launches || []).forEach((r) => {
     const b = el("button", "linkish", r.label); b.type = "button";
@@ -516,6 +524,10 @@ async function main() {
   }
   if (document.body.dataset.tab !== "live") map.set("paths", null);
   patterns(); paste(); trajSetup(); savedSetup();
+  $("show-off").addEventListener("change", (ev) => {
+    showOff = ev.target.checked;
+    liveM = liveModel(); map.set("live", liveM.live); liveTables();
+  });
   map.resize();
   await shown;
   if (T && T.onChange) T.onChange(() => { tiles(); liveTables(); sourcesBox(); if (openCard) launchCard(openCard, false); });

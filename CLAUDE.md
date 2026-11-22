@@ -122,7 +122,8 @@ reported, not failed.
   the tfr lane holds go there. Never "FAA data", not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`). Every
   kept notice stays in `data/nms-closures.json` (copies and run unioned; no local
   copy and the site unreadable, not 404, stops the run). `nms.off_live`: a kept notice whose text says it is
-  something else (military exercise, missile firing, airdrop, amateur rocketry, aerodrome, ended) is no live area.
+  something else (military exercise, missile firing, airdrop, amateur rocketry, aerodrome, ended) carries `off_live`:
+  it matches no launch, and the page hides it until the viewer ticks "Show non-launch NOTAMs".
 - **GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): Cordon's `gnss.json`, no launch filters (Q-code GA/GW,
   signal text, `refers`). `data/gnss-notams/`: `active.json`, a `YYYY-MM-DD.json` per ended UTC day (rewritten up to
   48 h, n=0 days too), `all.json`, `index.json`; kept for good.

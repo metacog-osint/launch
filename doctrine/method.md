@@ -24,7 +24,7 @@ history, and says which scheduled launches coincide with them. Observations only
    **Off the live view** (`nms.off_live()`, 22 Nov 2026): a kept NOTAM whose text says it is an amateur rocketry
    window, no longer in force or an aerodrome notice, or, without space words (space, satellite, orbit, reentry,
    debris, rocket launch), a missile firing, an airdrop or airlift, or a military exercise, stays in the closure
-   ledger and is no live area. Terse notices ("AIRSPACE CLSD", "ACT") say nothing and stay.
+   ledger, matches no launch, and is hidden on the Live map and list until the viewer turns such notices on. Terse notices ("AIRSPACE CLSD", "ACT") say nothing and stay.
    **Live paths** (`catalog.live_paths()`, 21 Nov 2026): a scheduled launch's estimated path runs through the matched
    areas within 2,500 NM of its pad, by the same rule as History's paths. A time-only match counts only within 15
    degrees of the launch's expected bearing, and a NET known only to the day ties nothing. A launch with no area on

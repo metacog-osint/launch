@@ -303,14 +303,14 @@ def from_set(feats: list[dict], index: dict, past, now: datetime) -> dict:
 
 
 def areas(state: dict, tfr_ids: set[str] | None = None, sites: dict | None = None) -> list[dict]:
-    """Kept notices as areas for live.match. An FDC notice the tfr lane already holds is left to it, and one whose
-    text says it is not a launch (off_live) is left off. With history/timing.json's sites, an area near a pad carries
-    `expect` (timing.expect). `text` is for live.match and is not written to the snapshot's areas."""
+    """Kept notices as areas for live.match. An FDC notice the tfr lane already holds is left to it. One whose text
+    says it is not a launch carries `off_live` (its reason): live.match skips it and the page hides it until the
+    viewer turns such notices on. With history/timing.json's sites, an area near a pad carries `expect`
+    (timing.expect). `text` is for live.match and is not written to the snapshot's areas."""
     out = []
     for n in state.get("notices") or []:
         num = (n.get("number") or "")
-        if off_live(n.get("text")):   # read again: a lane carried from an earlier run has no off_live field
-            continue
+        off = off_live(n.get("text"))   # read again: a lane carried from an earlier run has no off_live field
         if tfr_ids and n.get("classification") == "FDC" and any(num.endswith(t) for t in tfr_ids):
             continue
         if not (n.get("start") and n.get("end")):
@@ -320,7 +320,8 @@ def areas(state: dict, tfr_ids: set[str] | None = None, sites: dict | None = Non
                         + (f" area {i + 1}" if len(n["rings"]) > 1 else ""),
                         "label": (n.get("text") or "").split("\n")[0][:120], "ring": ring, "kept": n["kept"],
                         "windows": [{"start": n["start"], "end": n["end"]}], "ring_basis": n.get("ring_basis"),
-                        "expect": timing.expect(ring, n["start"], n["end"], sites or {}), "text": n.get("text") or ""})
+                        "expect": timing.expect(ring, n["start"], n["end"], sites or {}), "text": n.get("text") or ""}
+                       | ({"off_live": off} if off else {}))
     return out
 
 

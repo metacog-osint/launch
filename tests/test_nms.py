@@ -71,7 +71,11 @@ class Keep(unittest.TestCase):
         n = nms.notice(feat(mil), [])
         self.assertEqual((n["kept"] is not None, n["off_live"]), (True, "military exercise"))
         st = {"notices": [n | {"start": "2026-11-23T00:00:00Z", "end": "2026-11-23T02:00:00Z"}]}
-        self.assertEqual(nms.areas(st), [])
+        got = nms.areas(st)
+        self.assertEqual([a["off_live"] for a in got], ["military exercise"])   # kept as an area, for the toggle
+        from launch import live
+        up = [{"id": "u1", "name": "X", "net": "2026-11-23T01:00:00Z", "lat": 26.2, "lon": 127.6}]
+        self.assertEqual(live.match(up, got, [], []), [])   # and matches no launch
         for t in ("DANGER AREA ACTIVATED WITHIN TTZP DUE TO THE ARIANE 6 LAUNCH VA271",
                   "TEMPORARY DANGER AREA DUE TO SPACE DEBRIS RETURN OF SPACEX NROL-136", "AIRSPACE CLSD WI AREA:",
                   "A MISSILE RANGE CLOSED FOR A ROCKET LAUNCH"):
