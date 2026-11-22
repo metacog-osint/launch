@@ -121,7 +121,8 @@ reported, not failed.
   launch words, area/warning Q-codes, `cn-area`, `unl-area`, `recurring-area` (25 NM of a past area); FDC notices
   the tfr lane holds go there. Never "FAA data", not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`). Every
   kept notice stays in `data/nms-closures.json` (copies and run unioned; no local
-  copy and the site unreadable, not 404, stops the run).
+  copy and the site unreadable, not 404, stops the run). `nms.off_live`: a kept notice whose text says it is
+  something else (military exercise, missile firing, airdrop, amateur rocketry, aerodrome, ended) is no live area.
 - **GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): Cordon's `gnss.json`, no launch filters (Q-code GA/GW,
   signal text, `refers`). `data/gnss-notams/`: `active.json`, a `YYYY-MM-DD.json` per ended UTC day (rewritten up to
   48 h, n=0 days too), `all.json`, `index.json`; kept for good.
@@ -129,8 +130,10 @@ reported, not failed.
   nearby live areas an `expect`. History, not a forecast.
 
 ## Matching (three levels, all shown; none says an area is for a launch)
-time (Orbit's rule) / time and place (azimuth +-5 deg, downrange 0.5x-50 to 1.25x+100 NM of the pad's history) /
+time (NET in a window of 6 h or less, or 1 h before; Orbit's was 4 h) / time and place (azimuth +-5 deg, downrange 0.5x-50 to 1.25x+100 NM of the pad's history) /
 grouped (GCAT launch from that site, within 30 NM, in the window). The feed carries TFRs and the last two only.
+`named` beside the level (`live.named_in`): the text has the mission designator (then a window up to 7 days counts;
+kept with the launch like time and place) or the vehicle's name with the place.
 
 ## Tier
 A space operations TFR whose XML `dateIssued` (UTC) is within 72 h of the run (`feed.NEW_HOURS`) is anomaly,
