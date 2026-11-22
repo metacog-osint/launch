@@ -68,7 +68,9 @@
           fits in time and place, which does not show it is for that launch. Grey: closure areas on no launch's path.
           Rings: pads scheduled in the next 14 days. Click a line or pad for the launch. Amber dashed: recurring drop
           zones. Purple: what you paste. Ctrl and scroll (or two fingers) to zoom.</p>
-        <p class="small"><label><input type="checkbox" id="show-zones"> Show recurring drop zones</label></p>
+        <p class="small"><label><input type="checkbox" id="show-zones"> Show recurring drop zones</label>
+          <label><input type="checkbox" id="show-off"> Show non-launch NOTAMs (exercises, airdrops, missile
+            firings) <span id="off-count"></span></label></p>
       </div>
       <div class="map-stage"><div id="map" class="map"></div></div>
       <div class="small" id="map-info" aria-live="polite"></div>
@@ -94,7 +96,8 @@
           runs through the area. <b>Names it</b>: the notice's text has the launch's mission designator (then a window
           of up to seven days counts), or its vehicle's name where the place fits too. None says an area is for a
           launch. NOTAMs whose text says they are something else (military exercises, missile firings, airdrops,
-          amateur rocketry, aerodrome notices) are kept in the closure ledger and left off this list.</p>
+          amateur rocketry, aerodrome notices) match no launch and are hidden from this list and the map until you turn
+          on "Show non-launch NOTAMs" on the map.</p>
       </div>
       <div class="tbl-wrap" id="match-table"></div>
       <h3 class="sub-h">Areas in force or announced</h3>

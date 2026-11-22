@@ -351,6 +351,8 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
         net = _dt(u["net"])
         bands = corridor_bands(corridors, u["lat"], u["lon"])
         for i, a in enumerate(areas):
+            if a.get("off_live"):   # a NOTAM whose text says it is not a launch (nms.off_live): shown on request only
+                continue
             wins = _windows_of(a)
             hit = time_match(net, wins)
             name = named_in(u, a.get("text"))
