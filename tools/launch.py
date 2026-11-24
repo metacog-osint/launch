@@ -434,7 +434,11 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
              + nms.areas(snap.get("nms") or {}, {t["id"] for t in snap.get("tfr") or []}, tim))
     # An area's text is read for live.match (named_in) and left out of the snapshot: each notice links its source.
     snap["areas"] = [{k: v for k, v in a.items() if k not in ("detail", "text")} for a in areas]
-    snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [])
+    led_path = root / "history" / "ledger.json"
+    led_rows = json.loads(led_path.read_text(encoding="utf-8")).get("launches") or [] if led_path.exists() else []
+    flown = [{"lat": x["site"]["lat"], "lon": x["site"]["lon"], "inc": x["inc"]} for x in led_rows
+             if x.get("kind") == "orbital" and x.get("inc") is not None and (x.get("site") or {}).get("lat") is not None]
+    snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [], flown)
     data_dir.mkdir(parents=True, exist_ok=True)
     # The Ascent move (19 Nov 2026): Launch's own schedule, LL2 ledger and the side-by-side check with Orbit's.
     ll2_led = None

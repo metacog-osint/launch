@@ -366,5 +366,59 @@ class Patterns(unittest.TestCase):
         self.assertEqual(z[0]["first"]["event"], "e0")
 
 
+
+class PlaceOnThinPads(unittest.TestCase):
+    """Most pads have few charted events (24 Nov 2026: 69 of 77 under 10), so their bands alone missed NG-25's
+    and USSF-380's own areas. Below MIN_BAND_EVENTS an area on a flown orbit's azimuth fits too."""
+    CAPE = {"lat": 28.562, "lon": -80.577}
+    WIN = [{"start": "2026-11-29T15:40:00Z", "end": "2026-11-29T16:43:00Z"}]
+
+    def area(self, az, nm):
+        import math
+        lat1, lon1, d = math.radians(self.CAPE["lat"]), math.radians(self.CAPE["lon"]), nm / 3440.065
+        b = math.radians(az)
+        lat2 = math.asin(math.sin(lat1) * math.cos(d) + math.cos(lat1) * math.sin(d) * math.cos(b))
+        lon2 = lon1 + math.atan2(math.sin(b) * math.sin(d) * math.cos(lat1), math.cos(d) - math.sin(lat1) * math.sin(lat2))
+        x, y = math.degrees(lon2), math.degrees(lat2)
+        return {"key": f"a{az}-{nm}", "ring": [[x - .05, y - .05], [x + .05, y - .05], [x + .05, y + .05], [x - .05, y + .05],
+                                              [x - .05, y - .05]], "windows": self.WIN}
+
+    def corr(self, events):
+        return [{"pad": [-80.604, 28.608], "events": events, "bands": [{"from": 110, "to": 115, "downrange_nm": [12, 12]}]}]
+
+    def run_it(self, areas, events=2, flown=None):
+        up = [{"id": "u1", "name": "Falcon 9 | NG-25", "net": "2026-11-29T15:47:00Z", **self.CAPE}]
+        return live.match(up, areas, self.corr(events), [], flown)
+
+    ISS = [{"lat": 28.56, "lon": -80.58, "inc": 51.64}] * 5
+
+    def test_launch_azimuths(self):
+        a = live.launch_azimuths(28.5, 51.6)
+        self.assertAlmostEqual(a[0], 45.0, delta=0.5)
+        self.assertAlmostEqual(a[1], 135.0, delta=0.5)
+        self.assertEqual(live.launch_azimuths(28.5, 20.0), [90.0])
+        self.assertEqual(live.launch_azimuths(34.6, 160.0), [270.0])
+
+    def test_thin_pad_area_on_a_flown_azimuth_fits(self):
+        m = self.run_it([self.area(46, 251)], flown=self.ISS)
+        self.assertEqual(m[0]["level"], "time and place")
+        self.assertIn("51.5-degree orbit flown from this site", m[0]["place_basis"])
+        self.assertEqual(self.run_it([self.area(46, 251)])[0]["level"], "time")        # no GCAT launches read
+        self.assertEqual(self.run_it([self.area(80, 251)], flown=self.ISS)[0]["level"], "time")   # off the azimuth
+
+    def test_rich_pad_bands_still_rule(self):
+        self.assertEqual(self.run_it([self.area(46, 251)], events=20, flown=self.ISS)[0]["level"], "time")
+
+    def test_one_off_inclination_does_not_count(self):
+        self.assertEqual(self.run_it([self.area(46, 251)], flown=self.ISS[:4])[0]["level"], "time")
+
+    def test_area_near_the_pad_fits_whatever_the_bands(self):
+        m = self.run_it([self.area(58, 11)], events=20)
+        self.assertEqual((m[0]["level"], m[0]["place_basis"]), ("time and place", "within 30 NM of the pad"))
+
+    def test_far_area_stays_time(self):
+        self.assertEqual(self.run_it([self.area(233, 5900)], flown=self.ISS)[0]["level"], "time")
+
+
 if __name__ == "__main__":
     unittest.main()
