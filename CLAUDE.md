@@ -79,8 +79,7 @@ the cache, the published copies and this run, so a lost cache loses nothing.
   (`catalog.farthest_nm()`), not one set aside as another event's (`ascent.select(others=)`). A launch without the number hides while its range is set.
 - **Downloads** (`export.js`): CSV, GeoJSON, KML of the filtered launches, only data the page holds; antimeridian
   cut; UTC plus the viewer's named zone; formula-guarded CSV; sources and licences in every file.
-- **Maps:** great-circle edges, globe toggle, `fitCoords()`. Filters live in the address (`#history?veh=...`);
-  `history.js` `LEGACY` and `OLD_PATH` read old words.
+- **Maps:** great-circle edges, globe toggle, `fitCoords()`. Filters live in the address (`#history?veh=...`).
 - **Paste tab:** pad trajectory (`traj.js`, dog-leg at 25 NM); saved notices stay in the browser (`launch.saved`).
 - **Source rules:** NotamForChina (Apache-2.0, `nfc.SHA`) and Joey0609/notams (MIT, `joey.SHA`) are fetched into
   git-ignored folders; `build_site` refuses without their licence files and publishes them. `joey.launch_related`
@@ -107,32 +106,30 @@ reported, not failed.
 
 ## Live lanes (`launch/live.py`)
 - `tfr`: FAA TFR list, map-service shapes (joined to the active list), XNOTAM XML of each SPACE OPERATIONS TFR.
-  Windows UTC (`tfr_windows`): the text's EFFECTIVE...UNTIL UTC, else `dateEffective`/`dateExpire` as UTC.
+  Windows UTC (`tfr_windows`).
 - `orbit`: Orbit's `data/snapshot.json` (scheduled and GCAT launches, payload `inc`); its NGA warnings until
   `cordon` first succeeds.
-- **Ascent move** (from Orbit, 19 Nov 2026; both run for a two-day check): `schedule` (one LL2 request;
+- **Ascent move** (from Orbit, 19 Nov 2026): `schedule` (one LL2 request;
   multi-source records `upcoming:<first source>:<its id>`, kept by later joins), `news` (links only), LL2 ledger
-  (`ll2ledger.py`: one pull, at most one lookup; launches since GCAT's newest become provisional `ll2:` rows),
+  (`ll2ledger.py`; launches since GCAT's newest become provisional `ll2:` rows),
   `compare.py`. Stores kept for good on release `ledger`.
 - `cordon`: Cordon's feed, `launch` category (the one NGA reader): launch, debris, reentry hazards; Orbit's keys.
 - `nms` (`nms.py`): FAA NMS-API NOTAMs via Cordon's `data/notams/` index and `launch-areas.json` (the active set);
   Cordon holds the keys and makes every FAA request.
-  `nms.keep`: no cancels, permanent notices, windows over 62 days, tops under FL100 or non-launch hazards; kept for
-  launch words, area/warning Q-codes, `cn-area`, `unl-area`, `recurring-area` (25 NM of a past area); FDC notices
-  the tfr lane holds go there. Never "FAA data", not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`). Every
-  kept notice stays in `data/nms-closures.json` (copies and run unioned; no local
-  copy and the site unreadable, not 404, stops the run). `nms.off_live`: a kept notice whose text says it is
-  something else (military exercise, missile firing, airdrop, amateur rocketry, aerodrome, ended) carries `off_live`:
-  it matches no launch, and the page hides it until the viewer ticks "Show non-launch NOTAMs".
+  `nms.keep` (rules in its docstring). Never "FAA data", not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`).
+  Every kept notice stays in `data/nms-closures.json` (no local copy and the site unreadable, not 404, stops the
+  run). `nms.off_live`: text that says it is something else (exercise, missile firing, airdrop, amateur rocketry,
+  aerodrome, ended): matches no launch, hidden until the viewer ticks "Show non-launch NOTAMs".
 - **GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): Cordon's `gnss.json`, no launch filters (Q-code GA/GW,
-  signal text, `refers`). `data/gnss-notams/`: `active.json`, a `YYYY-MM-DD.json` per ended UTC day (rewritten up to
-  48 h, n=0 days too), `all.json`, `index.json`; kept for good.
+  signal text, `refers`). `data/gnss-notams/` (active, a file per ended UTC day, all, index), kept
+  for good.
 - **Timing** (`timing.py`): median opening-to-launch per site (5+ launches; 450 NM, windows 6 h or less) gives
   nearby live areas an `expect`. History, not a forecast.
 
 ## Matching (three levels, all shown; none says an area is for a launch)
-time (NET in a window of 6 h or less, or 1 h before; Orbit's was 4 h) / time and place (azimuth +-5 deg, downrange 0.5x-50 to 1.25x+100 NM of the pad's history) /
-grouped (GCAT launch from that site, within 30 NM, in the window). The feed carries TFRs and the last two only.
+time (NET in a window of 6 h or less, or 1 h before) / time and place (`live.place_test`: near the pad, the pad's
+charted bands, or where those are thin a flown inclination's azimuth from `history/ledger.json`) / grouped (GCAT
+launch from that site, within 30 NM, in the window). The feed carries TFRs and the last two only.
 `named` beside the level (`live.named_in`): the text has the mission designator (then a window up to 7 days counts;
 kept with the launch like time and place) or the vehicle's name with the place.
 
