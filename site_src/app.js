@@ -23,6 +23,9 @@ function el(tag, cls, text) {
   return e;
 }
 const fmt = (iso, o) => (!iso ? "" : T ? T.format(iso, o || {}) : iso.replace("T", " ").replace(":00Z", "Z"));
+// A window "start to end": the end's date is left off only when it falls on the start's day in the viewer's zone, so
+// a window over midnight or over several days does not read as ending before it opens.
+const span = (a, b) => fmt(a) + " to " + fmt(b, fmt(a, { time: false }) === fmt(b, { time: false }) ? { date: false } : {});
 function mark(cc) {
   const s = el("span", "cc g-" + group(cc));
   if (!cc) { s.textContent = "?"; s.title = "Not known"; return s; }
@@ -74,7 +77,7 @@ function tiles() {
   const lv = {};
   (snap.matches || []).forEach((m) => { lv[m.level] = (lv[m.level] || 0) + 1; });
   const items = [
-    ["Live closure areas", (snap.areas || []).length],
+    ["Live closure areas (NGA warnings, NOTAMs, TFRs; Orbit counts warnings)", (snap.areas || []).filter((a) => !a.off_live).length],
     ["FAA space-operations TFRs", (snap.tfr || []).length],
     ["Scheduled launches, 14 days", ((snap.orbit || {}).upcoming || []).length],
     ["Coincidences: time / time and place / grouped", `${lv.time || 0} / ${lv["time and place"] || 0} / ${lv.grouped || 0}`],
@@ -85,13 +88,16 @@ function tiles() {
   $("asof").textContent = "Live areas read " + fmt(snap.generated_at) + ".";
   // Today's reading (tic-shell): this run's counts. A closure announces intent, so a coincidence is only that.
   const num = (v) => el("b", "", String(v));
-  const areas = (snap.areas || []).length, tfr = (snap.tfr || []).length, up = ((snap.orbit || {}).upcoming || []).length, both = lv["time and place"] || 0;
+  const areas = (snap.areas || []).filter((a) => !a.off_live).length, tfr = (snap.tfr || []).length, up = ((snap.orbit || {}).upcoming || []).length, both = lv["time and place"] || 0;
   $("reading").replaceChildren(el("span", "tic-reading-k", "Today\u2019s reading"),
     num(areas), ` live closure area${areas === 1 ? "" : "s"}, `, num(tfr), ` FAA space-operations TFR${tfr === 1 ? "" : "s"} and `,
     num(up), ` launch${up === 1 ? "" : "es"} scheduled in the next 14 days. `, num(both),
     ` coincidence${both === 1 ? "" : "s"} between a scheduled launch and a closure, in both time and place.`);
 }
 
+// NOTAMs whose text says they are not a launch (nms.off_live: exercises, airdrops, missile firings...) are areas with
+// `off_live`. They match no launch, and the map and the area list leave them out until the viewer turns them on.
+let showOff = false;
 function liveModel() {
   const live = { type: "FeatureCollection", features: [] };
   const tied = LP.tiedAreas(upcomingRecs());
@@ -99,6 +105,7 @@ function liveModel() {
     const key = "live:" + (a.key || a.id) + ":" + i;
     const on = tied.get(i) || [];
     byKey.set(key, { kind: "live", a, launches: on });
+    if (a.off_live && !showOff) return;
     live.features.push(poly(a.ring, { key, tied: on.length ? 1 : 0, group: on.length ? group(on[0].actor) : a.source === "faa-tfr" ? "us" : "other" }));
   });
   const paths = { type: "FeatureCollection", features: LP.livePathRecords(upcomingRecs()).map((r) => {
@@ -130,12 +137,13 @@ function liveTables() {
   const lvlBadge = (m) => {
     const s = el("span", "lvl");
     s.append(el("span", "badge" + (m.level === "time" ? "" : " badge-warn"), m.level));
+    if (m.named) { const n = el("span", "badge badge-warn", "names it"); n.title = `The notice's text has "${m.named}"`; s.append(n); }
     if (onPath(m)) s.append(el("span", "badge badge-path", "on path"));
     return s;
   };
   put($("match-table"), ms.length ? table(
     ["Scheduled launch", "NET", "Area", "Window (UTC shown in your zone)", "Level", { label: "Az / NM", num: true }, "Why"],
-    ms.map((m) => ({ m, cells: [m.launch_name, fmt(m.net), m.area, fmt(m.window[0]) + " to " + fmt(m.window[1], { date: false }),
+    ms.map((m) => ({ m, cells: [m.launch_name, fmt(m.net), m.area, span(m.window[0], m.window[1]),
       lvlBadge(m), `${m.azimuth}° / ${m.distance_nm}`, m.level === "grouped" ? "GCAT launch " + m.grouped_with.launch_tag : m.place_basis] })),
     (row) => {
       const rec = recOf.get(row.m.launch);
@@ -148,11 +156,14 @@ function liveTables() {
       const k = row.m.area_i !== undefined ? `live:${row.m.area}:${row.m.area_i}` : [...byKey.keys()].find((x) => x.startsWith("live:" + row.m.area + ":"));
       if (k) pickLive(k);
     }) : muted("No scheduled launch coincides with a live closure area."));
-  const rows = (snap.areas || []).map((a, i) => ({ key: "live:" + (a.key || a.id) + ":" + i, cells: [
-    srcLabel(a), a.key || a.id, a.label || (a.regions || []).join(", ") || "",
-    ((a.windows || []).slice(0, 2).map((w) => fmt(w.start) + " to " + fmt(w.end, { date: false })).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
+  const rows = (snap.areas || []).map((a, i) => ({ a, key: "live:" + (a.key || a.id) + ":" + i, cells: [
+    srcLabel(a), a.key || a.id, (a.off_live ? `Not a launch (${a.off_live}): ` : "") + (a.label || (a.regions || []).join(", ") || ""),
+    ((a.windows || []).slice(0, 2).map((w) => span(w.start, w.end)).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
       + (a.expect ? "; " + expectText(a.expect) : "")] }));
-  put($("area-table"), rows.length ? table(["Source", "Notice", "Where", "Windows"], rows, (r) => pickLive(r.key)) : muted("No live areas."));
+  const off = (snap.areas || []).filter((a) => a.off_live).length, shown = rows.filter((r) => showOff || !r.a.off_live);
+  $("off-count").textContent = `(${off})`;
+  put($("area-table"), shown.length ? table(["Source", "Notice", "Where", "Windows"], shown, (r) => pickLive(r.key)) : muted("No live areas."));
+  if (off && !showOff) $("area-table").append(muted(`${off} non-launch NOTAM${off === 1 ? " is" : "s are"} hidden (exercises, airdrops, missile firings and the like): turn them on with "Show non-launch NOTAMs" on the map.`));
   unlistedTable();
   pastWeek();
   folds("live");
@@ -217,6 +228,7 @@ function pickLive(key) {
   }
   const a = x.a;
   box.append(el("b", "", (a.source === "faa-tfr" ? "FAA TFR " : a.source === "faa-nms" ? "NOTAM " : "") + (a.key || a.id)), document.createTextNode(" · " + (a.hazard || a.label || "") + ((a.detail || {}).activity ? " · " + a.detail.activity : "")));
+  if (a.off_live) box.append(el("br"), document.createTextNode(`Not a launch notice (${a.off_live}): it matches no launch.`));
   if (a.source === "faa-nms") box.append(el("br"), document.createTextNode("Kept: " + (KEPT[a.kept] || a.kept) + (a.expect ? "; " + expectText(a.expect) : "") + ". " + ((snap.nms || {}).source_note || "")));
   (x.launches || []).forEach((r) => {
     const b = el("button", "linkish", r.label); b.type = "button";
@@ -236,7 +248,7 @@ function launchCard(r, fit = true) {
   fact("Vehicle", r.ll2_vehicle || r.vehicle);
   fact("Payload", r.payload);
   fact("NET", fmt(r.time) + (r.net_precision && !["Second", "Minute"].includes(r.net_precision) ? ` (to the ${r.net_precision.toLowerCase()})` : "") + (r.ll2_status ? ` · ${r.ll2_status}` : ""));
-  if (u.window_start && u.window_end) fact("Window", fmt(u.window_start) + " to " + fmt(u.window_end, { date: false }));
+  if (u.window_start && u.window_end) fact("Window", span(u.window_start, u.window_end));
   fact("Pad", [r.pad_name, r.site].filter(Boolean).join(", "));
   const cl = (r.live || {}).closures || [];
   const sourceNames = [...new Set(cl.map((c) => SRC_LABEL[c.source] || c.source))];
@@ -250,7 +262,7 @@ function launchCard(r, fit = true) {
       const li = el("li"), b = el("button", "linkish", c.area + (a && /^[A-Z]$/.test(a.label || "") ? ` area ${a.label}` : "")); b.type = "button";
       if (a) b.addEventListener("click", () => map.fit({ type: "FeatureCollection", features: [poly(a.ring, {})] }));
       const role = c.role === "path" ? "on the path" : c.role === "pad" ? "at the pad" : "not on the path: " + c.why;
-      li.append(b, document.createTextNode(` · ${c.level} · ${c.azimuth}° / ${whole(c.nm)} NM · ${fmt(c.window[0])} to ${fmt(c.window[1], { date: false })} · ${role}`));
+      li.append(b, document.createTextNode(` · ${c.level} · ${c.azimuth}° / ${whole(c.nm)} NM · ${span(c.window[0], c.window[1])} · ${role}`));
       ul.appendChild(li);
     });
     fact("Closures", ul);
@@ -486,6 +498,7 @@ async function showTab() {
   const name = (location.hash.replace(/^#/, "").split("?")[0]) || "live";
   const tab = TABS.includes(name) ? name : "live";
   document.body.dataset.tab = tab;
+  document.title = (tab === "live" ? "" : $("tab-" + tab).textContent + " · ") + "Launch · The Intelligence Company";
   TABS.forEach((t) => {
     $(t).hidden = t !== tab;
     const a = $("tab-" + t); a.setAttribute("aria-selected", t === tab ? "true" : "false");
@@ -516,9 +529,18 @@ async function main() {
   });
   const shown = showTab();
   const model = liveM = liveModel();
-  map = await createMap($("map"), model, { onPick: (k) => { if (k.startsWith("live:") || k.startsWith("pad:") || k.startsWith("path:")) pickLive(k); } });
+  try {
+    map = await createMap($("map"), model, { onPick: (k) => { if (k.startsWith("live:") || k.startsWith("pad:") || k.startsWith("path:")) pickLive(k); } });
+  } catch (err) { // no map (no WebGL 2, or the map failed): every tab still works, and every area is in the tables
+    $("map").textContent = "The map could not load: " + err.message + ". Every area and launch is listed on this page.";
+    map = { set() {}, fit() {}, pickPoint() {}, resize() {} };
+  }
   if (document.body.dataset.tab !== "live") map.set("paths", null);
   patterns(); paste(); trajSetup(); savedSetup();
+  $("show-off").addEventListener("change", (ev) => {
+    showOff = ev.target.checked;
+    liveM = liveModel(); map.set("live", liveM.live); liveTables();
+  });
   map.resize();
   await shown;
   if (T && T.onChange) T.onChange(() => { tiles(); liveTables(); sourcesBox(); if (openCard) launchCard(openCard, false); });

@@ -29,6 +29,8 @@ distance), else none.
 from __future__ import annotations
 
 import bisect
+import hashlib
+import json
 import math
 import re
 from datetime import datetime, timedelta, timezone
@@ -37,6 +39,7 @@ from . import ascent as A
 from . import gcat, history, notam, overfly
 from . import nfc as NFC
 from . import programs as P
+from .live import time_match
 
 LEDGER_SINCE = "2012-01-01"
 DEFAULT_PATH_NM = 1500
@@ -203,21 +206,78 @@ def flown_from_ll2(upcoming: list[dict], now: str) -> list[dict]:
 
 
 def closures_from_matches(matches: list[dict], areas: list[dict], now: str) -> list[dict]:
-    """Closure areas a scheduled launch coincided with in time and place (or grouped), kept with that launch."""
-    by_key = {}
-    for a in areas:
-        by_key.setdefault(a.get("key") or a.get("id"), a)
+    """Closure areas a scheduled launch coincided with in time and place (or grouped), or in time with the notice's
+    text naming its mission (live.named_in, `named_by` "mission"), kept with that launch. A notice
+    with several areas stores each ring the match names (`area_i`). The first ring keeps the id older records have,
+    `launch|area`; a later ring is `launch|area#<ring tag>`, since a run's area index is not stable between runs."""
+    by_key: dict = {}
+    for i, a in enumerate(areas):
+        by_key.setdefault(a.get("key") or a.get("id"), []).append(i)
     out = []
     for m in matches or []:
-        if m.get("level") not in ("time and place", "grouped"):
+        if m.get("level") not in ("time and place", "grouped") and m.get("named_by") != "mission":
             continue
-        a = by_key.get(m.get("area"))
-        if not a or not a.get("ring"):
+        rings = by_key.get(m.get("area"))
+        if not rings:
             continue
-        out.append({"id": f"{m['launch']}|{m['area']}", "ll2": m["launch"], "area": m["area"],
+        i = m.get("area_i") if m.get("area_i") in rings else rings[0]
+        a = areas[i]
+        if not a.get("ring"):
+            continue
+        cid = f"{m['launch']}|{m['area']}" + ("" if i == rings[0] else f"#{_ring_tag(a['ring'])}")
+        out.append({"id": cid, "ll2": m["launch"], "area": m["area"],
                     "source": m.get("area_source"), "level": m["level"], "window": m.get("window"),
+                    **({"named": m["named"]} if m.get("named_by") == "mission" else {}),
                     "ring": a["ring"], "azimuth": m.get("azimuth"), "distance_nm": m.get("distance_nm"),
                     "recorded": now})
+    return out
+
+
+def _ring_tag(ring: list) -> str:
+    """A short name for one ring that is the same in every run."""
+    pts = [[round(x, 4) for x in p[:2]] for p in ring or []]
+    return hashlib.sha256(json.dumps(pts, separators=(",", ":")).encode()).hexdigest()[:8]
+
+
+def _closure_windows(c: dict) -> list:
+    """Every window recorded for a stored closure."""
+    return c.get("windows") or ([c["window"]] if c.get("window") else [])
+
+
+def _keep_closure(store: dict, key, c: dict) -> None:
+    """The first reading of a closure stands and a later reading adds any window it lacks, so a launch that slips into
+    another window of the same notice still finds that window."""
+    old = store.get(key)
+    if old is None:
+        store[key] = c
+        return
+    seen = _closure_windows(old)
+    more = [w for w in _closure_windows(c) if w not in seen]
+    if more:
+        store[key] = {**old, "windows": sorted(seen + more)}
+
+
+def closures_holding(cl: list[dict], time: str | None, precision: str | None = None) -> list[dict]:
+    """The stored closures that are still this launch's: a window holds its time by live.match()'s rule, and `window`
+    is set to that one. The rest stay in the ledger and are left off the record (a slipped launch's old closures).
+    A time known only to the day takes a window within 24 h of it. With a coarser time, no time or an unreadable
+    window, nothing can be tested and the closure stays."""
+    t = _dt(time)
+    if not t or (precision not in LIVE_NET_PRECISE and precision != "Day"):
+        return list(cl)
+    out = []
+    for c in cl:
+        wins = _closure_windows(c)
+        spans = [(w, _dt(w[0]), _dt(w[1])) for w in wins if len(w) >= 2]
+        if not wins or len(spans) < len(wins) or any(s is None or e is None for _, s, e in spans):
+            out.append(c)
+            continue
+        if precision == "Day":
+            hit = next((w for w, s, e in spans if s - timedelta(hours=24) <= t <= e + timedelta(hours=24)), None)
+        else:
+            hit = next((w for w, s, e in spans if time_match(t, [(s, e)])), None)
+        if hit:
+            out.append({**c, "window": hit})
     return out
 
 
@@ -241,7 +301,7 @@ def merge(*ledgers: dict | None) -> dict:
             # The newer reading wins field by field; a field it lacks (Orbit's copy has no inclination) is kept.
             launches[r["id"]] = {**base, **{k: v for k, v in new.items() if v not in (None, "", [], {})}}
         for c in lg.get("closures") or []:
-            closures.setdefault(c["id"], c)
+            _keep_closure(closures, c["id"], c)
     rows = sorted(launches.values(), key=lambda r: (r.get("time") or r.get("date") or "", r["id"]))
     return {"version": 1, "since": since, "launches": rows, "closures": sorted(closures.values(), key=lambda c: c["id"]),
             "sites": dict(sorted(sites.items()))}
@@ -669,9 +729,9 @@ def live_paths(recs: list[dict], matches: list[dict], areas: list[dict], bands_b
                 row["role"] = "pad"
             elif nm > AREA_NM:
                 row["why"] = f"{nm:,.0f} NM from the pad, farther than an ascent's closure areas are read"
-            elif m.get("level") == "time" and expected is None:
+            elif m.get("level") == "time" and m.get("named_by") != "mission" and expected is None:
                 row["why"] = "the time fits, and no expected bearing to test the place against"
-            elif m.get("level") == "time" and _adiff(az, expected) > LIVE_TIME_DEG:
+            elif m.get("level") == "time" and m.get("named_by") != "mission" and _adiff(az, expected) > LIVE_TIME_DEG:
                 row["why"] = f"the time fits, but it lies {_adiff(az, expected):.0f}\u00b0 off the launch's expected bearing"
             else:
                 cands.append({"ring": a["ring"], "centroid": [round(lo, 4), round(la, 4)], "azimuth": round(az, 1),
@@ -1214,6 +1274,16 @@ def _closure_list(cl: list[dict]) -> list[dict]:
     return [{"ring": c["ring"], "area": c["area"], "level": c["level"], "window": c.get("window")} for c in cl]
 
 
+def _closure_areas(pad, cl: list[dict]) -> list[dict]:
+    """Stored closures as infer_path() areas, measured from the record's pad and tied by their window."""
+    out = []
+    for c in cl:
+        la, lo = notam.centroid(c["ring"])
+        out.append({"ring": c["ring"], "centroid": [round(lo, 4), round(la, 4)], "tie": A.TIE_WINDOW,
+                    "notice": c["area"], "windows": [c["window"]] if c.get("window") else []})
+    return _bear(pad, out)
+
+
 def _bear(pad, areas: list[dict]) -> list[dict]:
     """Bearing and distance from the record's pad to each area that has a centroid. Always from the record's pad: a
     charted area carries the bearing the import took from the event's first point, which is stale when the pad was
@@ -1225,6 +1295,16 @@ def _bear(pad, areas: list[dict]) -> list[dict]:
             {**a, "azimuth": round(history.bearing(pad[1], pad[0], a["centroid"][1], a["centroid"][0]), 1),
              "downrange_nm": round(notam.haversine_nm(pad[1], pad[0], a["centroid"][1], a["centroid"][0]), 1)}
             for a in areas]
+
+
+def _new_closure_areas(pad, cl: list[dict], listed: list[dict], time: str | None) -> list[dict]:
+    """_closure_areas() less those another source already has at that place (within NFC_AGREE_NM) in a window that
+    holds the launch: one notice from two sources is one area. An area there whose window misses the launch is
+    another event's and does not count."""
+    t = _dt(time)
+    known = [a["centroid"] for a in listed if a.get("centroid") and A.time_holds(a, t)]
+    return [a for a in _closure_areas(pad, cl)
+            if not any(notam.haversine_nm(a["centroid"][1], a["centroid"][0], c[1], c[0]) <= NFC_AGREE_NM for c in known)]
 
 
 # ---------- NASASpaceflight forum threads (nsf.py: NotamForChina's link list; the forum is never read) ----------
@@ -1303,8 +1383,11 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     for e in hist.get("events") or []:
         all_copies.setdefault(e["id"], []).append(e)
     bands_by_site = site_bands(corridors, sites)
-    closures_by_ll2: dict[str, list] = {}
+    stored: dict = {}   # one per ring: a ring stored under both id forms, should a notice's order change, is one area
     for c in ledger.get("closures") or []:
+        _keep_closure(stored, (c["ll2"], c["area"], _ring_tag(c.get("ring"))), c)
+    closures_by_ll2: dict[str, list] = {}
+    for c in stored.values():
         closures_by_ll2.setdefault(c["ll2"], []).append(c)
     gcat, fixed = apply_site_fixes([r for r in ledger.get("launches") or [] if r.get("source") == "gcat"], sites,
                                    site_fixes)
@@ -1735,7 +1818,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             r["orbit"] = P.orbit_class(None, link.get("orbit"))
         if r.get("kind") == P.NOT_KNOWN:
             r["kind"] = ll2_kind(link)
-        cl = closures_by_ll2.get(link["id"], [])
+        cl = closures_holding(closures_by_ll2.get(link["id"], []), r.get("time"))
         if cl:
             r["closures"] = _closure_list(cl)
         return cl
@@ -1825,7 +1908,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         extra += add_joey(r, ["gcat:" + g["tag"]] + ["chart:" + m["id"] for m in grp], copies)
         extra += add_wayback(r, g["tag"])
         extra += add_published(r, g["tag"])
-        finish(r, areas=list(cl) + _bear(r["pad"], areas + extra),
+        listed = _bear(r["pad"], areas + extra)
+        finish(r, areas=_new_closure_areas(r["pad"], cl, listed, r.get("time")) + listed,
                orbit_code=P.gcat_orbit_code(g.get("category")))
 
     # NotamForChina's launches that joined nothing. Before ledger_since GCAT's list here does not reach, so the
@@ -1866,7 +1950,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
              "ll2_url": u.get("ll2_url"), "areas": 0}
         if provisional:
             r["provisional"] = True
-        cl = closures_by_ll2.get(u["id"], [])
+        cl = closures_holding(closures_by_ll2.get(u["id"], []), u.get("net"), u.get("net_precision"))
         if cl:
             r["closures"] = _closure_list(cl)
         if status == "upcoming" and nowdt and _dt(u.get("net")) and _dt(u["net"]) < nowdt:
@@ -1878,7 +1962,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
             continue
         used_ll2.add(f["ll2"])
         r, cl = ll2_rec({**f, "id": f["ll2"], "net": f["time"]}, "launched", True)
-        finish(r, areas=cl)
+        finish(r, areas=_closure_areas(r.get("pad"), cl))
     for u in ll2_all:
         if u["id"] in used_ll2 or u.get("status") in LL2_FLOWN:
             continue

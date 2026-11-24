@@ -432,7 +432,8 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     tim = json.loads(tim_path.read_text(encoding="utf-8"))["sites"] if tim_path.exists() else {}
     areas = (list(nav if nav is not None else orb.get("areas") or []) + live.tfr_areas(snap.get("tfr") or [], {})
              + nms.areas(snap.get("nms") or {}, {t["id"] for t in snap.get("tfr") or []}, tim))
-    snap["areas"] = [{k: v for k, v in a.items() if k != "detail"} for a in areas]
+    # An area's text is read for live.match (named_in) and left out of the snapshot: each notice links its source.
+    snap["areas"] = [{k: v for k, v in a.items() if k not in ("detail", "text")} for a in areas]
     snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [])
     data_dir.mkdir(parents=True, exist_ok=True)
     # The Ascent move (19 Nov 2026): Launch's own schedule, LL2 ledger and the side-by-side check with Orbit's.

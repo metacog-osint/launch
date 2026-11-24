@@ -10,16 +10,25 @@
           (method cordon-feed-1.1). Cordon is the suite's one NGA reader (decided 17 Nov 2026); Launch takes the
           warnings with a launch, debris or reentry hazard and leaves the missile firings. Orbit's own copy of
           them is no longer used.
-  nms     FAA NOTAM Management Service: waits for API access (requested 13 Nov 2026).
+  nms     FAA NOTAM Management Service NOTAMs through Cordon (launch/nms.py): Cordon holds the keys and pulls
+          them (decided 18 Nov 2026); Launch reads its launch-areas subset and keeps closures by its own rules.
 
 Matching, three levels, each named on the page:
-  time            a scheduled launch's NET falls in an area's window of four hours or less, or up to an hour
-                  before it opens (Orbit's rule, method orbit-2.2, rule 5).
+  time            a scheduled launch's NET falls in an area's window of WINDOW_MAX_H (six) hours or less, or up to
+                  an hour before it opens (Orbit's rule, method orbit-2.2, rule 5, with four hours; widened on 22 Nov
+                  2026: Ariane 6 VA271's own NOTAMs and NAVAREA IV warning ran 4.9 to 5.7 hours and matched nothing).
   time and place  the same, and the area lies in an azimuth band where the charted history has closures from that
                   pad, or (no history for the pad) within PLACE_NM of it.
   grouped         after the launch: GCAT dates a launch from that site inside the window of an area that had
                   matched on time and place. History events are grouped as charted.
 None of these says an area is for a launch; each says which coincidence holds.
+
+Named, beside the level: the notice's text has the launch's mission designator (a word of letters and digits in
+LL2's mission name, hyphens ignored: NROL-136, VA271 if LL2 had it, LE-04), `named_by` "mission"; or the
+vehicle's name (ARIANE 6 for an Ariane 64) in an area that also fits in place, `named_by` "vehicle". A mission
+designator also lets a window up to NAMED_MAX_DAYS match, since a debris area that names its launch often stays
+open for the backup days (Tahiti's A1508/26 for NROL-136, five days). Still a coincidence of words: it is shown as
+such.
 """
 from __future__ import annotations
 
@@ -40,7 +49,8 @@ CORDON_FEED = "https://cordon.theintelligence.company/data/feed.geojson"
 NGA_PAGE = "https://msi.nga.mil/NavWarnings"
 NGA_SERIES = {"4": ("navarea-iv", "NAVAREA IV"), "12": ("navarea-xii", "NAVAREA XII"), "A": ("hydrolant", "HYDROLANT"),
               "P": ("hydropac", "HYDROPAC"), "C": ("hydroarc", "HYDROARC")}
-WINDOW_MAX_H = 4
+WINDOW_MAX_H = 6
+NAMED_MAX_DAYS = 7
 BEFORE_H = 1
 PLACE_NM = 1500
 
@@ -245,7 +255,8 @@ def cordon_read(body: bytes) -> dict:
             areas.append({"source": "cordon-navwarn", "key": key, "label": label, "hazard": m.get("hazard"),
                           "regions": regions, "ring": notam.unwrap(ring), "windows": m.get("windows") or [],
                           "window_mode": m.get("window_mode"), "expires": p.get("valid_until"),
-                          "cancels": m.get("cancels") or [], "broadcasts": broadcasts, "cordon_id": p["id"]})
+                          "cancels": m.get("cancels") or [], "broadcasts": broadcasts, "cordon_id": p["id"],
+                          "text": m.get("text") or ""})   # for named_in; not written to the snapshot
     return {"generated_at": doc.get("generated_at"), "nga_state": nga.get("state"),
             "missile_firings_left_out": skipped, "areas": areas}
 
@@ -262,11 +273,65 @@ def _windows_of(area: dict) -> list[tuple[datetime, datetime]]:
     return out
 
 
-def time_match(net: datetime, windows) -> tuple[datetime, datetime] | None:
+def time_match(net: datetime, windows, max_h: float = WINDOW_MAX_H) -> tuple[datetime, datetime] | None:
     for s, e in windows:
-        if e - s <= timedelta(hours=WINDOW_MAX_H) and s - timedelta(hours=BEFORE_H) <= net <= e:
+        if e - s <= timedelta(hours=max_h) and s - timedelta(hours=BEFORE_H) <= net <= e:
             return s, e
     return None
+
+
+# ---------- a notice that names the launch ----------
+
+def _joined(s: str) -> str:
+    """Upper case, hyphens inside a designator dropped: "NROL-136" and "NROL136" read the same."""
+    return re.sub(r"(?<=[A-Z0-9])-(?=[A-Z0-9])", "", (s or "").upper())
+
+
+def mission_words(u: dict) -> list[str]:
+    """The launch's designators: words of LL2's mission name (and the name after "|") with letters and digits,
+    four characters or more once joined. "Amazon Leo (LE-04)" -> ["LE04"]; "Starlink Group 31-2" -> [] (no letter)."""
+    name = u.get("name") or ""
+    src = " ".join([u.get("mission") or "", name.split("|", 1)[1] if "|" in name else ""])
+    out = []
+    for w in re.findall(r"[A-Z0-9]+", _joined(src)):
+        if len(w) >= 4 and re.search(r"[A-Z]", w) and re.search(r"\d", w) and w not in out:
+            out.append(w)
+    return out
+
+
+def vehicle_pattern(v: str | None) -> re.Pattern | None:
+    """The vehicle's name as a notice writes it: its words up to the first number, and that number's first digit
+    ("Ariane 64 Block 2" -> ARIANE 6, "Falcon 9 Block 5" -> FALCON 9, "Long March 2C" -> LONG MARCH 2C), at least
+    four letters. None when there is nothing to read."""
+    parts, words = [], re.split(r"[\s-]+", (v or "").upper().strip())
+    for w in words:
+        if not w or w == "BLOCK":
+            break
+        if w[0].isdigit():   # "2C" and "1A" whole; "64" and "2.1B/FREGAT" by the first digit
+            parts.append(w if re.fullmatch(r"\d+[A-Z]+", w) else w[0])
+            break
+        parts.append(w)
+        if re.search(r"\d", w):
+            break
+    if sum(c.isalpha() for c in "".join(parts)) < 4:
+        return None
+    tail = "" if parts[-1].isdigit() and len(parts[-1]) == 1 else r"\b"
+    return re.compile(r"\b" + r"[\s-]*".join(re.escape(x) for x in parts) + tail)
+
+
+def named_in(u: dict, text: str | None) -> tuple[str, str] | None:
+    """(the words as the text writes them, "mission") when the text has a mission designator, (words, "vehicle") when
+    it has the vehicle's name, else None."""
+    if not text:
+        return None
+    up = text.upper()
+    for w in mission_words(u):
+        m = re.search(r"\b" + "-?".join(re.escape(c) for c in w) + r"\b", up)
+        if m:
+            return m.group(0), "mission"
+    pat = vehicle_pattern(u.get("vehicle"))
+    m = pat.search(up) if pat else None
+    return (m.group(0), "vehicle") if m else None
 
 
 def corridor_bands(corridors: list[dict], lat: float, lon: float, within_nm: float = 15) -> list[dict] | None:
@@ -286,7 +351,13 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
         net = _dt(u["net"])
         bands = corridor_bands(corridors, u["lat"], u["lon"])
         for i, a in enumerate(areas):
-            hit = time_match(net, _windows_of(a))
+            if a.get("off_live"):   # a NOTAM whose text says it is not a launch (nms.off_live): shown on request only
+                continue
+            wins = _windows_of(a)
+            hit = time_match(net, wins)
+            name = named_in(u, a.get("text"))
+            if not hit and name and name[1] == "mission":
+                hit = time_match(net, wins, NAMED_MAX_DAYS * 24)
             if not hit:
                 continue
             la, lo = notam.centroid(a["ring"])
@@ -303,6 +374,8 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
                 place = dist <= PLACE_NM
                 place_basis = f"within {PLACE_NM} NM of the pad (no history for this pad)" if place else f"over {PLACE_NM} NM from the pad"
             level = "time and place" if place else "time"
+            if name and name[1] == "vehicle" and not place:
+                name = None   # a vehicle's name alone: many launches share it, so it counts only with the place
             grouped = None
             if place:
                 for g in recent:
@@ -316,7 +389,8 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
             rows.append({"launch": u["id"], "launch_name": u["name"], "net": u["net"], "area": a.get("key") or a.get("id"),
                          "area_i": i, "area_source": a.get("source"), "window": [_iso(hit[0]), _iso(hit[1])], "level": level,
                          "azimuth": round(az, 1), "distance_nm": round(dist), "place_basis": place_basis,
-                         "inclination_est": history.inclination(u["lat"], az), "grouped_with": grouped})
+                         "inclination_est": history.inclination(u["lat"], az), "grouped_with": grouped,
+                         "named": name[0] if name else None, "named_by": name[1] if name else None})
     return rows
 
 
