@@ -33,6 +33,7 @@ such.
 from __future__ import annotations
 
 import json
+import math
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -53,6 +54,11 @@ WINDOW_MAX_H = 6
 NAMED_MAX_DAYS = 7
 BEFORE_H = 1
 PLACE_NM = 1500
+NEAR_PAD_NM = 30       # an area this near the pad is the pad's own hazard area: place, whatever the bands say
+MIN_BAND_EVENTS = 10   # a pad with fewer charted events has bands too thin to rule an area out (most US pads)
+AZ_TOL = 5             # degrees either side of a launch azimuth for an inclination flown from the site
+MIN_FLOWN = 5          # launches GCAT shows at an inclination (to 0.5 degree) before it counts as the site's
+SITE_NM = 30           # a GCAT launch this near the pad counts as flown from its site
 
 
 def _dt(s: str) -> datetime:
@@ -334,22 +340,89 @@ def named_in(u: dict, text: str | None) -> tuple[str, str] | None:
     return (m.group(0), "vehicle") if m else None
 
 
-def corridor_bands(corridors: list[dict], lat: float, lon: float, within_nm: float = 15) -> list[dict] | None:
+def corridor_of(corridors: list[dict], lat: float, lon: float, within_nm: float = 15) -> dict | None:
     best = None
     for c in corridors:
         d = notam.haversine_nm(lat, lon, c["pad"][1], c["pad"][0])
         if d <= within_nm and (best is None or d < best[0]):
             best = (d, c)
-    return best[1]["bands"] if best else None
+    return best[1] if best else None
 
 
-def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent: list[dict]) -> list[dict]:
+def corridor_bands(corridors: list[dict], lat: float, lon: float, within_nm: float = 15) -> list[dict] | None:
+    c = corridor_of(corridors, lat, lon, within_nm)
+    return c["bands"] if c else None
+
+
+def flown_inclinations(flown: list[dict] | None, lat: float, lon: float, within_nm: float = SITE_NM,
+                       min_n: int = MIN_FLOWN) -> list[float]:
+    """Inclinations (to 0.5 degree) GCAT shows flown at least `min_n` times from within `within_nm` of the pad, so a
+    one-off orbit does not open its azimuth (24 Nov 2026: about 80 of 360 degrees pass at Vandenberg and the Cape)."""
+    n: dict[float, int] = {}
+    for f in flown or []:
+        if f.get("inc") is not None and f.get("lat") is not None and notam.haversine_nm(
+                lat, lon, f["lat"], f["lon"]) <= within_nm:
+            k = round(f["inc"] * 2) / 2
+            n[k] = n.get(k, 0) + 1
+    return sorted(k for k, c in n.items() if c >= min_n)
+
+
+def launch_azimuths(lat: float, inc: float) -> list[float]:
+    """The two launch azimuths for inclination `inc` from latitude `lat` (spherical earth, cos i = cos(lat) sin(az)).
+    An inclination below the latitude cannot be flown directly: due east (or west, retrograde) is the nearest."""
+    s = math.cos(math.radians(inc)) / math.cos(math.radians(lat))
+    if abs(s) >= 1:
+        return [90.0] if s > 0 else [270.0]
+    b = math.degrees(math.asin(s))
+    return [b % 360, (180 - b) % 360]
+
+
+def _az_off(a: float, b: float) -> float:
+    return abs((a - b + 180) % 360 - 180)
+
+
+def place_test(corridor: dict | None, incs: list[float], lat: float, az: float, dist: float) -> tuple[bool, str]:
+    """Whether an area fits a launch from this pad in place, and why. A pad's charted bands (patterns.json) rule an
+    area out only when they rest on MIN_BAND_EVENTS events or more; below that, an area on the azimuth (+-AZ_TOL) of
+    an inclination GCAT shows flown from the site, within PLACE_NM, fits too. An area within NEAR_PAD_NM always fits.
+    A pad with no bands and no GCAT launches keeps the plain PLACE_NM rule."""
+    if dist <= NEAR_PAD_NM:
+        return True, f"within {NEAR_PAD_NM} NM of the pad"
+    bands = corridor["bands"] if corridor else None
+    if bands:
+        # Inside a band's azimuths (+-5 degrees) and its downrange distances (x0.5 - 50 NM to x1.25 + 100 NM).
+        if any(b["from"] - 5 <= az < b["to"] + 5
+               and b["downrange_nm"][0] * 0.5 - 50 <= dist <= b["downrange_nm"][1] * 1.25 + 100 for b in bands):
+            return True, "azimuth band and downrange distance seen in the history for this pad"
+    events = (corridor or {}).get("events")
+    rich = bool(bands) and (events is None or events >= MIN_BAND_EVENTS)
+    if rich or (bands and not incs):
+        return False, "outside the azimuth bands and distances in the history for this pad"
+    if not incs:
+        if dist <= PLACE_NM:
+            return True, f"within {PLACE_NM} NM of the pad (no history for this pad)"
+        return False, f"over {PLACE_NM} NM from the pad"
+    thin = f"the pad's charted history is thin ({events or 0} events)"
+    if dist > PLACE_NM:
+        return False, f"over {PLACE_NM} NM from the pad; {thin}"
+    fits = [i for i in incs if any(_az_off(az, x) <= AZ_TOL for x in launch_azimuths(lat, i))]
+    if fits:
+        best = min(fits, key=lambda i: min(_az_off(az, x) for x in launch_azimuths(lat, i)))
+        return True, (f"on the azimuth of a {best:g}-degree orbit flown from this site (GCAT), within {PLACE_NM} NM; "
+                      f"{thin}")
+    return False, f"off the azimuths of the orbits flown from this site (GCAT); {thin}"
+
+
+def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent: list[dict],
+          flown: list[dict] | None = None) -> list[dict]:
+    """`flown`: GCAT launches as {lat, lon, inc} (history/ledger.json), read where a pad's charted bands are thin."""
     rows = []
     for u in upcoming:
         if u.get("lat") is None or not u.get("net"):
             continue
         net = _dt(u["net"])
-        bands = corridor_bands(corridors, u["lat"], u["lon"])
+        corridor = corridor_of(corridors, u["lat"], u["lon"])
+        incs = flown_inclinations(flown, u["lat"], u["lon"])
         for i, a in enumerate(areas):
             if a.get("off_live"):   # a NOTAM whose text says it is not a launch (nms.off_live): shown on request only
                 continue
@@ -363,16 +436,7 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
             la, lo = notam.centroid(a["ring"])
             az = history.bearing(u["lat"], u["lon"], la, lo)
             dist = notam.haversine_nm(u["lat"], u["lon"], la, lo)
-            if bands is not None:
-                # Inside a band's azimuths (+-5 degrees) and its downrange distances (x0.5 - 50 NM to x1.25 + 100 NM).
-                place = any(b["from"] - 5 <= az < b["to"] + 5
-                            and b["downrange_nm"][0] * 0.5 - 50 <= dist <= b["downrange_nm"][1] * 1.25 + 100
-                            for b in bands)
-                place_basis = ("azimuth band and downrange distance seen in the history for this pad" if place
-                               else "outside the azimuth bands and distances in the history for this pad")
-            else:
-                place = dist <= PLACE_NM
-                place_basis = f"within {PLACE_NM} NM of the pad (no history for this pad)" if place else f"over {PLACE_NM} NM from the pad"
+            place, place_basis = place_test(corridor, incs, u["lat"], az, dist)
             level = "time and place" if place else "time"
             if name and name[1] == "vehicle" and not place:
                 name = None   # a vehicle's name alone: many launches share it, so it counts only with the place
