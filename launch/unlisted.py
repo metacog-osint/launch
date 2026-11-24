@@ -67,14 +67,17 @@ def _may_be(rec: dict, s: datetime) -> bool:
 def closures(areas: list[dict], records: list[dict], sites: dict, now: datetime,
              schedule_ok: bool = True, matches: list[dict] | None = None) -> list[dict]:
     """`matches` are live.match's rows: an area that already coincides in time and place with a listed launch from
-    any site (a downrange area, say, nearer another site) is that launch's to explain, so it is left out."""
+    any site (a downrange area, say, nearer another site), or whose text names a listed launch, is that launch's to
+    explain, so it is left out. An area marked `off_live` (its text says it is not a launch) is left out too."""
     if not schedule_ok or not sites:
         return []
     until = now + timedelta(days=HORIZON_DAYS)
-    placed = {m.get("area") for m in matches or [] if m.get("level") != "time"}
+    placed = {m.get("area") for m in matches or [] if m.get("level") != "time" or m.get("named")}
     found = []
     for a in areas:
         if (a.get("detail") or {}).get("activity"):  # amateur rocketry, named in the TFR's text
+            continue
+        if a.get("off_live"):  # a NOTAM whose text says it is not a launch (nms.off_live): never a launch's closure
             continue
         if (a.get("key") or a.get("id")) in placed:
             continue
