@@ -74,7 +74,7 @@ function tiles() {
   const lv = {};
   (snap.matches || []).forEach((m) => { lv[m.level] = (lv[m.level] || 0) + 1; });
   const items = [
-    ["Live closure areas", (snap.areas || []).length],
+    ["Live closure areas (NGA warnings, NOTAMs, TFRs; Orbit counts warnings)", (snap.areas || []).length],
     ["FAA space-operations TFRs", (snap.tfr || []).length],
     ["Scheduled launches, 14 days", ((snap.orbit || {}).upcoming || []).length],
     ["Coincidences: time / time and place / grouped", `${lv.time || 0} / ${lv["time and place"] || 0} / ${lv.grouped || 0}`],
