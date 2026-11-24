@@ -77,7 +77,7 @@ function tiles() {
   const lv = {};
   (snap.matches || []).forEach((m) => { lv[m.level] = (lv[m.level] || 0) + 1; });
   const items = [
-    ["Live closure areas", (snap.areas || []).filter((a) => !a.off_live).length],
+    ["Live closure areas (NGA warnings, NOTAMs, TFRs; Orbit counts warnings)", (snap.areas || []).filter((a) => !a.off_live).length],
     ["FAA space-operations TFRs", (snap.tfr || []).length],
     ["Scheduled launches, 14 days", ((snap.orbit || {}).upcoming || []).length],
     ["Coincidences: time / time and place / grouped", `${lv.time || 0} / ${lv["time and place"] || 0} / ${lv.grouped || 0}`],
@@ -486,6 +486,7 @@ async function showTab() {
   const name = (location.hash.replace(/^#/, "").split("?")[0]) || "live";
   const tab = TABS.includes(name) ? name : "live";
   document.body.dataset.tab = tab;
+  document.title = (tab === "live" ? "" : $("tab-" + tab).textContent + " · ") + "Launch · The Intelligence Company";
   TABS.forEach((t) => {
     $(t).hidden = t !== tab;
     const a = $("tab-" + t); a.setAttribute("aria-selected", t === tab ? "true" : "false");

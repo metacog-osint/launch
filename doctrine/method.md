@@ -37,3 +37,12 @@ history, and says which scheduled launches coincide with them. Observations only
    Headlines are links only. The LL2 ledger is verified and extended each run; its launches GCAT has not listed are
    provisional until a GCAT launch joins them.
 6. **Not for navigation.**
+
+## Feed contract revision 2.1 (23 Nov 2026)
+Every feed item states `subject_id` and `last_change`, and `event_start` wherever the notice gives a time. Ids do not
+change; `subject_id` is the id with any space replaced by a hyphen, because the contract allows none.
+
+A TFR's event time runs from its first window's start to its last window's end, or is its issue time when it lists no
+window. Its `last_change` is `new` at the FAA's issue time. A TFR issued within 72 hours is tier anomaly, and its
+`signal` is the hours since issue. A coincidence carries the closure area's window, and its `last_change` is `none`,
+because a coincidence has no source date and Launch keeps no log of its feed items.

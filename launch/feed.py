@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
-from tic_doctrine import CONTRACT, geo  # noqa: E402
+from tic_doctrine import CONTRACT, __version__ as KIT_VERSION, geo  # noqa: E402
 
 SITE = "https://launch.theintelligence.company"
 METHOD = "launch-1.0"
@@ -68,16 +68,35 @@ def _countries(*codes) -> list[str]:
     return sorted({c for c in codes if c and geo.name(c)})
 
 
+def _subject(item_id: str) -> str:
+    """The item's id as a subject: the contract allows no spaces, and a NOTAM's area key has one."""
+    return item_id.replace(" ", "-")
+
+
+def _window_times(windows: list) -> dict:
+    """event_start and event_end: the first window's start to the last window's end, as the notice states them."""
+    starts = sorted(_iso(_dt(w["start"])) for w in windows or [] if w.get("start"))
+    ends = sorted(_iso(_dt(w["end"])) for w in windows or [] if w.get("end"))
+    if not starts:
+        return {}
+    return {"event_start": starts[0], **({"event_end": ends[-1]} if ends and ends[-1] >= starts[0] else {})}
+
+
 def _tfr_item(t: dict, generated: str, accessed: str) -> dict:
     d = t.get("detail") or {}
     alt = "; ".join(f"{a.get('name') or 'area'}: {a['lower']} to {a['upper']}" for a in d.get("areas") or [])
     issued = d.get("issued_utc")
     is_new = bool(issued and _dt(issued) >= _dt(generated) - timedelta(hours=NEW_HOURS))
     activity = d.get("activity")
+    issued_at = _iso(_dt(issued)) if issued else None
+    times = _window_times(d.get("windows")) or ({"event_start": issued_at} if issued_at else {})
     props = {
         **_base(generated),
         "tier": "anomaly" if is_new else "routine",
         "id": f"launch:tfr:{t['id']}",
+        "subject_id": _subject(f"launch:tfr:{t['id']}"),
+        **times,
+        **({"last_change": "new", "last_change_at": min(issued_at, generated)} if issued_at else {"last_change": "none"}),
         "title": (f"FAA space operations TFR FDC {t['id']}" + (f", {activity}" if activity else "")
                   + f": {t.get('description') or ''}").strip(),
         "summary": (f"The FAA lists FDC {t['id']} (space operations, {t.get('facility')}, {t.get('state')}), created "
@@ -100,6 +119,8 @@ def _tfr_item(t: dict, generated: str, accessed: str) -> dict:
                      **({"activity": activity} if activity else {})},
     }
     if is_new:
+        hours = max((_dt(generated) - _dt(issued)).total_seconds() / 3600, 0)
+        props["signal"] = {"name": "hours_since_faa_issued", "value": round(hours, 1), "unit": "hours", "tail": "low"}
         props["baseline_ref"] = {"id": "faa-space-ops-tfrs-in-force", "type": "rolling", "version": "1",
                                  "window": f"the space operations TFRs the FAA listed {NEW_HOURS} hours earlier"}
     return {"type": "Feature", "geometry": _geom(t["rings"]), "properties": props}
@@ -113,6 +134,10 @@ def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: s
     props = {
         **_base(generated),
         "id": f"launch:match:{m['launch']}:{m['area']}",
+        "subject_id": _subject(f"launch:match:{m['launch']}:{m['area']}"),
+        "event_start": _iso(_dt(m["window"][0])),
+        "event_end": _iso(end),
+        "last_change": "none",   # a coincidence has no source date, and Launch keeps no log of its feed items
         "title": f"Closure area {m['area']} coincides ({lvl}) with scheduled launch {m['launch_name']}",
         "summary": (f"{m['launch_name']} is scheduled for {m['net'][:16].replace('T', ' ')} UTC (Launch Library 2 via "
                     f"Orbit). Closure area {m['area']} ({area.get('source')}) has a window "
@@ -150,7 +175,8 @@ def build_feed(snap: dict) -> dict:
             if a:
                 features.append(_match_item(m, a, generated, orb_at, cor_at))
     return {
-        "type": "FeatureCollection", "contract": CONTRACT, "program": "launch", "generated_at": generated,
+        "type": "FeatureCollection", "contract": CONTRACT, "contract_rev": "2.1", "kit": KIT_VERSION,
+        "program": "launch", "generated_at": generated,
         "method_version": METHOD,
         "licence": "FAA TFRs and NGA warnings: US Government works. Orbit's items keep their sources' terms "
                    "(GCAT CC BY 4.0).",
