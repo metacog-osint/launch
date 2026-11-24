@@ -20,6 +20,13 @@ const worldLayers = (b, maxzoom) => [
   { id: "la-land", type: "fill", source: "la_world", ...(maxzoom ? { maxzoom } : {}), paint: { "fill-color": b.land } },
   { id: "la-borders", type: "line", source: "la_world", ...(maxzoom ? { maxzoom } : {}), paint: { "line-color": b.border, "line-width": 0.6 } },
 ];
+// MapLibre draws with WebGL 2. Some browsers have it off or lack it (a locked-down machine, an old phone, a remote
+// desktop): the page then says so and every tab but the map still works.
+export const NO_WEBGL2 = "this browser cannot draw maps (WebGL 2 is off or not supported)";
+export function hasWebGL2() {
+  try { return !!document.createElement("canvas").getContext("webgl2"); } catch { return false; }
+}
+
 export async function buildStyle() {
   const b = BASE[theme()];
   try {
@@ -163,6 +170,7 @@ export function addProjectionToggle(map) {
 }
 
 export async function createMap(container, model, { onPick }) {
+  if (!hasWebGL2()) throw new Error(NO_WEBGL2);
   const first = await buildStyle();
   const map = new ml.Map({
     container, style: first.style, center: [110, 20], zoom: worldZoom(container, 20),
