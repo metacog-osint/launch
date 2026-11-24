@@ -62,6 +62,13 @@ class Closures(unittest.TestCase):
         self.assertEqual(self.run_it([area()], matches=placed), [])
         self.assertEqual(len(self.run_it([area()], matches=[{"area": "A1/26", "level": "time"}])), 1)
 
+    def test_non_launch_notam_is_out(self):
+        self.assertEqual(self.run_it([area(off_live="military exercise")]), [])
+
+    def test_area_naming_a_listed_launch_is_out(self):
+        named = [{"area": "A1/26", "level": "time", "named": "NG-25"}]
+        self.assertEqual(self.run_it([area()], matches=named), [])
+
     def test_areas_opening_together_are_one_row(self):
         rows = self.run_it([area("A1/26"), area("A2/26", start="2026-11-29T21:20:00Z", end="2026-11-29T21:50:00Z"),
                             area("A3/26", start="2026-11-30T09:00:00Z", end="2026-11-30T09:30:00Z")])
