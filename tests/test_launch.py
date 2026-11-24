@@ -173,6 +173,37 @@ class Matching(unittest.TestCase):
                  "site": {"lat": 38.85, "lon": 111.61}}]
         self.assertEqual(live.match(up, [area], corr, gcat)[0]["level"], "grouped")
 
+    def test_six_hour_windows(self):
+        """Ariane 6 VA271's own areas ran 4.9 to 5.7 hours (22 Nov 2026) and matched nothing at four."""
+        up = [{"id": "u1", "name": "Ariane 64 | Amazon Leo (LE-04)", "net": "2026-11-23T11:09:00Z", "lat": 5.24, "lon": -52.77}]
+        ring = [[-47.2, 14.0], [-45.6, 12.9], [-48.0, 10.0], [-47.2, 14.0]]
+        five7 = {"key": "A1864/26", "ring": ring, "windows": [{"start": "2026-11-23T06:27:00Z", "end": "2026-11-23T12:08:00Z"}]}
+        self.assertEqual(len(live.match(up, [five7], [], [])), 1)
+        seven = {**five7, "windows": [{"start": "2026-11-23T05:00:00Z", "end": "2026-11-23T12:08:00Z"}]}
+        self.assertEqual(live.match(up, [seven], [], []), [])
+
+    def test_named(self):
+        """A mission designator in the text names the launch (hyphens ignored) and lets a longer window match; the
+        vehicle's name counts only where the place fits too."""
+        self.assertEqual(live.mission_words({"name": "Falcon 9 Block 5 | NROL-136", "mission": "NROL-136"}), ["NROL136"])
+        self.assertEqual(live.mission_words({"name": "Starship | Starlink Group 31-2 (Starship Flight 15)"}), [])
+        self.assertEqual(live.vehicle_pattern("Ariane 64 Block 2").pattern, r"\bARIANE[\s-]*6")
+        self.assertEqual(live.vehicle_pattern("Soyuz 2.1b/Fregat-M").pattern, r"\bSOYUZ[\s-]*2")
+        self.assertIsNone(live.vehicle_pattern("H3-22S"))
+        up = [{"id": "u1", "name": "Falcon 9 Block 5 | NROL-136", "mission": "NROL-136", "vehicle": "Falcon 9 Block 5",
+               "net": "2026-11-22T16:00:00Z", "lat": 34.63, "lon": -120.61}]
+        tahiti = {"key": "A1508/26", "ring": [[-121.9, -30.0], [-122.7, -28.0], [-120.7, -27.2], [-121.9, -30.0]],
+                  "windows": [{"start": "2026-11-22T14:00:00Z", "end": "2026-11-27T14:08:00Z"}],
+                  "text": "TEMPORARY DANGER AREA DUE TO SPACE DEBRIS RETURN OF SPACEX\nNROL-136 IN TAHITI FIR"}
+        m = live.match(up, [tahiti], [], [])
+        self.assertEqual((m[0]["named"], m[0]["named_by"], m[0]["level"]), ("NROL-136", "mission", "time"))
+        self.assertEqual(live.match(up, [{**tahiti, "text": "SPACE DEBRIS"}], [], []), [])   # 5 days, unnamed
+        near = {"key": "x", "ring": [[-121.0, 34.0], [-120.8, 34.0], [-120.8, 33.8], [-121.0, 34.0]],
+                "windows": [{"start": "2026-11-22T15:00:00Z", "end": "2026-11-22T17:00:00Z"}], "text": "FALCON 9 LAUNCH"}
+        self.assertEqual(live.match(up, [near], [], [])[0]["named_by"], "vehicle")
+        far = {**near, "ring": [[150, -40], [151, -40], [151, -41], [150, -40]]}
+        self.assertIsNone(live.match(up, [far], [], [])[0]["named"])
+
     def test_cordon_launch_warnings(self):
         """NGA warnings come from Cordon's feed (decided 17 Nov 2026): launch hazards kept, missile firings left out,
         Orbit's keys and NGA's numbers kept, letters from the text when areas have no windows of their own."""

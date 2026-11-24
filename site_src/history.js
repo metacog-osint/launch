@@ -16,6 +16,8 @@ let REGION = null;
 try { REGION = new Intl.DisplayNames(["en"], { type: "region" }); } catch { REGION = null; }
 const countryName = (cc) => { if (!cc) return "Not known"; try { return (REGION && REGION.of(cc)) || cc; } catch { return cc; } };
 const fmt = (iso, o) => (!iso ? "" : T ? T.format(iso, o || {}) : iso.replace("T", " ").replace(":00Z", "Z"));
+// "start to end", the end's date left off only on the start's day in the viewer's zone (app.js has the same).
+const span = (a, b) => fmt(a) + " to " + fmt(b, fmt(a, { time: false }) === fmt(b, { time: false }) ? { date: false } : {});
 const $ = (id) => document.getElementById(id);
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -571,7 +573,7 @@ function detail(r) {
   (r.programmes || []).forEach((p) => q.appendChild(quick(p, "prog", p)));
   if (r.actor) q.appendChild(quick(countryName(r.actor), "cc", r.actor));
   box.appendChild(q);
-  (r.closures || []).forEach((c) => box.appendChild(el("p", "small", `Closure area ${c.area} coincided in ${c.level}` + (c.window ? ` (${fmt(c.window[0])} to ${fmt(c.window[1], { date: false })})` : "") + ". Coincidence, not proof the area was for this launch.")));
+  [...new Map((r.closures || []).map((c) => [`${c.area}|${(c.window || []).join()}`, c])).values()].forEach((c) => box.appendChild(el("p", "small", `Closure area ${c.area} coincided in ${c.level}` + (c.window ? ` (${span(c.window[0], c.window[1])})` : "") + ". Coincidence, not proof the area was for this launch.")));
   const evs = (r.chart || []).flatMap((id) => chartById.get(id) || []);
   const nfcN = r.nfc_notices || [];
   const nfcFor = (num) => nfcN.find((x) => x.chart && x.number === num);
@@ -681,7 +683,7 @@ function archiveSection(box, all) {
   all.forEach((n) => {
     const d = el("details", "notam");
     const when = n.kind === "faa-tfr" ? (n.start ? ` · ${fmt(n.start)} to ${fmt(n.end)}` : "")
-      : ((n.windows || [])[0] ? ` · ${fmt(n.windows[0].start)} to ${fmt(n.windows[0].end, { date: false })}` + (n.windows.length > 1 ? ` (+${n.windows.length - 1} more)` : "") : "");
+      : ((n.windows || [])[0] ? ` · ${span(n.windows[0].start, n.windows[0].end)}` + (n.windows.length > 1 ? ` (+${n.windows.length - 1} more)` : "") : "");
     d.appendChild(el("summary", "", (n.kind === "faa-tfr" ? `FAA TFR ${n.number || ""}` : `NGA ${n.id}`) + when));
     if (n.join) d.appendChild(el("p", "small muted", "Its launch: " + joeyJoin(n.join) + "."));
     if (n.location) d.appendChild(el("p", "small", n.location + (n.reason ? ` · ${n.reason}` : "")));
@@ -738,14 +740,14 @@ const NFC_JOIN = {
 function nfcCheck(x) {
   if (x.joey) return x.gap_nm !== undefined
     ? `NotamForChina lists this notice too; its charted area lies ${x.gap_nm <= (IX.nfc ? IX.nfc.agree_nm : 5) ? "within" : "up to"} ${x.gap_nm} NM of the area read from the text.`
-    : "NotamForChina lists this notice too" + (x.start ? ` (${fmt(x.start)} to ${fmt(x.end, { date: false })})` : "") + ".";
+    : "NotamForChina lists this notice too" + (x.start ? ` (${span(x.start, x.end)})` : "") + ".";
   if (x.gap_nm !== undefined) {
     const agree = IX.nfc ? IX.nfc.agree_nm : 5;
     return x.gap_nm <= agree ? `NotamForChina charts this notice too; its corners lie within ${x.gap_nm} NM of the charted area.`
       : `NotamForChina charts this notice up to ${x.gap_nm} NM from the charted area: one of the two may be drawn for another notice.`;
   }
   if (x.ring) return "NotamForChina charts this notice; Launch has no charted area for it, so NotamForChina's is drawn.";
-  return "NotamForChina lists this notice" + (x.start ? ` (${fmt(x.start)} to ${fmt(x.end, { date: false })})` : "") + ".";
+  return "NotamForChina lists this notice" + (x.start ? ` (${span(x.start, x.end)})` : "") + ".";
 }
 function nfcSection(box, r, all) {
   const own = all.filter((x) => !x.chart && !x.joey);
@@ -760,7 +762,7 @@ function nfcSection(box, r, all) {
     own.forEach((x) => {
       const li = el("li");
       li.appendChild(el("b", "", x.number || "Notice"));
-      const bits = [x.fir, x.label, x.start ? `${fmt(x.start)} to ${fmt(x.end, { date: false })}` : "", x.ring ? "charted" : "no area"].filter(Boolean);
+      const bits = [x.fir, x.label, x.start ? `${span(x.start, x.end)}` : "", x.ring ? "charted" : "no area"].filter(Boolean);
       li.appendChild(document.createTextNode(" · " + bits.join(" · ") + (x.folded ? " (window from the sheet, area from the map)" : "")));
       ul.appendChild(li);
     });

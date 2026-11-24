@@ -55,6 +55,32 @@ class Keep(unittest.TestCase):
         for t in (gun, laser, low, perm, stage, cancel):
             self.assertIsNone(self.kept(t), t.splitlines()[0])
 
+    def test_off_live_kept_but_not_a_live_area(self):
+        """Notices that say they are not a launch (22 Nov 2026's live list) stay kept, for the ledger, and are no
+        live area; launch and debris notices are left alone."""
+        mil = icao(fir="RJJJ", a="RJJJ", q="QRACA", e="MULTIPLE U.S. MIL ACT WILL BE CONDUCTED WI FUKUOKA FIR AS FLW, "
+                   "AREA: 255335N1283000E-254837N1290219E-254415N1292552E-255335N1283000E.")
+        missile = icao(fir="FAJA", a="FAJA", q="QWMLW", e="FAR 148 MISSILE FRNG EXER WI 340000S0230000E-340000S0240000E-"
+                       "350000S0240000E-340000S0230000E.")
+        age = icao(fir="KZDC", a="KZDC", q="QRRCA", e="AEROSPACE GROUND EQUIPMENT RUNS NOT AUTH DURING QUIET HOURS.")
+        hpr = icao(fir="KZLC", a="KZLC", q="QRRCA", e="CLASS 2 HIGH-POWER ROCKETS WI 2NM RADIUS OF 431415N1161927W.")
+        drop = icao(fir="HAAA", a="HDAM", q="QWPLW", e="MULTIPLE PASSES OF HIGH-ALTITUDE AIRDROPS AT KATHERINE DZ.")
+        for t, why in ((mil, "military exercise"), (missile, "missile firing"), (age, "aerodrome notice"),
+                       (hpr, "amateur rocketry"), (drop, "airdrop or airlift")):
+            self.assertEqual(nms.off_live(nms.notam.parse(t)["e_text"]), why)
+        n = nms.notice(feat(mil), [])
+        self.assertEqual((n["kept"] is not None, n["off_live"]), (True, "military exercise"))
+        st = {"notices": [n | {"start": "2026-11-23T00:00:00Z", "end": "2026-11-23T02:00:00Z"}]}
+        got = nms.areas(st)
+        self.assertEqual([a["off_live"] for a in got], ["military exercise"])   # kept as an area, for the toggle
+        from launch import live
+        up = [{"id": "u1", "name": "X", "net": "2026-11-23T01:00:00Z", "lat": 26.2, "lon": 127.6}]
+        self.assertEqual(live.match(up, got, [], []), [])   # and matches no launch
+        for t in ("DANGER AREA ACTIVATED WITHIN TTZP DUE TO THE ARIANE 6 LAUNCH VA271",
+                  "TEMPORARY DANGER AREA DUE TO SPACE DEBRIS RETURN OF SPACEX NROL-136", "AIRSPACE CLSD WI AREA:",
+                  "A MISSILE RANGE CLOSED FOR A ROCKET LAUNCH"):
+            self.assertIsNone(nms.off_live(t), t)
+
     def test_recurring(self):
         t = icao(fir="ULLL", a="ULLL", q="QRTCA", e="AIRSPACE CLSD WI AREA: 691700N0340000E-690000N0340000E-"
                  "690000N0325000E-691300N0331500E-691700N0340000E.", g="FL230", up="230",

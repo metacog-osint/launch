@@ -287,6 +287,119 @@ class Ledger(unittest.TestCase):
         self.assertEqual([c["area"] for c in cl], ["A1"])  # time-only coincidences are not kept
 
 
+class StoredClosures(unittest.TestCase):
+    """ideas#134: slipped launches, notices with several areas, and flown provisional launches."""
+    PAD = [102.0, 28.25]
+    R1 = [[108.0, 27.0], [109.0, 27.0], [109.0, 28.0], [108.0, 27.0]]
+    R2 = [[112.0, 26.0], [113.0, 26.0], [113.0, 27.0], [112.0, 26.0]]
+
+    def closure(self, cid, ring, start, end, ll2="u1"):
+        return {"id": cid, "ll2": ll2, "area": cid.split("|")[1].split("#")[0], "source": "faa-nms",
+                "level": "time and place", "window": [start, end], "ring": ring, "azimuth": 100.0, "distance_nm": 400,
+                "recorded": NOW}
+
+    def flown(self, closures):
+        f = {"id": "ll2:u1", "source": "ll2", "ll2": "u1", "time": "2026-11-20T12:00:00Z", "date": "2026-11-20",
+             "status": "Launch Successful", "name": "Long March 2D | Test", "net_precision": "Minute",
+             "lat": self.PAD[1], "lon": self.PAD[0], "updated": NOW}
+        ledger = {"since": "2023-01-01", "sites": SITES, "launches": [f], "closures": closures}
+        return catalog.build_index({"events": []}, ledger, [], [], "2026-11-21T00:00:00Z")["records"][0]
+
+    def test_old_window_is_kept_in_the_store_and_left_off_the_launch(self):
+        old = self.closure("u1|OLD", self.R1, "2026-11-12T11:50:00Z", "2026-11-12T12:20:00Z")
+        new = self.closure("u1|NEW", self.R2, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        led = catalog.merge({"closures": [old]}, {"closures": [new]})
+        self.assertEqual({c["id"] for c in led["closures"]}, {"u1|OLD", "u1|NEW"})
+        self.assertEqual([c["area"] for c in self.flown(led["closures"])["closures"]], ["NEW"])
+
+    def test_launch_may_precede_its_window_by_the_live_rule(self):
+        c = self.closure("u1|A", self.R1, "2026-11-20T12:30:00Z", "2026-11-20T13:00:00Z")
+        self.assertEqual(len(catalog.closures_holding([c], "2026-11-20T12:00:00Z", "Minute")), 1)
+        self.assertEqual(catalog.closures_holding([c], "2026-11-20T11:00:00Z", "Minute"), [])
+
+    def test_coarse_time_cannot_rule_a_closure_out(self):
+        c = self.closure("u1|A", self.R1, "2026-11-20T12:30:00Z", "2026-11-20T13:00:00Z")
+        self.assertEqual(len(catalog.closures_holding([c], "2026-11-01T00:00:00Z", "Month")), 1)
+        self.assertEqual(len(catalog.closures_holding([c], "2026-11-20T00:00:00Z", "Day")), 1)
+        self.assertEqual(catalog.closures_holding([c], "2026-11-25T00:00:00Z", "Day"), [])
+
+    def test_slip_into_another_window_of_the_same_notice(self):
+        a = self.closure("u1|A", self.R1, "2026-11-12T11:50:00Z", "2026-11-12T12:20:00Z")
+        b = self.closure("u1|A", self.R1, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        led = catalog.merge({"closures": [a]}, {"closures": [b]})
+        self.assertEqual(len(led["closures"]), 1)
+        self.assertEqual(led["closures"][0]["window"], a["window"])  # the first reading stands
+        held = catalog.closures_holding(led["closures"], "2026-11-20T12:00:00Z", "Minute")
+        self.assertEqual(held[0]["window"], b["window"])
+
+    def test_each_ring_of_a_notice_is_stored_with_a_stable_id(self):
+        areas = [{"key": "other", "ring": self.R2}, {"key": "N", "ring": self.R1}, {"key": "N", "ring": self.R2}]
+        m = [{"launch": "u1", "area": "N", "area_i": i, "level": "time and place", "window": ["a", "b"]} for i in (1, 2)]
+        cl = catalog.closures_from_matches(m, areas, NOW)
+        self.assertEqual([c["ring"] for c in cl], [self.R1, self.R2])
+        self.assertEqual(cl[0]["id"], "u1|N")  # the id older records have
+        self.assertTrue(cl[1]["id"].startswith("u1|N#"))
+        moved = [{"key": "N", "ring": self.R1}, {"key": "N", "ring": self.R2}]
+        m2 = [{"launch": "u1", "area": "N", "area_i": 1, "level": "time and place", "window": ["a", "b"]}]
+        self.assertEqual(catalog.closures_from_matches(m2, moved, NOW)[0]["id"], cl[1]["id"])
+
+    def test_old_match_without_an_index_reads_the_first_ring(self):
+        areas = [{"key": "N", "ring": self.R1}, {"key": "N", "ring": self.R2}]
+        m = [{"launch": "u1", "area": "N", "level": "time and place", "window": ["a", "b"]}]
+        self.assertEqual(catalog.closures_from_matches(m, areas, NOW)[0]["ring"], self.R1)
+
+    def test_a_ring_under_both_id_forms_is_one_area(self):
+        a = self.closure("u1|N", self.R1, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        b = self.closure(f"u1|N#{catalog._ring_tag(self.R1)}", self.R1, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        self.assertEqual(len(self.flown([a, b])["closures"]), 1)
+
+    def test_flown_provisional_keeps_a_path_through_held_closures(self):
+        held = self.closure("u1|A", self.R1, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        slipped = self.closure("u1|B", self.R2, "2026-11-12T11:50:00Z", "2026-11-12T12:20:00Z")
+        r = self.flown([held, slipped])
+        self.assertTrue(r["provisional"])
+        self.assertIn("closure area", r["path"]["basis"])
+        la, lo = catalog.notam.centroid(self.R1)
+        self.assertAlmostEqual(first_leg(self.PAD, r["path"]), catalog.history.bearing(self.PAD[1], self.PAD[0], la, lo), delta=1)
+
+    def joined(self, closures, inc=50.0):
+        """A GCAT launch from Wenchang joined to the LL2 record its closures are stored under."""
+        t = "2026-11-20T12:00:00Z"
+        g = gcat_rec("2026-300", t, "CZ-8A", "Test", "WEN", inc=inc)
+        s = SITES["WEN"]
+        f = {"id": "ll2:u1", "source": "ll2", "ll2": "u1", "time": t, "date": t[:10], "status": "Launch Successful",
+             "name": "Long March 8A | Test", "net_precision": "Minute", "lat": s["lat"], "lon": s["lon"], "updated": NOW}
+        ledger = {"since": "2023-01-01", "sites": SITES, "launches": [g, f], "closures": closures}
+        recs = catalog.build_index({"events": []}, ledger, [], [], "2026-11-21T00:00:00Z")["records"]
+        self.assertEqual([r["id"] for r in recs], ["gcat:2026-300"])  # the LL2 record folds into GCAT's
+        return recs[0]
+
+    WEN1 = [[114.0, 16.0], [115.0, 16.0], [115.0, 17.0], [114.0, 16.0]]
+
+    def test_gcat_joined_launch_keeps_a_path_through_held_closures(self):
+        held = self.closure("u1|A", self.WEN1, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        slipped = self.closure("u1|B", self.R2, "2026-11-12T11:50:00Z", "2026-11-12T12:20:00Z")
+        r = self.joined([held, slipped])
+        self.assertEqual([c["area"] for c in r["closures"]], ["A"])
+        self.assertIn("closure area", r["path"]["basis"])
+        la, lo = catalog.notam.centroid(self.WEN1)
+        pad = r["pad"]
+        self.assertAlmostEqual(first_leg(pad, r["path"]), catalog.history.bearing(pad[1], pad[0], la, lo), delta=1)
+        self.assertAlmostEqual(r["far_nm"], catalog.notam.haversine_nm(pad[1], pad[0], la, lo), delta=2)
+
+    def test_one_notice_from_two_sources_is_one_area(self):
+        pad = [SITES["WEN"]["lon"], SITES["WEN"]["lat"]]
+        t = "2026-11-20T12:00:00Z"
+        c = self.closure("u1|A", self.WEN1, "2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z")
+        la, lo = catalog.notam.centroid(self.WEN1)
+        same = {"centroid": [lo, la], "windows": [["2026-11-20T11:50:00Z", "2026-11-20T12:20:00Z"]]}
+        self.assertEqual(catalog._new_closure_areas(pad, [c], [same], t), [])
+        other_day = {**same, "windows": [["2026-11-12T11:50:00Z", "2026-11-12T12:20:00Z"]]}
+        self.assertEqual(len(catalog._new_closure_areas(pad, [c], [other_day], t)), 1)
+        elsewhere = {**same, "centroid": [lo + 3, la]}
+        self.assertEqual(len(catalog._new_closure_areas(pad, [c], [elsewhere], t)), 1)
+
+
 class Index(unittest.TestCase):
     def build(self, events, launches, upcoming=(), corridors=()):
         return catalog.build_index({"events": events}, {"since": "2023-01-01", "sites": SITES, "launches": launches, "closures": []},

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="tic-shell.css">
+<link rel="alternate" type="application/geo+json" title="Launch feed (GeoJSON)" href="data/feed.geojson">
 <link rel="stylesheet" href="tic-time.css">
 <link rel="stylesheet" href="tic-nav.css">
 <link rel="stylesheet" href="tic-related.css">
@@ -19,6 +20,7 @@
 <script type="module" src="app.js"></script>
 </head>
 <body data-tab="live">
+<a class="skip" href="#main">Skip to content</a>
 <header class="top">
   <div class="wrap top-row">
     <div class="brand"><strong>Launch</strong><a class="tic-layer" href="https://theintelligence.company/#layers">Space layer</a><span class="muted">The Intelligence Company</span></div>
@@ -30,17 +32,18 @@
         <a href="#paste" role="tab" id="tab-paste" aria-controls="paste">Paste a NOTAM</a>
         <a href="#sources" role="tab" id="tab-sources" aria-controls="sources">Sources</a>
       </div>
-      <a href="data/feed.geojson">Feed (contract v2)</a>
       <span id="time-settings"></span>
     </nav>
   </div>
 </header>
 
-<main class="wrap">
+<main id="main" class="wrap">
+  <noscript><p class="noscript">This page needs JavaScript to draw its maps and lists.</p></noscript>
   <p class="notice small">Not for navigation or flight planning. Shapes are read from the notices' text or charted
     by hand, and either can be wrong; every area says which. Flight paths are estimates
-    from an inferred azimuth, and each says what it was inferred from. Worldwide NOTAMs arrive once the
-    FAA grants Launch access to its NOTAM service (requested 13 Nov 2026).</p>
+    from an inferred azimuth, and each says what it was inferred from. Worldwide NOTAMs come from the FAA's
+    NOTAM service, read through Cordon; they are not the authoritative source for notices issued outside the
+    United States.</p>
 
   <section class="panel" id="live" role="tabpanel" aria-labelledby="tab-live">
     <div class="hero">
@@ -50,6 +53,24 @@
         Every area shows the issuer's own text. A closure announces intent: some are cancelled, some are never
         used. <span id="asof"></span></p>
       <p class="tic-reading" id="reading" aria-live="polite"></p>
+      <p class="small muted caveat">A closure announces intent, and shapes are read from notice text or charted by hand,
+        so either can be wrong. <a href="https://github.com/metacog-osint/launch/blob/main/doctrine/method.md">How Launch reads notices</a>.</p>
+      <details class="terms" id="terms">
+        <summary>Terms on this page</summary>
+        <dl>
+          <dt>NOTAM</dt><dd>Notice to Air Missions: a short official notice that a state issues to pilots, here
+            announcing that an area is closed for a launch or reentry.</dd>
+          <dt>TFR</dt><dd>Temporary Flight Restriction: the US form of such a closure, issued by the FAA.</dd>
+          <dt>FAA, NGA</dt><dd>The US Federal Aviation Administration, and the US National Geospatial-Intelligence
+            Agency, which publishes navigational warnings for ships.</dd>
+          <dt>FIR</dt><dd>Flight Information Region: the block of airspace one country's air traffic service looks after.</dd>
+          <dt>ICAO</dt><dd>The International Civil Aviation Organization, whose four-letter codes name airports and regions.</dd>
+          <dt>NM</dt><dd>Nautical miles. One is 1.85 km.</dd>
+          <dt>UTC</dt><dd>Coordinated Universal Time, the same as Zulu. Times follow your time-zone setting.</dd>
+          <dt>NET</dt><dd>No earlier than: a launch date that can only slip later.</dd>
+          <dt>GCAT</dt><dd>Jonathan McDowell's General Catalog of Artificial Space Objects, the source of the launch history.</dd>
+        </dl>
+      </details>
       <div class="tiles tic-tiles" id="tiles" aria-live="polite"></div>
       <p class="legend small muted" aria-label="Country colours">
         <span><span class="sw g-us"></span>United States</span>
@@ -67,7 +88,9 @@
           fits in time and place, which does not show it is for that launch. Grey: closure areas on no launch's path.
           Rings: pads scheduled in the next 14 days. Click a line or pad for the launch. Amber dashed: recurring drop
           zones. Purple: what you paste. Ctrl and scroll (or two fingers) to zoom.</p>
-        <p class="small"><label><input type="checkbox" id="show-zones"> Show recurring drop zones</label></p>
+        <p class="small"><label><input type="checkbox" id="show-zones"> Show recurring drop zones</label>
+          <label><input type="checkbox" id="show-off"> Show non-launch NOTAMs (exercises, airdrops, missile
+            firings) <span id="off-count"></span></label></p>
       </div>
       <div class="map-stage"><div id="map" class="map"></div></div>
       <div class="small" id="map-info" aria-live="polite"></div>
@@ -87,10 +110,14 @@
       <div class="card-head">
         <h2 id="live-h">Live: closure areas and scheduled launches</h2>
         <p class="muted small">A coincidence is named by its level. <b>Time</b>: a launch's scheduled time falls in an
-          area's window of four hours or less, or up to an hour before it opens. <b>Time and place</b>: also, the area
+          area's window of six hours or less, or up to an hour before it opens. <b>Time and place</b>: also, the area
           lies in an azimuth band and at a distance where the pad's history has closures. <b>Grouped</b>: GCAT has
           since dated a launch from that site inside the window. <b>On path</b>: Launch's estimated path for that launch
-          runs through the area. None says an area is for a launch.</p>
+          runs through the area. <b>Names it</b>: the notice's text has the launch's mission designator (then a window
+          of up to seven days counts), or its vehicle's name where the place fits too. None says an area is for a
+          launch. NOTAMs whose text says they are something else (military exercises, missile firings, airdrops,
+          amateur rocketry, aerodrome notices) match no launch and are hidden from this list and the map until you turn
+          on "Show non-launch NOTAMs" on the map.</p>
       </div>
       <div class="tbl-wrap" id="match-table"></div>
       <h3 class="sub-h" id="unlisted-h">Closures with no listed launch</h3>
@@ -265,6 +292,10 @@
     </section>
   </section>
 </main>
-<footer class="foot"><div class="wrap small muted">Launch · The Intelligence Company. Publicly available information only. Not for navigation. Launch data from GCAT (J. McDowell, planet4589.org/space/gcat), CC BY 4.0. Chinese NOTAM history from NotamForChina (mikezang), Apache-2.0, and Joey0609/notams, MIT.</div></footer>
+<footer class="foot"><div class="wrap small muted">Launch · The Intelligence Company. Publicly available information only. Not for navigation. Launch data from GCAT (J. McDowell, planet4589.org/space/gcat), CC BY 4.0. Chinese NOTAM history from NotamForChina (mikezang), Apache-2.0, and Joey0609/notams, MIT.</div>
+  <nav class="tic-data" aria-label="Data and downloads"><span class="tic-data-k">Data and downloads</span>
+    <a href="data/feed.geojson">Feed (GeoJSON)</a>
+    <a href="https://github.com/metacog-osint/launch">Source code</a></nav>
+</footer>
 </body>
 </html>
