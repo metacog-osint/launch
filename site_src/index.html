@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="tic-shell.css">
+<link rel="alternate" type="application/geo+json" title="Launch feed (GeoJSON)" href="data/feed.geojson">
 <link rel="stylesheet" href="tic-time.css">
 <link rel="stylesheet" href="tic-nav.css">
 <link rel="stylesheet" href="tic-related.css">
@@ -30,7 +31,6 @@
         <a href="#paste" role="tab" id="tab-paste" aria-controls="paste">Paste a NOTAM</a>
         <a href="#sources" role="tab" id="tab-sources" aria-controls="sources">Sources</a>
       </div>
-      <a href="data/feed.geojson">Feed (contract v2)</a>
       <span id="time-settings"></span>
     </nav>
   </div>
@@ -278,6 +278,10 @@
     </section>
   </section>
 </main>
-<footer class="foot"><div class="wrap small muted">Launch · The Intelligence Company. Publicly available information only. Not for navigation. Launch data from GCAT (J. McDowell, planet4589.org/space/gcat), CC BY 4.0. Chinese NOTAM history from NotamForChina (mikezang), Apache-2.0, and Joey0609/notams, MIT.</div></footer>
+<footer class="foot"><div class="wrap small muted">Launch · The Intelligence Company. Publicly available information only. Not for navigation. Launch data from GCAT (J. McDowell, planet4589.org/space/gcat), CC BY 4.0. Chinese NOTAM history from NotamForChina (mikezang), Apache-2.0, and Joey0609/notams, MIT.</div>
+  <nav class="tic-data" aria-label="Data and downloads"><span class="tic-data-k">Data and downloads</span>
+    <a href="data/feed.geojson">Feed (GeoJSON)</a>
+    <a href="https://github.com/metacog-osint/launch">Source code</a></nav>
+</footer>
 </body>
 </html>
