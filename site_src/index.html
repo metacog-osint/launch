@@ -41,8 +41,9 @@
   <noscript><p class="noscript">This page needs JavaScript to draw its maps and lists.</p></noscript>
   <p class="notice small">Not for navigation or flight planning. Shapes are read from the notices' text or charted
     by hand, and either can be wrong; every area says which. Flight paths are estimates
-    from an inferred azimuth, and each says what it was inferred from. Worldwide NOTAMs arrive once the
-    FAA grants Launch access to its NOTAM service (requested 13 Nov 2026).</p>
+    from an inferred azimuth, and each says what it was inferred from. Worldwide NOTAMs come from the FAA's
+    NOTAM service, read through Cordon; they are not the authoritative source for notices issued outside the
+    United States.</p>
 
   <section class="panel" id="live" role="tabpanel" aria-labelledby="tab-live">
     <div class="hero">
@@ -87,7 +88,9 @@
           fits in time and place, which does not show it is for that launch. Grey: closure areas on no launch's path.
           Rings: pads scheduled in the next 14 days. Click a line or pad for the launch. Amber dashed: recurring drop
           zones. Purple: what you paste. Ctrl and scroll (or two fingers) to zoom.</p>
-        <p class="small"><label><input type="checkbox" id="show-zones"> Show recurring drop zones</label></p>
+        <p class="small"><label><input type="checkbox" id="show-zones"> Show recurring drop zones</label>
+          <label><input type="checkbox" id="show-off"> Show non-launch NOTAMs (exercises, airdrops, missile
+            firings) <span id="off-count"></span></label></p>
       </div>
       <div class="map-stage"><div id="map" class="map"></div></div>
       <div class="small" id="map-info" aria-live="polite"></div>
@@ -107,10 +110,14 @@
       <div class="card-head">
         <h2 id="live-h">Live: closure areas and scheduled launches</h2>
         <p class="muted small">A coincidence is named by its level. <b>Time</b>: a launch's scheduled time falls in an
-          area's window of four hours or less, or up to an hour before it opens. <b>Time and place</b>: also, the area
+          area's window of six hours or less, or up to an hour before it opens. <b>Time and place</b>: also, the area
           lies in an azimuth band and at a distance where the pad's history has closures. <b>Grouped</b>: GCAT has
           since dated a launch from that site inside the window. <b>On path</b>: Launch's estimated path for that launch
-          runs through the area. None says an area is for a launch.</p>
+          runs through the area. <b>Names it</b>: the notice's text has the launch's mission designator (then a window
+          of up to seven days counts), or its vehicle's name where the place fits too. None says an area is for a
+          launch. NOTAMs whose text says they are something else (military exercises, missile firings, airdrops,
+          amateur rocketry, aerodrome notices) match no launch and are hidden from this list and the map until you turn
+          on "Show non-launch NOTAMs" on the map.</p>
       </div>
       <div class="tbl-wrap" id="match-table"></div>
       <h3 class="sub-h">Areas in force or announced</h3>

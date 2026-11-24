@@ -206,7 +206,8 @@ def flown_from_ll2(upcoming: list[dict], now: str) -> list[dict]:
 
 
 def closures_from_matches(matches: list[dict], areas: list[dict], now: str) -> list[dict]:
-    """Closure areas a scheduled launch coincided with in time and place (or grouped), kept with that launch. A notice
+    """Closure areas a scheduled launch coincided with in time and place (or grouped), or in time with the notice's
+    text naming its mission (live.named_in, `named_by` "mission"), kept with that launch. A notice
     with several areas stores each ring the match names (`area_i`). The first ring keeps the id older records have,
     `launch|area`; a later ring is `launch|area#<ring tag>`, since a run's area index is not stable between runs."""
     by_key: dict = {}
@@ -214,7 +215,7 @@ def closures_from_matches(matches: list[dict], areas: list[dict], now: str) -> l
         by_key.setdefault(a.get("key") or a.get("id"), []).append(i)
     out = []
     for m in matches or []:
-        if m.get("level") not in ("time and place", "grouped"):
+        if m.get("level") not in ("time and place", "grouped") and m.get("named_by") != "mission":
             continue
         rings = by_key.get(m.get("area"))
         if not rings:
@@ -226,6 +227,7 @@ def closures_from_matches(matches: list[dict], areas: list[dict], now: str) -> l
         cid = f"{m['launch']}|{m['area']}" + ("" if i == rings[0] else f"#{_ring_tag(a['ring'])}")
         out.append({"id": cid, "ll2": m["launch"], "area": m["area"],
                     "source": m.get("area_source"), "level": m["level"], "window": m.get("window"),
+                    **({"named": m["named"]} if m.get("named_by") == "mission" else {}),
                     "ring": a["ring"], "azimuth": m.get("azimuth"), "distance_nm": m.get("distance_nm"),
                     "recorded": now})
     return out
@@ -727,9 +729,9 @@ def live_paths(recs: list[dict], matches: list[dict], areas: list[dict], bands_b
                 row["role"] = "pad"
             elif nm > AREA_NM:
                 row["why"] = f"{nm:,.0f} NM from the pad, farther than an ascent's closure areas are read"
-            elif m.get("level") == "time" and expected is None:
+            elif m.get("level") == "time" and m.get("named_by") != "mission" and expected is None:
                 row["why"] = "the time fits, and no expected bearing to test the place against"
-            elif m.get("level") == "time" and _adiff(az, expected) > LIVE_TIME_DEG:
+            elif m.get("level") == "time" and m.get("named_by") != "mission" and _adiff(az, expected) > LIVE_TIME_DEG:
                 row["why"] = f"the time fits, but it lies {_adiff(az, expected):.0f}\u00b0 off the launch's expected bearing"
             else:
                 cands.append({"ring": a["ring"], "centroid": [round(lo, 4), round(la, 4)], "azimuth": round(az, 1),
