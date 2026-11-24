@@ -474,6 +474,7 @@ async function showTab() {
   const name = (location.hash.replace(/^#/, "").split("?")[0]) || "live";
   const tab = TABS.includes(name) ? name : "live";
   document.body.dataset.tab = tab;
+  document.title = (tab === "live" ? "" : $("tab-" + tab).textContent + " · ") + "Launch · The Intelligence Company";
   TABS.forEach((t) => {
     $(t).hidden = t !== tab;
     const a = $("tab-" + t); a.setAttribute("aria-selected", t === tab ? "true" : "false");
