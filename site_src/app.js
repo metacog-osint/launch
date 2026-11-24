@@ -164,8 +164,20 @@ function liveTables() {
   $("off-count").textContent = `(${off})`;
   put($("area-table"), shown.length ? table(["Source", "Notice", "Where", "Windows"], shown, (r) => pickLive(r.key)) : muted("No live areas."));
   if (off && !showOff) $("area-table").append(muted(`${off} non-launch NOTAM${off === 1 ? " is" : "s are"} hidden (exercises, airdrops, missile firings and the like): turn them on with "Show non-launch NOTAMs" on the map.`));
+  unlistedTable();
   pastWeek();
   folds("live");
+}
+
+// Closure with no listing (launch/unlisted.py): a closure and a schedule that shows nothing for it, never a launch.
+function unlistedTable() {
+  const us = snap.unlisted || [];
+  put($("unlisted-table"), us.length ? table(["Nearest site", { label: "NM", num: true }, "Window", "Notices", "Schedule"],
+    us.map((u) => ({ u, cells: [u.site, u.expect.nm, fmt(u.start) + " to " + fmt(u.end, { date: false }) + (u.more_windows ? ` and ${u.more_windows} more` : ""),
+      u.notices.map((n) => n.key).join(", "),
+      u.maybe_listed.length ? "None in this window. Dated only roughly: " + u.maybe_listed.join(", ") : "None listed"] })),
+    (r) => { const k = [...byKey.keys()].find((x) => x.startsWith("live:" + r.u.notices[0].key + ":")); if (k) pickLive(k); })
+    : muted("No closure near a launch site is without a listed launch."));
 }
 
 // Launches of the seven days to the last data read, newest first, each a link to its History record.

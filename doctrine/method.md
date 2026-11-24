@@ -25,6 +25,10 @@ history, and says which scheduled launches coincide with them. Observations only
    window, no longer in force or an aerodrome notice, or, without space words (space, satellite, orbit, reentry,
    debris, rocket launch), a missile firing, an airdrop or airlift, or a military exercise, stays in the closure
    ledger, matches no launch, and is hidden on the Live map and list until the viewer turns such notices on. Terse notices ("AIRSPACE CLSD", "ACT") say nothing and stay.
+   **Closure with no listing** (`launch/unlisted.py`, 21 Nov 2026): a window of 6 h or less in the next 14 days, within
+   450 NM of a site with launch-timing history, with no exactly dated listed launch within 100 NM of that site in any
+   of the notice's windows, and no time-and-place match to a listed launch elsewhere. A listing dated only to a day or
+   month is named beside it. It says the schedule shows nothing for a closure, not that a launch is coming.
    **Live paths** (`catalog.live_paths()`, 21 Nov 2026): a scheduled launch's estimated path runs through the matched
    areas within 2,500 NM of its pad, by the same rule as History's paths. A time-only match counts only within 15
    degrees of the launch's expected bearing, and a NET known only to the day ties nothing. A launch with no area on

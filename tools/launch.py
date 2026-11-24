@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
 from launch import (catalog, compare, feed, fetch, gcat, gnss, history, joey, live, ll2ledger, news, nfc, nms, nsf,  # noqa: E402
-                    overfly, patterns, privacy, public, schedule, timing, wayback)
+                    overfly, patterns, privacy, public, schedule, timing, unlisted, wayback)
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
@@ -445,6 +445,12 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
             snap["lanes"]["compare"] = update_compare(snap, store, ll2_led, orbit_doc, data_dir, getter)
         except Exception as exc:  # noqa: BLE001  the check never fails the run
             snap["lanes"]["compare"] = {"status": "failed", "error": _err(exc)}
+    # Closure with no listing (Ascent step 1b): only against a schedule read in this run or carried from a good one.
+    sched_lane = snap["lanes"].get("schedule") or {}
+    snap["unlisted"] = unlisted.closures(areas, (snap.get("schedule") or {}).get("records") or [], tim,
+                                         datetime.now(timezone.utc),
+                                         schedule_ok=bool((snap.get("schedule") or {}).get("read_at"))
+                                         and sched_lane.get("status") != "failed", matches=snap["matches"])
     snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter, ll2_led)
     if not only or "nms" in only:
         snap["lanes"]["nms_ledger"] = update_nms_ledger(snap, data_dir, getter)
