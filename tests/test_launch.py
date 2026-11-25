@@ -420,5 +420,66 @@ class PlaceOnThinPads(unittest.TestCase):
         self.assertEqual(self.run_it([self.area(233, 5900)], flown=self.ISS)[0]["level"], "time")
 
 
+
+class GroundTrack(unittest.TestCase):
+    """A far area under the launch's own ground track, at the time the track passes, is time and place (NG-25's
+    South Pacific disposal areas, 24 Nov 2026, about 68 min after NET)."""
+    CAPE = {"lat": 28.562, "lon": -80.577}
+    NET = "2026-11-29T15:47:00Z"
+    ISS = [{"lat": 28.56, "lon": -80.58, "inc": 51.64}] * 5
+    CORR = [{"pad": [-80.604, 28.608], "events": 2, "bands": [{"from": 110, "to": 115, "downrange_nm": [12, 12]}]}]
+
+    @staticmethod
+    def box(lat, lon, w, start, end, key):
+        return {"key": key, "ring": [[lon - .3, lat - .3], [lon + .3, lat - .3], [lon + .3, lat + .3], [lon - .3, lat + .3],
+                                     [lon - .3, lat - .3]], "windows": [{"start": start, "end": end}]}
+
+    def near(self):   # 251 NM out on the ISS azimuth: a place match that sets the orbit
+        return self.box(31.5, -77.0, .3, "2026-11-29T15:40:00Z", "2026-11-29T16:43:00Z", "near")
+
+    def point_at(self, minutes):
+        t = live.ground_track(self.CAPE["lat"], self.CAPE["lon"], 51.5, True, minutes, minutes)
+        return t[0][1], t[0][2]
+
+    def run_it(self, areas, flown=ISS):
+        up = [{"id": "u1", "name": "Falcon 9 | NG-25", "net": self.NET, **self.CAPE}]
+        return {r["area"]: r for r in live.match(up, areas, self.CORR, [], flown)}
+
+    def test_track_starts_at_the_pad_and_reaches_its_inclination(self):
+        t = live.ground_track(28.5, -80.6, 51.6, True, 0, 30, step_s=60)
+        self.assertAlmostEqual(t[0][1], 28.5, places=3)
+        self.assertAlmostEqual(t[0][2], -80.6, places=3)
+        self.assertAlmostEqual(max(x[1] for x in t), 51.6, delta=0.5)
+
+    def test_track_orbits_take_a_flown_inclination_on_the_bearing(self):
+        self.assertEqual(live.track_orbits(28.56, 46.0, [51.5, 28.5]), [(51.5, True)])
+        guess = live.track_orbits(28.56, 46.0, [])
+        self.assertEqual(len(guess), 5)
+        self.assertTrue(all(north for _, north in guess))
+
+    def test_far_area_under_the_track_in_its_window(self):
+        la, lo = self.point_at(68)
+        rows = self.run_it([self.near(), self.box(la, lo, .3, "2026-11-29T16:46:00Z", "2026-11-29T17:37:00Z", "far")])
+        self.assertEqual(rows["near"]["level"], "time and place")
+        self.assertEqual(rows["far"]["level"], "time and place")
+        self.assertEqual(rows["far"]["track"]["inc"], 51.5)
+        self.assertIn("ground track", rows["far"]["place_basis"])
+
+    def test_far_area_off_the_track_or_out_of_time_stays_time(self):
+        la, lo = self.point_at(68)
+        off = self.box(la + 10, lo, .3, "2026-11-29T16:46:00Z", "2026-11-29T17:37:00Z", "off")
+        late = self.box(la, lo, .3, "2026-11-29T19:00:00Z", "2026-11-29T20:30:00Z", "late")
+        rows = self.run_it([self.near(), off])
+        self.assertEqual(rows["off"]["level"], "time")
+        self.assertIsNone(rows["off"]["track"])
+        up = [{"id": "u1", "name": "Falcon 9 | NG-25", "net": "2026-11-29T18:30:00Z", **self.CAPE}]
+        self.assertEqual(live.match(up, [late], self.CORR, [], self.ISS)[0]["level"], "time")   # no near area: no orbit
+
+    def test_without_a_place_match_there_is_no_direction(self):
+        la, lo = self.point_at(68)
+        rows = self.run_it([self.box(la, lo, .3, "2026-11-29T16:46:00Z", "2026-11-29T17:37:00Z", "far")])
+        self.assertEqual(rows["far"]["level"], "time")
+
+
 if __name__ == "__main__":
     unittest.main()
