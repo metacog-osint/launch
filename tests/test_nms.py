@@ -342,6 +342,19 @@ class Timing(unittest.TestCase):
         self.assertIsNone(timing.expect(x and [[100.4, 40.4], [100.6, 40.4], [100.6, 40.6], [100.4, 40.4]],
                                         "2026-12-01T05:00:00Z", "2026-12-02T05:00:00Z", {"Testsite": s}))
 
+    def test_window_no_longer_than_the_sites_longest(self):
+        """24 Nov 2026: a 6 h area near a site whose launches' windows ran 30 min at most gets no expected time."""
+        recs = [self.rec(f"2026-0{m}-01T10:0{m}:00Z", f"2026-0{m}-01T10:00:00Z", f"2026-0{m}-01T10:30:00Z")
+                for m in range(1, 7)]
+        s = timing.by_site(recs)["Testsite"]
+        self.assertEqual(s["max_window_min"], 30.0)
+        ring = [[100.4, 40.4], [100.6, 40.4], [100.6, 40.6], [100.4, 40.4]]
+        self.assertIsNotNone(timing.expect(ring, "2026-12-01T05:00:00Z", "2026-12-01T05:30:00Z", {"Testsite": s}))
+        self.assertIsNone(timing.expect(ring, "2026-12-01T05:00:00Z", "2026-12-01T05:31:00Z", {"Testsite": s}))
+        self.assertIsNone(timing.expect(ring, "2026-12-01T05:00:00Z", "2026-12-01T11:00:00Z", {"Testsite": s}))
+        old = {k: v for k, v in s.items() if k != "max_window_min"}   # a timing.json from before the field: 6 h holds
+        self.assertIsNotNone(timing.expect(ring, "2026-12-01T05:00:00Z", "2026-12-01T11:00:00Z", {"Testsite": old}))
+
     def test_window_must_hold_launch(self):
         self.assertIsNone(timing.offset(self.rec("2026-01-01T11:00:00Z", "2026-01-01T10:00:00Z",
                                                  "2026-01-01T10:30:00Z")))
