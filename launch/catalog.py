@@ -604,6 +604,11 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
             if off_line:
                 set_aside += (f"; {off_line} area point{'' if off_line == 1 else 's'} not drawn through (the path "
                               f"would turn more than {A.MAX_TURN_DEG}° there: areas side by side, not a dog-leg)")
+            if A.bends(pad, pts) and A.zigzag(pad, pts):
+                set_aside += (f"; {len(pts) - 1} nearer area points drawn as one line to the farthest (they lie "
+                              f"both sides of it, more than {A.ZIGZAG_NM} NM each: drop zones side by side, not a "
+                              "dog-leg)")
+                pts = pts[-1:]
             if A.bends(pad, pts):
                 done = A.legs_nm(pad, pts)
                 tail = max(100.0, 0.15 * far["downrange_nm"])
