@@ -327,6 +327,26 @@ class FeedAndRegisters(unittest.TestCase):
     def test_registers(self):
         self.assertEqual(registers.check(ROOT / "doctrine"), [])
 
+    def test_feed_folds_a_notices_lettered_areas(self):
+        """24 Nov 2026: NAVAREA XII 836/26's parts A, B, C each matched USSF-380 and gave three items with one id."""
+        sq = [[-121.0, 33.0], [-120.9, 33.0], [-120.9, 33.1], [-121.0, 33.0]]
+        areas = [{"key": "navarea-xii-836-26", "label": x, "source": "cordon-navwarn",
+                  "ring": [[c[0], c[1] - i] for c in sq]} for i, x in enumerate("ABC")]
+        m = {"launch": "u1", "launch_name": "Falcon 9 | USSF-380", "net": "2026-11-29T04:39:00Z", "area": "navarea-xii-836-26",
+             "window": ["2026-11-29T04:39:00Z", "2026-11-29T09:22:00Z"], "azimuth": 154.0, "place_basis": "b",
+             "inclination_est": 70.0, "grouped_with": None}
+        snap = {"generated_at": "2026-11-25T00:00:00Z", "lanes": {}, "areas": areas,
+                "matches": [{**m, "area_i": 0, "level": "time and place", "distance_nm": 287},
+                            {**m, "area_i": 1, "level": "time and place", "distance_nm": 65},
+                            {**m, "area_i": 2, "level": "time", "distance_nm": 360}]}
+        fs = feed.build_feed(snap)["features"]
+        self.assertEqual(len(fs), 1)
+        p = fs[0]["properties"]
+        self.assertEqual((fs[0]["geometry"]["type"], len(fs[0]["geometry"]["coordinates"])), ("MultiPolygon", 2))
+        self.assertEqual(p["measures"]["parts"], ["A", "B"])   # the two that fit in time and place
+        self.assertIn("(areas A, B)", p["title"])
+        self.assertIn("NOTAM Management Service", feed.build_feed(snap)["attribution"])
+
     def test_feed_items_pass_contract(self):
         sq = [[-97.2, 26.0], [-97.1, 26.0], [-97.1, 26.1], [-97.2, 26.0]]
         snap = {"generated_at": "2026-11-14T02:00:00Z", "lanes": {"tfr": {"fetched_at": "2026-11-14T02:00:00Z"},

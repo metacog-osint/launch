@@ -71,14 +71,17 @@ def by_site(records: list[dict]) -> dict:
         out[site] = {"pad": [round(median(x["pad"][0] for x in xs), 3), round(median(x["pad"][1] for x in xs), 3)],
                      "launches": len(xs), "median_min": round(median(mins), 1), "q1_min": round(q[0], 1),
                      "q3_min": round(q[2], 1), "within_15_min": sum(1 for m in mins if m <= 15),
-                     "median_window_min": round(median(x["window_min"] for x in xs), 1)}
+                     "median_window_min": round(median(x["window_min"] for x in xs), 1),
+                     "max_window_min": round(max(x["window_min"] for x in xs), 1)}
     return dict(sorted(out.items(), key=lambda kv: -kv[1]["launches"]))
 
 
 def expect(ring: list, start: str, end: str, sites: dict) -> dict | None:
     """For a live closure area: the nearest site with figures whose pad is within NEAR_NM, and the time its
-    median offset gives from the area's opening ("if a launch from there, around ..."). None when no site fits
-    or the window is longer than MAX_WINDOW_H."""
+    median offset gives from the area's opening ("if a launch from there, around ..."). None when no site fits,
+    the window is longer than MAX_WINDOW_H, or it is longer than the longest window any of that site's launches had
+    (`max_window_min`; 24 Nov 2026: a 6 h Vietnamese "ROCKET FRNG" area 260 NM from Wenchang, whose launches' windows
+    ran 20 min at the median and 205 at most, read as a Wenchang launch)."""
     s, e = _dt(start), _dt(end)
     if not (s and e and ring and len(ring) >= 3 and sites) or (e - s).total_seconds() > MAX_WINDOW_H * 3600:
         return None
@@ -91,6 +94,8 @@ def expect(ring: list, start: str, end: str, sites: dict) -> dict | None:
     if not best:
         return None
     d, name, f = best
+    if f.get("max_window_min") and (e - s).total_seconds() / 60 > f["max_window_min"]:
+        return None
     at = s + timedelta(minutes=f["median_min"])
     return {"site": name, "nm": round(d), "median_min": f["median_min"], "q1_min": f["q1_min"], "q3_min": f["q3_min"],
             "launches": f["launches"], "at": at.strftime("%Y-%m-%dT%H:%M:%SZ")}
