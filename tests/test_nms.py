@@ -55,6 +55,51 @@ class Keep(unittest.TestCase):
         for t in (gun, laser, low, perm, stage, cancel):
             self.assertIsNone(self.kept(t), t.splitlines()[0])
 
+    def test_off_live_kept_but_not_a_live_area(self):
+        """Notices that say they are not a launch (22 Nov 2026's live list) stay kept, for the ledger, and are no
+        live area; launch and debris notices are left alone."""
+        mil = icao(fir="RJJJ", a="RJJJ", q="QRACA", e="MULTIPLE U.S. MIL ACT WILL BE CONDUCTED WI FUKUOKA FIR AS FLW, "
+                   "AREA: 255335N1283000E-254837N1290219E-254415N1292552E-255335N1283000E.")
+        missile = icao(fir="FAJA", a="FAJA", q="QWMLW", e="FAR 148 MISSILE FRNG EXER WI 340000S0230000E-340000S0240000E-"
+                       "350000S0240000E-340000S0230000E.")
+        age = icao(fir="KZDC", a="KZDC", q="QRRCA", e="AEROSPACE GROUND EQUIPMENT RUNS NOT AUTH DURING QUIET HOURS.")
+        hpr = icao(fir="KZLC", a="KZLC", q="QRRCA", e="CLASS 2 HIGH-POWER ROCKETS WI 2NM RADIUS OF 431415N1161927W.")
+        drop = icao(fir="HAAA", a="HDAM", q="QWPLW", e="MULTIPLE PASSES OF HIGH-ALTITUDE AIRDROPS AT KATHERINE DZ.")
+        for t, why in ((mil, "military exercise"), (missile, "missile firing"), (age, "aerodrome notice"),
+                       (hpr, "amateur rocketry"), (drop, "airdrop or airlift")):
+            self.assertEqual(nms.off_live(nms.notam.parse(t)["e_text"]), why)
+        n = nms.notice(feat(mil), [])
+        self.assertEqual((n["kept"] is not None, n["off_live"]), (True, "military exercise"))
+        st = {"notices": [n | {"start": "2026-11-23T00:00:00Z", "end": "2026-11-23T02:00:00Z"}]}
+        got = nms.areas(st)
+        self.assertEqual([a["off_live"] for a in got], ["military exercise"])   # kept as an area, for the toggle
+        from launch import live
+        up = [{"id": "u1", "name": "X", "net": "2026-11-23T01:00:00Z", "lat": 26.2, "lon": 127.6}]
+        self.assertEqual(live.match(up, got, [], []), [])   # and matches no launch
+        for t in ("DANGER AREA ACTIVATED WITHIN TTZP DUE TO THE ARIANE 6 LAUNCH VA271",
+                  "TEMPORARY DANGER AREA DUE TO SPACE DEBRIS RETURN OF SPACEX NROL-136", "AIRSPACE CLSD WI AREA:",
+                  "A MISSILE RANGE CLOSED FOR A ROCKET LAUNCH"):
+            self.assertIsNone(nms.off_live(t), t)
+
+    def test_off_live_24_nov(self):
+        """24 Nov 2026's live list: an EOD demolition, a navaid flight inspection, a 5,000 ft civilian rocket test and
+        a prohibited area matched launches. Launch and debris notices stay live."""
+        for t, why in (
+                ("H&HS EOD DEMOLITION OF EXPLOSIVES. LOCATION: TARGET ISLAND, MAX FRAGMENTATION DISTANCE VERTICAL: "
+                 "1,217 FT", "explosives demolition"),
+                ("ILS/NAVAID FLT INSPECTION OPS WILL TAKE PLACE\nFLT TEST ACFT HAVE PRIORITY", "navaid flight inspection"),
+                ("CIVILIAN ROCKET TEST WITHIN 1NM RADIUS OF 35-52-59N/126-47-40E , SFC TO 5,000 AGL ON 28 NOVEMBER",
+                 "ceiling under 10,000 ft"),
+                ("TEMPO PROHIBITED AREA ACT AS FLW:\n1. AREA : A CIRCLE RADIUS 2NM CENTERED ON 373508N1265440E",
+                 "prohibited area")):
+            self.assertEqual(nms.off_live(t), why, t)
+        for t in ("TRIGGER NOTAM - AIP AIRAC SUP 58/26. TEMPO DANGER AREAS ESTABLISHED IN CONNECTION WITH ROCKET "
+                  "LAUNCH FROM ANDOYA SPACE.",
+                  "SPECIAL OPS (AEROSPACE FLT ACT) WILL BE CONDUCTED BY CHINA. EST FALL AREA OF UNBURNED DEBRIS WI:",
+                  "A TEMPORARY DANGER AREA ESTABLISHED BOUNDED BY: 400000N1100000E, SFC TO UNL",
+                  "PROHIBITED AREA ACT DUE TO ROCKET LAUNCH", "SFC TO 60,000 FT AMSL ROCKET LAUNCH"):
+            self.assertIsNone(nms.off_live(t), t)
+
     def test_recurring(self):
         t = icao(fir="ULLL", a="ULLL", q="QRTCA", e="AIRSPACE CLSD WI AREA: 691700N0340000E-690000N0340000E-"
                  "690000N0325000E-691300N0331500E-691700N0340000E.", g="FL230", up="230",
@@ -203,6 +248,54 @@ class Ledger(unittest.TestCase):
         st, led = self.lane(down, cached=nms.ledger([], [{**self.N, "number": "A0002/26"}], "2026-11-01T00:00:00Z"))
         self.assertEqual((st["status"], led["n"]), ("failed", 2))
 
+    def test_release_copy_restores_when_site_404_and_no_cache(self):
+        """ideas#222: a site that answers 404 and an empty cache restore from the release, not from empty."""
+        old = nms.ledger([], [{**self.N, "number": "A0003/26"}], "2026-11-01T00:00:00Z")
+
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                return json.dumps(old).encode()
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        st, led = self.lane(get)
+        self.assertEqual((st["status"], led["n"], st["published"], st["release"]), ("ok", 2, False, True))
+
+    def test_site_down_but_release_readable_goes_on(self):
+        old = nms.ledger([], [{**self.N, "number": "A0004/26"}], "2026-11-01T00:00:00Z")
+
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                return json.dumps(old).encode()
+            raise urllib.error.URLError("down")
+        st, led = self.lane(get)
+        self.assertEqual((st["status"], led["n"], st["release"]), ("ok", 2, True))
+
+    def test_release_down_and_site_404_with_no_cache_stops(self):
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                raise urllib.error.URLError("down")
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        with self.assertRaises(RuntimeError):
+            self.lane(get)
+
+
+class CordonNgaState(unittest.TestCase):
+    """ideas#222: Cordon withholds its NGA set when its reader is stale or never read; Launch's lane is then unread
+    (it fails and keeps its last good copy), not zero warnings."""
+
+    def doc(self, state):
+        return json.dumps({"generated_at": "2026-11-24T00:00:00Z",
+                           "health": {"nga-navwarnings": {"state": state}}, "features": []}).encode()
+
+    def test_withheld_states_fail_the_lane(self):
+        import runpy
+        mod = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tools" / "launch.py"), run_name="nga_test")
+        for state in ("stale", "never"):
+            with self.assertRaises(RuntimeError):
+                mod["_lane_cordon"](None, {}, lambda url, timeout=0, s=state: self.doc(s))
+        for state in ("fresh", "failing", None):
+            got, _ = mod["_lane_cordon"](None, {}, lambda url, timeout=0, s=state: self.doc(s))
+            self.assertEqual((got["cordon"]["nga_state"], got["cordon"]["areas"]), (state, []))
+
 
 class SiteSize(unittest.TestCase):
     """check warns as a site file nears Cloudflare Pages' 25 MiB limit and fails before it."""
@@ -248,6 +341,19 @@ class Timing(unittest.TestCase):
         self.assertEqual(x["at"], "2026-12-01T05:03:30Z")
         self.assertIsNone(timing.expect(x and [[100.4, 40.4], [100.6, 40.4], [100.6, 40.6], [100.4, 40.4]],
                                         "2026-12-01T05:00:00Z", "2026-12-02T05:00:00Z", {"Testsite": s}))
+
+    def test_window_no_longer_than_the_sites_longest(self):
+        """24 Nov 2026: a 6 h area near a site whose launches' windows ran 30 min at most gets no expected time."""
+        recs = [self.rec(f"2026-0{m}-01T10:0{m}:00Z", f"2026-0{m}-01T10:00:00Z", f"2026-0{m}-01T10:30:00Z")
+                for m in range(1, 7)]
+        s = timing.by_site(recs)["Testsite"]
+        self.assertEqual(s["max_window_min"], 30.0)
+        ring = [[100.4, 40.4], [100.6, 40.4], [100.6, 40.6], [100.4, 40.4]]
+        self.assertIsNotNone(timing.expect(ring, "2026-12-01T05:00:00Z", "2026-12-01T05:30:00Z", {"Testsite": s}))
+        self.assertIsNone(timing.expect(ring, "2026-12-01T05:00:00Z", "2026-12-01T05:31:00Z", {"Testsite": s}))
+        self.assertIsNone(timing.expect(ring, "2026-12-01T05:00:00Z", "2026-12-01T11:00:00Z", {"Testsite": s}))
+        old = {k: v for k, v in s.items() if k != "max_window_min"}   # a timing.json from before the field: 6 h holds
+        self.assertIsNotNone(timing.expect(ring, "2026-12-01T05:00:00Z", "2026-12-01T11:00:00Z", {"Testsite": old}))
 
     def test_window_must_hold_launch(self):
         self.assertIsNone(timing.offset(self.rec("2026-01-01T11:00:00Z", "2026-01-01T10:00:00Z",

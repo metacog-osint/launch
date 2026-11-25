@@ -173,6 +173,37 @@ class Matching(unittest.TestCase):
                  "site": {"lat": 38.85, "lon": 111.61}}]
         self.assertEqual(live.match(up, [area], corr, gcat)[0]["level"], "grouped")
 
+    def test_six_hour_windows(self):
+        """Ariane 6 VA271's own areas ran 4.9 to 5.7 hours (22 Nov 2026) and matched nothing at four."""
+        up = [{"id": "u1", "name": "Ariane 64 | Amazon Leo (LE-04)", "net": "2026-11-23T11:09:00Z", "lat": 5.24, "lon": -52.77}]
+        ring = [[-47.2, 14.0], [-45.6, 12.9], [-48.0, 10.0], [-47.2, 14.0]]
+        five7 = {"key": "A1864/26", "ring": ring, "windows": [{"start": "2026-11-23T06:27:00Z", "end": "2026-11-23T12:08:00Z"}]}
+        self.assertEqual(len(live.match(up, [five7], [], [])), 1)
+        seven = {**five7, "windows": [{"start": "2026-11-23T05:00:00Z", "end": "2026-11-23T12:08:00Z"}]}
+        self.assertEqual(live.match(up, [seven], [], []), [])
+
+    def test_named(self):
+        """A mission designator in the text names the launch (hyphens ignored) and lets a longer window match; the
+        vehicle's name counts only where the place fits too."""
+        self.assertEqual(live.mission_words({"name": "Falcon 9 Block 5 | NROL-136", "mission": "NROL-136"}), ["NROL136"])
+        self.assertEqual(live.mission_words({"name": "Starship | Starlink Group 31-2 (Starship Flight 15)"}), [])
+        self.assertEqual(live.vehicle_pattern("Ariane 64 Block 2").pattern, r"\bARIANE[\s-]*6")
+        self.assertEqual(live.vehicle_pattern("Soyuz 2.1b/Fregat-M").pattern, r"\bSOYUZ[\s-]*2")
+        self.assertIsNone(live.vehicle_pattern("H3-22S"))
+        up = [{"id": "u1", "name": "Falcon 9 Block 5 | NROL-136", "mission": "NROL-136", "vehicle": "Falcon 9 Block 5",
+               "net": "2026-11-22T16:00:00Z", "lat": 34.63, "lon": -120.61}]
+        tahiti = {"key": "A1508/26", "ring": [[-121.9, -30.0], [-122.7, -28.0], [-120.7, -27.2], [-121.9, -30.0]],
+                  "windows": [{"start": "2026-11-22T14:00:00Z", "end": "2026-11-27T14:08:00Z"}],
+                  "text": "TEMPORARY DANGER AREA DUE TO SPACE DEBRIS RETURN OF SPACEX\nNROL-136 IN TAHITI FIR"}
+        m = live.match(up, [tahiti], [], [])
+        self.assertEqual((m[0]["named"], m[0]["named_by"], m[0]["level"]), ("NROL-136", "mission", "time"))
+        self.assertEqual(live.match(up, [{**tahiti, "text": "SPACE DEBRIS"}], [], []), [])   # 5 days, unnamed
+        near = {"key": "x", "ring": [[-121.0, 34.0], [-120.8, 34.0], [-120.8, 33.8], [-121.0, 34.0]],
+                "windows": [{"start": "2026-11-22T15:00:00Z", "end": "2026-11-22T17:00:00Z"}], "text": "FALCON 9 LAUNCH"}
+        self.assertEqual(live.match(up, [near], [], [])[0]["named_by"], "vehicle")
+        far = {**near, "ring": [[150, -40], [151, -40], [151, -41], [150, -40]]}
+        self.assertIsNone(live.match(up, [far], [], [])[0]["named"])
+
     def test_cordon_launch_warnings(self):
         """NGA warnings come from Cordon's feed (decided 17 Nov 2026): launch hazards kept, missile firings left out,
         Orbit's keys and NGA's numbers kept, letters from the text when areas have no windows of their own."""
@@ -296,6 +327,26 @@ class FeedAndRegisters(unittest.TestCase):
     def test_registers(self):
         self.assertEqual(registers.check(ROOT / "doctrine"), [])
 
+    def test_feed_folds_a_notices_lettered_areas(self):
+        """24 Nov 2026: NAVAREA XII 836/26's parts A, B, C each matched USSF-380 and gave three items with one id."""
+        sq = [[-121.0, 33.0], [-120.9, 33.0], [-120.9, 33.1], [-121.0, 33.0]]
+        areas = [{"key": "navarea-xii-836-26", "label": x, "source": "cordon-navwarn",
+                  "ring": [[c[0], c[1] - i] for c in sq]} for i, x in enumerate("ABC")]
+        m = {"launch": "u1", "launch_name": "Falcon 9 | USSF-380", "net": "2026-11-29T04:39:00Z", "area": "navarea-xii-836-26",
+             "window": ["2026-11-29T04:39:00Z", "2026-11-29T09:22:00Z"], "azimuth": 154.0, "place_basis": "b",
+             "inclination_est": 70.0, "grouped_with": None}
+        snap = {"generated_at": "2026-11-25T00:00:00Z", "lanes": {}, "areas": areas,
+                "matches": [{**m, "area_i": 0, "level": "time and place", "distance_nm": 287},
+                            {**m, "area_i": 1, "level": "time and place", "distance_nm": 65},
+                            {**m, "area_i": 2, "level": "time", "distance_nm": 360}]}
+        fs = feed.build_feed(snap)["features"]
+        self.assertEqual(len(fs), 1)
+        p = fs[0]["properties"]
+        self.assertEqual((fs[0]["geometry"]["type"], len(fs[0]["geometry"]["coordinates"])), ("MultiPolygon", 2))
+        self.assertEqual(p["measures"]["parts"], ["A", "B"])   # the two that fit in time and place
+        self.assertIn("(areas A, B)", p["title"])
+        self.assertIn("NOTAM Management Service", feed.build_feed(snap)["attribution"])
+
     def test_feed_items_pass_contract(self):
         sq = [[-97.2, 26.0], [-97.1, 26.0], [-97.1, 26.1], [-97.2, 26.0]]
         snap = {"generated_at": "2026-11-14T02:00:00Z", "lanes": {"tfr": {"fetched_at": "2026-11-14T02:00:00Z"},
@@ -333,6 +384,121 @@ class Patterns(unittest.TestCase):
         z = patterns.recurring(evs)
         self.assertEqual(len(z), 1)
         self.assertEqual(z[0]["first"]["event"], "e0")
+
+
+
+class PlaceOnThinPads(unittest.TestCase):
+    """Most pads have few charted events (24 Nov 2026: 69 of 77 under 10), so their bands alone missed NG-25's
+    and USSF-380's own areas. Below MIN_BAND_EVENTS an area on a flown orbit's azimuth fits too."""
+    CAPE = {"lat": 28.562, "lon": -80.577}
+    WIN = [{"start": "2026-11-29T15:40:00Z", "end": "2026-11-29T16:43:00Z"}]
+
+    def area(self, az, nm):
+        import math
+        lat1, lon1, d = math.radians(self.CAPE["lat"]), math.radians(self.CAPE["lon"]), nm / 3440.065
+        b = math.radians(az)
+        lat2 = math.asin(math.sin(lat1) * math.cos(d) + math.cos(lat1) * math.sin(d) * math.cos(b))
+        lon2 = lon1 + math.atan2(math.sin(b) * math.sin(d) * math.cos(lat1), math.cos(d) - math.sin(lat1) * math.sin(lat2))
+        x, y = math.degrees(lon2), math.degrees(lat2)
+        return {"key": f"a{az}-{nm}", "ring": [[x - .05, y - .05], [x + .05, y - .05], [x + .05, y + .05], [x - .05, y + .05],
+                                              [x - .05, y - .05]], "windows": self.WIN}
+
+    def corr(self, events):
+        return [{"pad": [-80.604, 28.608], "events": events, "bands": [{"from": 110, "to": 115, "downrange_nm": [12, 12]}]}]
+
+    def run_it(self, areas, events=2, flown=None):
+        up = [{"id": "u1", "name": "Falcon 9 | NG-25", "net": "2026-11-29T15:47:00Z", **self.CAPE}]
+        return live.match(up, areas, self.corr(events), [], flown)
+
+    ISS = [{"lat": 28.56, "lon": -80.58, "inc": 51.64}] * 5
+
+    def test_launch_azimuths(self):
+        a = live.launch_azimuths(28.5, 51.6)
+        self.assertAlmostEqual(a[0], 45.0, delta=0.5)
+        self.assertAlmostEqual(a[1], 135.0, delta=0.5)
+        self.assertEqual(live.launch_azimuths(28.5, 20.0), [90.0])
+        self.assertEqual(live.launch_azimuths(34.6, 160.0), [270.0])
+
+    def test_thin_pad_area_on_a_flown_azimuth_fits(self):
+        m = self.run_it([self.area(46, 251)], flown=self.ISS)
+        self.assertEqual(m[0]["level"], "time and place")
+        self.assertIn("51.5-degree orbit flown from this site", m[0]["place_basis"])
+        self.assertEqual(self.run_it([self.area(46, 251)])[0]["level"], "time")        # no GCAT launches read
+        self.assertEqual(self.run_it([self.area(80, 251)], flown=self.ISS)[0]["level"], "time")   # off the azimuth
+
+    def test_rich_pad_bands_still_rule(self):
+        self.assertEqual(self.run_it([self.area(46, 251)], events=20, flown=self.ISS)[0]["level"], "time")
+
+    def test_one_off_inclination_does_not_count(self):
+        self.assertEqual(self.run_it([self.area(46, 251)], flown=self.ISS[:4])[0]["level"], "time")
+
+    def test_area_near_the_pad_fits_whatever_the_bands(self):
+        m = self.run_it([self.area(58, 11)], events=20)
+        self.assertEqual((m[0]["level"], m[0]["place_basis"]), ("time and place", "within 30 NM of the pad"))
+
+    def test_far_area_stays_time(self):
+        self.assertEqual(self.run_it([self.area(233, 5900)], flown=self.ISS)[0]["level"], "time")
+
+
+
+class GroundTrack(unittest.TestCase):
+    """A far area under the launch's own ground track, at the time the track passes, is time and place (NG-25's
+    South Pacific disposal areas, 24 Nov 2026, about 68 min after NET)."""
+    CAPE = {"lat": 28.562, "lon": -80.577}
+    NET = "2026-11-29T15:47:00Z"
+    ISS = [{"lat": 28.56, "lon": -80.58, "inc": 51.64}] * 5
+    CORR = [{"pad": [-80.604, 28.608], "events": 2, "bands": [{"from": 110, "to": 115, "downrange_nm": [12, 12]}]}]
+
+    @staticmethod
+    def box(lat, lon, w, start, end, key):
+        return {"key": key, "ring": [[lon - .3, lat - .3], [lon + .3, lat - .3], [lon + .3, lat + .3], [lon - .3, lat + .3],
+                                     [lon - .3, lat - .3]], "windows": [{"start": start, "end": end}]}
+
+    def near(self):   # 251 NM out on the ISS azimuth: a place match that sets the orbit
+        return self.box(31.5, -77.0, .3, "2026-11-29T15:40:00Z", "2026-11-29T16:43:00Z", "near")
+
+    def point_at(self, minutes):
+        t = live.ground_track(self.CAPE["lat"], self.CAPE["lon"], 51.5, True, minutes, minutes)
+        return t[0][1], t[0][2]
+
+    def run_it(self, areas, flown=ISS):
+        up = [{"id": "u1", "name": "Falcon 9 | NG-25", "net": self.NET, **self.CAPE}]
+        return {r["area"]: r for r in live.match(up, areas, self.CORR, [], flown)}
+
+    def test_track_starts_at_the_pad_and_reaches_its_inclination(self):
+        t = live.ground_track(28.5, -80.6, 51.6, True, 0, 30, step_s=60)
+        self.assertAlmostEqual(t[0][1], 28.5, places=3)
+        self.assertAlmostEqual(t[0][2], -80.6, places=3)
+        self.assertAlmostEqual(max(x[1] for x in t), 51.6, delta=0.5)
+
+    def test_track_orbits_take_a_flown_inclination_on_the_bearing(self):
+        self.assertEqual(live.track_orbits(28.56, 46.0, [51.5, 28.5]), [(51.5, True)])
+        guess = live.track_orbits(28.56, 46.0, [])
+        self.assertEqual(len(guess), 5)
+        self.assertTrue(all(north for _, north in guess))
+
+    def test_far_area_under_the_track_in_its_window(self):
+        la, lo = self.point_at(68)
+        rows = self.run_it([self.near(), self.box(la, lo, .3, "2026-11-29T16:46:00Z", "2026-11-29T17:37:00Z", "far")])
+        self.assertEqual(rows["near"]["level"], "time and place")
+        self.assertEqual(rows["far"]["level"], "time and place")
+        self.assertEqual(rows["far"]["track"]["inc"], 51.5)
+        self.assertIn("ground track", rows["far"]["place_basis"])
+
+    def test_far_area_off_the_track_or_out_of_time_stays_time(self):
+        la, lo = self.point_at(68)
+        off = self.box(la + 10, lo, .3, "2026-11-29T16:46:00Z", "2026-11-29T17:37:00Z", "off")
+        late = self.box(la, lo, .3, "2026-11-29T19:00:00Z", "2026-11-29T20:30:00Z", "late")
+        rows = self.run_it([self.near(), off])
+        self.assertEqual(rows["off"]["level"], "time")
+        self.assertIsNone(rows["off"]["track"])
+        up = [{"id": "u1", "name": "Falcon 9 | NG-25", "net": "2026-11-29T18:30:00Z", **self.CAPE}]
+        self.assertEqual(live.match(up, [late], self.CORR, [], self.ISS)[0]["level"], "time")   # no near area: no orbit
+
+    def test_without_a_place_match_there_is_no_direction(self):
+        la, lo = self.point_at(68)
+        rows = self.run_it([self.box(la, lo, .3, "2026-11-29T16:46:00Z", "2026-11-29T17:37:00Z", "far")])
+        self.assertEqual(rows["far"]["level"], "time")
 
 
 if __name__ == "__main__":

@@ -48,6 +48,53 @@ LEDGER_ABOUT = ("Every NMS closure notice Launch has kept (nms.keep), ended ones
                 "set (first_seen, last_seen). Email addresses in the text are replaced by '" + EMAIL_NOTE + "'. The "
                 "live areas are in snapshot.json; every raw NMS feature is in Cordon's archive "
                 "(its release assets nms-archive-YYYY-MM; Cordon's notams index.json, field archive, links them).")
+# Kept, and left off the live view: notices whose text says what they are, and it is not a space launch (decided 22
+# Nov 2026, from the live list of that day). They stay in the ledger (storage keeps everything); they are not live
+# areas and match no launch. First that applies, each with its reason; then, unless the text has SPACE words, the rest.
+OFF_LIVE_ALWAYS = [
+    ("amateur rocketry", re.compile(r"ROCKETRY|TRIPOLI|HIGH[- ]POWER ROCKET|AMATEUR ROCKET")),
+    ("no longer in force", re.compile(r"NO LONGER IN FORCE|(?:WAS|HAS BEEN|IS) COMPLETED")),
+    ("aerodrome notice", re.compile(r"AEROSPACE GROUND EQUIPMENT|QUIET HOURS")),
+]
+# A ceiling the text states, from the surface, under 10,000 ft (M1205/26 RKRR, "SFC TO 5,000 AGL", 24 Nov 2026):
+# nms.keep drops tops under FL100 from the NOTAM's own field, which that notice leaves empty.
+LOW_CEILING = re.compile(r"\bSFC\s*(?:TO|-)\s*(\d{1,2},?\d{3}|\d{3})\s*(?:FT)?\s*(?:AGL|AMSL|MSL)\b")
+SPACE = re.compile(r"\bSPACE\b|\bSPACE ?(?:DEBRIS|LAUNCH|VEHICLE|CRAFT|OPS|OPERATIONS|FLIGHT|FLT)|SATELLITE|\bORBIT|"
+                   r"LAUNCH VEHICLE|ROCKET LAUNCH|AEROSPACE (?:FLIGHT|ACT)|RE-?ENTRY|SPLASH ?DOWN|DEBRIS")
+OFF_LIVE = [
+    ("missile firing", re.compile(r"MISSILE")),
+    ("airdrop or airlift", re.compile(r"AIR ?DROP|AIRLIFT|OFF-?LOAD|\bDZ\b|DROP ZONE")),
+    ("military exercise", re.compile(r"\bMIL(?:ITARY)? (?:ACT|ACTIVITY|ACTIVITIES|EXER|EXERCISE|FLYING|TRAINING|OPS)\b|"
+                                     r"\bEXER(?:CISE)?\b")),
+    # Added 24 Nov 2026 from that day's live list (M1055/26 RJJJ, N4141/26 YBBB).
+    ("explosives demolition", re.compile(r"\bEOD\b|DEMOLITION|EXPLOSIVE ORDNANCE")),
+    ("navaid flight inspection", re.compile(r"(?:FLT|FLIGHT) (?:INSP|INSPECTION|CHECK)|\bNAVAID\b")),
+]
+# A prohibited area with no launch, rocket or space word (D3693/26 RKRR, 24 Nov 2026): launch closures are
+# danger or restricted areas, or closed airspace.
+PROHIBITED = re.compile(r"PROHIBITED AREA")
+
+
+def off_live(text: str | None) -> str | None:
+    """Why a kept notice is left off the live view (OFF_LIVE_ALWAYS, then OFF_LIVE without SPACE words), or None."""
+    t = (text or "").upper()
+    for why, rx in OFF_LIVE_ALWAYS:
+        if rx.search(t):
+            return why
+    m = LOW_CEILING.search(t)
+    low = bool(m and int(m.group(1).replace(",", "")) < 10000)
+    if SPACE.search(t):
+        return "ceiling under 10,000 ft" if low else None
+    for why, rx in OFF_LIVE:
+        if rx.search(t):
+            return why
+    if low:
+        return "ceiling under 10,000 ft"
+    if PROHIBITED.search(t) and not WORDS.search(t):
+        return "prohibited area"
+    return None
+
+
 RECUR_NM = 25                   # an area centred this close to a past launch closure area is "recurring"
 RECUR_MAX_DAYS = 7
 
@@ -218,7 +265,8 @@ def notice(f: dict, past: list[tuple[float, float]]) -> dict | None:
             "lower": n.get("lower"), "upper": (n.get("upper") or "").split("\n")[0].strip() or None,
             "issuing_state": n.get("issuing_state"), "named_states": n.get("named_states") or [],
             "kept": why, "rings": [[[round(x, 5), round(y, 5)] for x, y in r] for r in rings], "ring_basis": basis,
-            "issued": meta.get("issued"), "last_updated": meta.get("lastUpdated"), "text": n.get("e_text") or ""}
+            "issued": meta.get("issued"), "last_updated": meta.get("lastUpdated"), "text": n.get("e_text") or "",
+            "off_live": off_live(n.get("e_text"))}
 
 
 # ---------- the store ----------
@@ -259,19 +307,25 @@ def from_set(feats: list[dict], index: dict, past, now: datetime) -> dict:
     res = apply({}, feats, past, now, replace_all=True)
     notices = sorted(res["notices"].values(), key=lambda n: (n.get("start") or "", n.get("number") or ""))
     kinds: dict[str, int] = {}
+    off: dict[str, int] = {}
     for n in notices:
         kinds[n["kept"]] = kinds.get(n["kept"], 0) + 1
+        if n.get("off_live"):
+            off[n["off_live"]] = off.get(n["off_live"], 0) + 1
     return {"env": index.get("env"), "mode": "cordon", "via": CORDON_NOTAMS, "bulk_at": index.get("bulk_at"),
             "pulled_to": index.get("pulled_to"), "cordon_status": index.get("lane_status"), "requests": 0,
-            "counts": {**res["counts"], "kept_by_rule": kinds}, "source_note": SOURCE_NOTE, "notices": notices}
+            "counts": {**res["counts"], "kept_by_rule": kinds, "off_live": off}, "source_note": SOURCE_NOTE, "notices": notices}
 
 
 def areas(state: dict, tfr_ids: set[str] | None = None, sites: dict | None = None) -> list[dict]:
-    """Kept notices as areas for live.match. An FDC notice the tfr lane already holds is left to it. With
-    history/timing.json's sites, an area near a pad carries `expect` (timing.expect)."""
+    """Kept notices as areas for live.match. An FDC notice the tfr lane already holds is left to it. One whose text
+    says it is not a launch carries `off_live` (its reason): live.match skips it and the page hides it until the
+    viewer turns such notices on. With history/timing.json's sites, an area near a pad carries `expect`
+    (timing.expect). `text` is for live.match and is not written to the snapshot's areas."""
     out = []
     for n in state.get("notices") or []:
         num = (n.get("number") or "")
+        off = off_live(n.get("text"))   # read again: a lane carried from an earlier run has no off_live field
         if tfr_ids and n.get("classification") == "FDC" and any(num.endswith(t) for t in tfr_ids):
             continue
         if not (n.get("start") and n.get("end")):
@@ -281,7 +335,8 @@ def areas(state: dict, tfr_ids: set[str] | None = None, sites: dict | None = Non
                         + (f" area {i + 1}" if len(n["rings"]) > 1 else ""),
                         "label": (n.get("text") or "").split("\n")[0][:120], "ring": ring, "kept": n["kept"],
                         "windows": [{"start": n["start"], "end": n["end"]}], "ring_basis": n.get("ring_basis"),
-                        "expect": timing.expect(ring, n["start"], n["end"], sites or {})})
+                        "expect": timing.expect(ring, n["start"], n["end"], sites or {}), "text": n.get("text") or ""}
+                       | ({"off_live": off} if off else {}))
     return out
 
 
