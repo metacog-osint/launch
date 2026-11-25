@@ -229,6 +229,54 @@ class Ledger(unittest.TestCase):
         st, led = self.lane(down, cached=nms.ledger([], [{**self.N, "number": "A0002/26"}], "2026-11-01T00:00:00Z"))
         self.assertEqual((st["status"], led["n"]), ("failed", 2))
 
+    def test_release_copy_restores_when_site_404_and_no_cache(self):
+        """ideas#222: a site that answers 404 and an empty cache restore from the release, not from empty."""
+        old = nms.ledger([], [{**self.N, "number": "A0003/26"}], "2026-11-01T00:00:00Z")
+
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                return json.dumps(old).encode()
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        st, led = self.lane(get)
+        self.assertEqual((st["status"], led["n"], st["published"], st["release"]), ("ok", 2, False, True))
+
+    def test_site_down_but_release_readable_goes_on(self):
+        old = nms.ledger([], [{**self.N, "number": "A0004/26"}], "2026-11-01T00:00:00Z")
+
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                return json.dumps(old).encode()
+            raise urllib.error.URLError("down")
+        st, led = self.lane(get)
+        self.assertEqual((st["status"], led["n"], st["release"]), ("ok", 2, True))
+
+    def test_release_down_and_site_404_with_no_cache_stops(self):
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                raise urllib.error.URLError("down")
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        with self.assertRaises(RuntimeError):
+            self.lane(get)
+
+
+class CordonNgaState(unittest.TestCase):
+    """ideas#222: Cordon withholds its NGA set when its reader is stale or never read; Launch's lane is then unread
+    (it fails and keeps its last good copy), not zero warnings."""
+
+    def doc(self, state):
+        return json.dumps({"generated_at": "2026-11-24T00:00:00Z",
+                           "health": {"nga-navwarnings": {"state": state}}, "features": []}).encode()
+
+    def test_withheld_states_fail_the_lane(self):
+        import runpy
+        mod = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tools" / "launch.py"), run_name="nga_test")
+        for state in ("stale", "never"):
+            with self.assertRaises(RuntimeError):
+                mod["_lane_cordon"](None, {}, lambda url, timeout=0, s=state: self.doc(s))
+        for state in ("fresh", "failing", None):
+            got, _ = mod["_lane_cordon"](None, {}, lambda url, timeout=0, s=state: self.doc(s))
+            self.assertEqual((got["cordon"]["nga_state"], got["cordon"]["areas"]), (state, []))
+
 
 class SiteSize(unittest.TestCase):
     """check warns as a site file nears Cloudflare Pages' 25 MiB limit and fails before it."""
