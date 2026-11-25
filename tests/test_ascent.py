@@ -123,6 +123,11 @@ class Paths(unittest.TestCase):
         dogleg = [A.dest(sohae, 191.9, 241), A.dest(sohae, 191.4, 365), A.dest(sohae, 170.1, 1609)]
         self.assertFalse(A.zigzag(sohae, dogleg))  # one side only: a dog-leg
 
+    def test_deep_space_from_vandenberg_goes_south(self):
+        p = catalog.infer_path([-120.611, 34.632], "Vandenberg", [], orbit="Deep space / lunar")
+        self.assertEqual(p["az"], 157.5)
+        self.assertIn("DART", p["basis"])
+
     def test_areas_at_one_distance_are_one_point(self):
         pad = [111.608, 38.849]
         pts = A.points(pad, [area(pad, 170.0, 600), area(pad, 172.0, 620), area(pad, 178.0, 1200)])
