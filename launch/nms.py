@@ -56,6 +56,9 @@ OFF_LIVE_ALWAYS = [
     ("no longer in force", re.compile(r"NO LONGER IN FORCE|(?:WAS|HAS BEEN|IS) COMPLETED")),
     ("aerodrome notice", re.compile(r"AEROSPACE GROUND EQUIPMENT|QUIET HOURS")),
 ]
+# A ceiling the text states, from the surface, under 10,000 ft (M1205/26 RKRR, "SFC TO 5,000 AGL", 24 Nov 2026):
+# nms.keep drops tops under FL100 from the NOTAM's own field, which that notice leaves empty.
+LOW_CEILING = re.compile(r"\bSFC\s*(?:TO|-)\s*(\d{1,2},?\d{3}|\d{3})\s*(?:FT)?\s*(?:AGL|AMSL|MSL)\b")
 SPACE = re.compile(r"\bSPACE\b|\bSPACE ?(?:DEBRIS|LAUNCH|VEHICLE|CRAFT|OPS|OPERATIONS|FLIGHT|FLT)|SATELLITE|\bORBIT|"
                    r"LAUNCH VEHICLE|ROCKET LAUNCH|AEROSPACE (?:FLIGHT|ACT)|RE-?ENTRY|SPLASH ?DOWN|DEBRIS")
 OFF_LIVE = [
@@ -63,7 +66,13 @@ OFF_LIVE = [
     ("airdrop or airlift", re.compile(r"AIR ?DROP|AIRLIFT|OFF-?LOAD|\bDZ\b|DROP ZONE")),
     ("military exercise", re.compile(r"\bMIL(?:ITARY)? (?:ACT|ACTIVITY|ACTIVITIES|EXER|EXERCISE|FLYING|TRAINING|OPS)\b|"
                                      r"\bEXER(?:CISE)?\b")),
+    # Added 24 Nov 2026 from that day's live list (M1055/26 RJJJ, N4141/26 YBBB).
+    ("explosives demolition", re.compile(r"\bEOD\b|DEMOLITION|EXPLOSIVE ORDNANCE")),
+    ("navaid flight inspection", re.compile(r"(?:FLT|FLIGHT) (?:INSP|INSPECTION|CHECK)|\bNAVAID\b")),
 ]
+# A prohibited area with no launch, rocket or space word (D3693/26 RKRR, 24 Nov 2026): launch closures are
+# danger or restricted areas, or closed airspace.
+PROHIBITED = re.compile(r"PROHIBITED AREA")
 
 
 def off_live(text: str | None) -> str | None:
@@ -72,11 +81,17 @@ def off_live(text: str | None) -> str | None:
     for why, rx in OFF_LIVE_ALWAYS:
         if rx.search(t):
             return why
+    m = LOW_CEILING.search(t)
+    low = bool(m and int(m.group(1).replace(",", "")) < 10000)
     if SPACE.search(t):
-        return None
+        return "ceiling under 10,000 ft" if low else None
     for why, rx in OFF_LIVE:
         if rx.search(t):
             return why
+    if low:
+        return "ceiling under 10,000 ft"
+    if PROHIBITED.search(t) and not WORDS.search(t):
+        return "prohibited area"
     return None
 
 

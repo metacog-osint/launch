@@ -81,6 +81,25 @@ class Keep(unittest.TestCase):
                   "A MISSILE RANGE CLOSED FOR A ROCKET LAUNCH"):
             self.assertIsNone(nms.off_live(t), t)
 
+    def test_off_live_24_nov(self):
+        """24 Nov 2026's live list: an EOD demolition, a navaid flight inspection, a 5,000 ft civilian rocket test and
+        a prohibited area matched launches. Launch and debris notices stay live."""
+        for t, why in (
+                ("H&HS EOD DEMOLITION OF EXPLOSIVES. LOCATION: TARGET ISLAND, MAX FRAGMENTATION DISTANCE VERTICAL: "
+                 "1,217 FT", "explosives demolition"),
+                ("ILS/NAVAID FLT INSPECTION OPS WILL TAKE PLACE\nFLT TEST ACFT HAVE PRIORITY", "navaid flight inspection"),
+                ("CIVILIAN ROCKET TEST WITHIN 1NM RADIUS OF 35-52-59N/126-47-40E , SFC TO 5,000 AGL ON 28 NOVEMBER",
+                 "ceiling under 10,000 ft"),
+                ("TEMPO PROHIBITED AREA ACT AS FLW:\n1. AREA : A CIRCLE RADIUS 2NM CENTERED ON 373508N1265440E",
+                 "prohibited area")):
+            self.assertEqual(nms.off_live(t), why, t)
+        for t in ("TRIGGER NOTAM - AIP AIRAC SUP 58/26. TEMPO DANGER AREAS ESTABLISHED IN CONNECTION WITH ROCKET "
+                  "LAUNCH FROM ANDOYA SPACE.",
+                  "SPECIAL OPS (AEROSPACE FLT ACT) WILL BE CONDUCTED BY CHINA. EST FALL AREA OF UNBURNED DEBRIS WI:",
+                  "A TEMPORARY DANGER AREA ESTABLISHED BOUNDED BY: 400000N1100000E, SFC TO UNL",
+                  "PROHIBITED AREA ACT DUE TO ROCKET LAUNCH", "SFC TO 60,000 FT AMSL ROCKET LAUNCH"):
+            self.assertIsNone(nms.off_live(t), t)
+
     def test_recurring(self):
         t = icao(fir="ULLL", a="ULLL", q="QRTCA", e="AIRSPACE CLSD WI AREA: 691700N0340000E-690000N0340000E-"
                  "690000N0325000E-691300N0331500E-691700N0340000E.", g="FL230", up="230",
