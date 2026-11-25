@@ -151,8 +151,8 @@ def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: s
         "event_end": _iso(end),
         "last_change": "none",   # a coincidence has no source date, and Launch keeps no log of its feed items
         "title": f"Closure area {m['area']}{_parts(parts)} coincides ({lvl}) with scheduled launch {m['launch_name']}",
-        "summary": (f"{m['launch_name']} is scheduled for {m['net'][:16].replace('T', ' ')} UTC (Launch Library 2 via "
-                    f"Orbit). Closure area {m['area']} ({area.get('source')}) has a window "
+        "summary": (f"{m['launch_name']} is scheduled for {m['net'][:16].replace('T', ' ')} UTC (Launch Library 2). "
+                    f"Closure area {m['area']} ({area.get('source')}) has a window "
                     f"{m['window'][0][11:16]}-{m['window'][1][11:16]} UTC on {m['window'][0][:10]} and lies "
                     f"{m['distance_nm']} NM from the pad on azimuth {m['azimuth']} degrees (implied inclination about "
                     f"{m['inclination_est']} degrees): {what}. A coincidence, not a finding that the area is for "
@@ -164,7 +164,7 @@ def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: s
         "coverage_fraction": 1.0,
         "precision_class": "area",
         "visual": {"type": "map", "url": f"{SITE}/#live"},
-        "sources": [{**SRC_ORBIT, "accessed_at": accessed}]
+        "sources": [{**SRC_LL2, "accessed_at": accessed}]
                    + ([{**SRC_CORDON, "accessed_at": cordon_at or accessed}]
                       if area.get("source") == "cordon-navwarn" else [])
                    + ([{**SRC_NMS, "accessed_at": accessed}] if area.get("source") == "faa-nms" else []),
@@ -283,7 +283,9 @@ def build_feed(snap: dict) -> dict:
     generated = snap["generated_at"]
     lanes = snap.get("lanes") or {}
     tfr_at = (lanes.get("tfr") or {}).get("fetched_at") or generated
-    orb_at = (lanes.get("orbit") or {}).get("fetched_at") or generated
+    # Match items cite Launch Library 2 as Launch read it (Ascent step 4, ideas#69), not Orbit's copy.
+    sch_at = ((snap.get("schedule") or {}).get("read_at") or (lanes.get("schedule") or {}).get("fetched_at")
+              or generated)
     cor_at = (lanes.get("cordon") or {}).get("fetched_at") or generated
     features = [_tfr_item(t, generated, tfr_at) for t in snap.get("tfr") or []]
     listed = snap.get("areas") or []
@@ -303,7 +305,7 @@ def build_feed(snap: dict) -> dict:
              else areas.get(best["area"]))
         if a:
             parts = [x.get("label") or "" for x in own]
-            features.append(_match_item(best, a, generated, orb_at, cor_at, rings=[x["ring"] for x in own] or None,
+            features.append(_match_item(best, a, generated, sch_at, cor_at, rings=[x["ring"] for x in own] or None,
                                         parts=sorted(parts) if all(parts) else None))
     sch = snap.get("schedule") or {}
     read_at = sch.get("read_at") or (lanes.get("schedule") or {}).get("fetched_at") or generated

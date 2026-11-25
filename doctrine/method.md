@@ -13,7 +13,8 @@ history, and says which scheduled launches coincide with them. Observations only
 3. **Patterns** (`launch/patterns.py`): per pad, closure azimuths in 5-degree bands with the inclination each
    implies (cos i = cos(lat) sin(az), LA-ASM-1); drop zones used by three or more events within 25 NM; window
    lengths; notices per FIR per year; launch hour by actor. Counted, not predicted.
-4. **Matching** (`launch/live.py`), three named levels: time (Orbit's rule, widened from 4 h on 22 Nov 2026: NET in
+4. **Matching** (`launch/live.py`; since 25 Nov 2026 the scheduled launches are Launch's own records that Launch
+   Library 2 lists, item 5, not Orbit's copy), three named levels: time (Orbit's rule, widened from 4 h on 22 Nov 2026: NET in
    a window of 6 h or less, or up to 1 h before it opens; Ariane 6 VA271's own areas ran 4.9 to 5.7 h); time and place (also within 30 NM of the pad, or inside an azimuth band the pad's
    charted history has; where that history rests on under 10 events, as at most US pads, also on the launch azimuth,
    +-5 degrees, of an inclination GCAT shows flown five or more times from the site, within 1,500 NM, added 24 Nov
@@ -43,7 +44,7 @@ history, and says which scheduled launches coincide with them. Observations only
    areas within 2,500 NM of its pad, by the same rule as History's paths. A time-only match counts only within 15
    degrees of the launch's expected bearing, and a NET known only to the day ties nothing. A launch with no area on
    its ascent has no line on the Live map.
-5. **Live lanes:** FAA space-operations TFRs; Orbit's published snapshot; NGA warnings and FAA NMS NOTAMs through
+5. **Live lanes:** FAA space-operations TFRs; Orbit's published snapshot (GCAT launches only); NGA warnings and FAA NMS NOTAMs through
    Cordon. The
    NASASpaceflight forum is linked, not collected.
    **Scheduled launches** (19 Nov 2026, from Orbit): one record per expected launch from one or more sources (Launch

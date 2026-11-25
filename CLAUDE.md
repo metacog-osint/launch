@@ -106,10 +106,11 @@ reported, not failed.
 ## Live lanes (`launch/live.py`)
 - `tfr`: FAA TFR list, map-service shapes (joined to the active list), XNOTAM XML of each SPACE OPERATIONS TFR.
   Windows UTC (`tfr_windows`).
-- `orbit`: Orbit's `data/snapshot.json` (scheduled and GCAT launches, payload `inc`); its NGA warnings until
-  `cordon` first succeeds.
+- `orbit`: Orbit's snapshot, for GCAT launches and payload `inc` only. Matching, ledger and index read Launch's
+  own LL2 records (`ll2_upcoming`); NGA warnings only via `cordon`.
 - **Ascent move** (from Orbit, 19 Nov 2026): `schedule` (one LL2 request; ids `upcoming:<source>:<id>`), `news`
-  (links), LL2 ledger (`ll2ledger.py`; provisional `ll2:` rows after GCAT's newest), `compare.py`; release `ledger`.
+  (links), LL2 ledger (`ll2ledger.py`; provisional `ll2:` rows after GCAT's newest); release `ledger`. `compare.py`
+  ended when Orbit's schedule did.
 - `cordon`: Cordon's feed, `launch` category (the one NGA reader): launch, debris, reentry hazards; Orbit's keys.
 - `nms` (`nms.py`): FAA NMS-API NOTAMs via Cordon's `data/notams/` index and `launch-areas.json` (the active set);
   Cordon holds the keys and makes every FAA request.
@@ -124,9 +125,8 @@ reported, not failed.
 
 ## Matching (three levels, all shown; none says an area is for a launch)
 `inclination_est`: the bearing's reading less its error on past launches near that bearing (`incbias.py`).
-time (NET in a window of 6 h or less, or 1 h before) / time and place (`live.place_test`, `live.on_track`: near the pad,
-charted bands, a flown orbit's azimuth where those are thin, or a far area on its ground track) / grouped (GCAT
-launch from that site, within 30 NM, in the window). The feed carries TFRs and the last two only.
+time / time and place (`live.place_test`, `live.on_track`) / grouped (GCAT launch from the site in the window);
+rules in `doctrine/method.md` item 4. The feed carries TFRs and the last two only.
 `named` beside the level (`live.named_in`): the text has the mission designator (then a window up to 7 days counts;
 kept with the launch like time and place) or the vehicle's name with the place.
 
