@@ -23,8 +23,8 @@ python -m unittest discover -s tests   # offline tests
 python tools/serve.py                  # http://127.0.0.1:8771 with _headers (CSP)
 ```
 `.github/workflows/update.yml` (every 6 h at :11, on every push to `main`, by hand) runs tests, collect, build and
-check, then deploys `site/`. State is in the Actions cache (not durable); each run unions the committed baseline,
-the cache, the published copies and this run, so a lost cache loses nothing.
+check, then deploys `site/`. Each run unions the committed baseline, the Actions cache, the published copies, release
+`ledger` (dated copies in `ledger-YYYY-qN`, kept for good) and this run, so a lost cache loses nothing.
 
 ## Layout
 - `launch/`: one module a job, most named below; `notam.py` parser, `catalog.py` the History list
@@ -117,9 +117,10 @@ reported, not failed.
 - `nms` (`nms.py`): FAA NMS-API NOTAMs via Cordon's `data/notams/` index and `launch-areas.json` (the active set);
   Cordon holds the keys and makes every FAA request.
   `nms.keep` (rules in its docstring). Never "FAA data", not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`).
-  Every kept notice stays in `data/nms-closures.json` (no local copy and the site unreadable, not 404, stops the
-  run). `nms.off_live`: text that says it is something else (exercise, missile firing, airdrop, demolition, navaid
-  check, ceiling under 10,000 ft, prohibited area, amateur rocketry, aerodrome, ended): matches no launch, hidden until the viewer ticks "Show non-launch NOTAMs".
+  Every kept notice stays in `data/nms-closures.json` (cache, site, release unioned; none readable, not 404, stops
+  the run). Cordon's NGA state `stale` or `never` fails the `cordon` lane. `nms.off_live`: text that says it is
+  something else (exercise, missile firing, airdrop, demolition, navaid check, ceiling under 10,000 ft, prohibited
+  area, amateur rocketry, aerodrome, ended): matches no launch, hidden until the viewer ticks "Show non-launch NOTAMs".
 - **GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): Cordon's `gnss.json`, no launch filters (Q-code GA/GW,
   signal text, `refers`). `data/gnss-notams/` (active, a file per ended UTC day, all, index), kept
   for good.
