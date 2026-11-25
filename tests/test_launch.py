@@ -484,6 +484,7 @@ class GroundTrack(unittest.TestCase):
         self.assertEqual(rows["far"]["level"], "time and place")
         self.assertEqual(rows["far"]["track"]["inc"], 51.5)
         self.assertIn("ground track", rows["far"]["place_basis"])
+        self.assertEqual(rows["far"]["inclination_est"], 51.5)   # the track's, not the far bearing's reading
 
     def test_far_area_off_the_track_or_out_of_time_stays_time(self):
         la, lo = self.point_at(68)
