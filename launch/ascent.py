@@ -18,8 +18,10 @@ Not every area joined to a launch is on its ascent. Each is tested, in this orde
                (Lijian-2 of 3 Nov 2026: two areas at 135 deg, 960 NM off its track, beside its two at 187)
 A notice's areas stand or fall together (HYDROPAC 2699/23 holds all three of Chollima-1's stage areas).
 
-The ground track is a circular orbit on a spherical, rotating Earth, from the pad at liftoff, for each period in
-PERIODS (the altitude is not known): good to about ON_TRACK_NM, enough to tell a first pass from a later one.
+The ground track is an orbit on a spherical, rotating Earth, from the pad at liftoff. When GCAT gives the launch's
+orbit (perigee and apogee, km), the track is that ellipse, perigee at the pad, for its period and ORBIT_TOL_MIN either
+side; else a circular orbit for each period in PERIODS: good to about ON_TRACK_NM, enough to tell a first pass from a
+later one.
 """
 from __future__ import annotations
 
@@ -37,7 +39,9 @@ FIRST_MIN = 20          # the first pass: liftoff to this many minutes (ascent a
 LATER_MIN_NM = 1000     # a later-pass area lies at least this far from the pad and more than 2 x ON_TRACK_NM off
                         # the first pass (a dog-leg's areas lie off the first pass too, nearer in)
 ASCENT_LAG_MIN = 6      # the model flies at orbital speed from liftoff; a real vehicle reaches orbit ~9 min in
-PERIODS = range(88, 108, 2)   # minutes: circular orbits ~200 to ~1,100 km
+PERIODS = range(88, 108, 2)   # minutes: circular orbits ~200 to ~1,100 km, when GCAT gives no orbit
+ORBIT_TOL_MIN = 1       # with GCAT's orbit, its period and this either side (the ascent's timing is modelled)
+EARTH_KM, MU_KM3_S2 = 6378.137, 398600.4418
 EARTH_DEG_MIN = 360 / 1436.07
 BEND_NM = 25            # a point this far off the straight line from the pad to the last area makes a bend
                         # (traj.js flags a dog-leg at 25 NM)
@@ -75,10 +79,30 @@ def _nm(u, v) -> float:
     return math.acos(d) * 3440.065
 
 
+def period_min(orbit_km) -> float | None:
+    """The period (minutes) of an orbit [perigee, apogee] in km, or None when it is not a usable Earth orbit."""
+    try:
+        pe, ap = float(orbit_km[0]), float(orbit_km[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if ap < 100 or pe > ap or pe < -EARTH_KM / 2:
+        return None
+    a = EARTH_KM + (pe + ap) / 2
+    return 2 * math.pi * math.sqrt(a ** 3 / MU_KM3_S2) / 60
+
+
+def _true_anomaly(m: float, e: float) -> float:
+    """The true anomaly at mean anomaly m (radians) of an orbit of eccentricity e (Kepler's equation, Newton)."""
+    E = m if e < 0.8 else math.pi
+    for _ in range(30):
+        E -= (E - e * math.sin(E) - m) / (1 - e * math.cos(E))
+    return 2 * math.atan2(math.sqrt(1 + e) * math.sin(E / 2), math.sqrt(1 - e) * math.cos(E / 2))
+
+
 def track(lat0: float, lon0: float, inc: float, north: bool, period: float, t0: float, t1: float,
-          step: float = 0.5, lag: float = 0.0) -> list[tuple[float, tuple]]:
-    """[(minutes after liftoff, unit vector)] along a circular orbit's ground track through the pad; `lag`: minutes
-    the Earth turns beyond the orbit's own time (the ascent is slower than the orbit)."""
+          step: float = 0.5, lag: float = 0.0, ecc: float = 0.0) -> list[tuple[float, tuple]]:
+    """[(minutes after liftoff, unit vector)] along an orbit's ground track through the pad (perigee there when
+    `ecc` > 0); `lag`: minutes the Earth turns beyond the orbit's own time (the ascent is slower than the orbit)."""
     s = math.sin(math.radians(lat0)) / math.sin(math.radians(inc))
     if abs(s) > 1:
         return []
@@ -87,7 +111,8 @@ def track(lat0: float, lon0: float, inc: float, north: bool, period: float, t0: 
     node = math.radians(lon0) - math.atan2(ci * math.sin(u0), math.cos(u0))
     out, t = [], t0
     while t <= t1:
-        u = u0 + 2 * math.pi * t / period
+        m = 2 * math.pi * t / period
+        u = u0 + (_true_anomaly(m, ecc) if ecc > 1e-4 else m)
         la = math.asin(math.sin(math.radians(inc)) * math.sin(u))
         lo = node + math.atan2(ci * math.sin(u), math.cos(u)) - math.radians(EARTH_DEG_MIN * (t + (lag if t > 0 else 0)))
         out.append((t, _unit(math.degrees(la), math.degrees(lo))))
@@ -98,15 +123,24 @@ def track(lat0: float, lon0: float, inc: float, north: bool, period: float, t0: 
 class Orbit:
     """The first and later passes of an orbit of inclination `inc` through the pad, both directions."""
 
-    def __init__(self, pad, inc: float, north: bool | None = None):
-        """`north`: the launch heads north (True) or south (False); None tries both."""
+    def __init__(self, pad, inc: float, north: bool | None = None, orbit_km=None):
+        """`north`: the launch heads north (True) or south (False); None tries both. `orbit_km`: GCAT's [perigee,
+        apogee] for the launch, which sets the later passes' period and shape (else PERIODS, circular)."""
         self.ok = inc is not None and 0 < inc < 180 and abs(pad[1]) <= min(inc, 180 - inc)
         if not self.ok:
             return
         ways = (True, False) if north is None else (north,)
         self.first = [p for w in ways for _, p in track(pad[1], pad[0], inc, w, 92, 0, FIRST_MIN)]
-        self.later = [p for w in ways for per in PERIODS
-                      for _, p in track(pad[1], pad[0], inc, w, per, per / 2, 2.2 * per, 1.0, lag=ASCENT_LAG_MIN)]
+        per0 = period_min(orbit_km)
+        if per0:
+            pe, ap = float(orbit_km[0]), float(orbit_km[1])
+            ecc = (ap - pe) / (2 * EARTH_KM + pe + ap)
+            pers = [per0 - ORBIT_TOL_MIN, per0, per0 + ORBIT_TOL_MIN]
+        else:
+            ecc, pers = 0.0, list(PERIODS)
+        self.later = [p for w in ways for per in pers
+                      for _, p in track(pad[1], pad[0], inc, w, per, per / 2, 2.2 * per, 1.0, lag=ASCENT_LAG_MIN,
+                                        ecc=ecc)]
 
     def first_nm(self, lat, lon) -> float | None:
         if not self.ok:
@@ -169,17 +203,18 @@ def centre(pad, a: dict) -> list[float]:
 
 
 def select(pad, near: list[dict], far: list[dict], *, time=None, inc=None, own=False, area_nm=2500,
-           spread=15.0, branch_az=None, others: list | None = None) -> tuple[list[dict], dict]:
+           spread=15.0, branch_az=None, others: list | None = None, orbit_km=None) -> tuple[list[dict], dict]:
     """(the ascent areas, {reason: count} of those set aside). `near`: areas within the distance limits; `far`:
     beyond area_nm. Each area: azimuth, downrange_nm, centroid [lon, lat], and optionally tie, notice, windows,
     schedule. `own`: the inclination is the record's own (a borrowed one tests nothing). `branch_az`: the
     azimuths that inclination allows from the pad. `others`: a list that gains the areas set aside as another
-    event's (window or schedule, bearing); a later pass or a far area is still the launch's own."""
+    event's (window or schedule, bearing); a later pass or a far area is still the launch's own. `orbit_km`: GCAT's
+    [perigee, apogee] for the launch (Orbit)."""
     t = _dt(time)
     timed = [a for a in near + far if time_holds(a, t)]
     nearest = min(timed, key=lambda a: a["downrange_nm"]) if timed else None
     north = None if nearest is None else math.cos(math.radians(nearest["azimuth"])) > 0
-    orbit = Orbit(pad, inc, north) if (own and inc) else None
+    orbit = Orbit(pad, inc, north, orbit_km) if (own and inc) else None
     aside: dict[str, int] = {}
     keep = []
     for a in near + far:

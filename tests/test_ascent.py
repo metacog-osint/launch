@@ -48,6 +48,21 @@ class LaterPass(unittest.TestCase):
         kept, aside = A.select(pad, [a], [], time="2022-12-16T11:46:47Z", inc=77.6, own=True)
         self.assertEqual((kept, aside), ([], {"later": 1}))
 
+    def test_gcat_orbit_sets_the_later_passes(self):
+        self.assertAlmostEqual(A.period_min([200, 200]), 88.4, delta=0.2)
+        self.assertAlmostEqual(A.period_min([197, 233]), 88.6, delta=0.2)  # Soyuz MS-27's orbit reached (GCAT)
+        self.assertIsNone(A.period_min([None, 233]))
+        self.assertIsNone(A.period_min([-50, 60]))
+        circ = A.track(34.6, -120.6, 77.6, False, 95.0, 0, 100, 5.0)
+        same = A.track(34.6, -120.6, 77.6, False, 95.0, 0, 100, 5.0, ecc=0.0)
+        self.assertEqual(circ, same)
+        # SWOT's area, 1 h 48 min after liftoff, is no later pass of an orbit that takes ~6 h to come round.
+        pad = [-120.611, 34.632]
+        ring = [[-144.7333, 10.2667], [-146.8167, 9.95], [-145.2667, -0.4167], [-143.2167, -0.1167], [-144.7333, 10.2667]]
+        a = ring_area(pad, ring, windows=[["2022-12-16T13:34:00Z", "2022-12-16T13:56:00Z"]], tie=A.TIE_WINDOW)
+        kept, aside = A.select(pad, [a], [], time="2022-12-16T11:46:47Z", inc=77.6, own=True, orbit_km=[200, 20000])
+        self.assertNotIn("later", aside)
+
     def test_a_dog_leg_area_near_the_pad_is_never_a_later_pass(self):
         jiuquan = [100.29, 40.96]
         kept, aside = A.select(jiuquan, [area(jiuquan, 140.0, 900)], [], inc=41.47, own=True)
