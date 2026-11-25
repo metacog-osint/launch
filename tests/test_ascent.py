@@ -112,6 +112,17 @@ class Paths(unittest.TestCase):
         dogleg = [A.dest(sohae, 191.9, 241), A.dest(sohae, 191.4, 365), A.dest(sohae, 170.1, 1609)]
         self.assertEqual(A.route(sohae, dogleg)[1], 0)  # a 26 deg turn is a dog-leg
 
+    def test_areas_both_sides_of_the_line_are_one_line(self):
+        baikonur = [63.305, 45.965]
+        zz = [area(baikonur, 61.0, 300), area(baikonur, 56.5, 600), area(baikonur, 63.0, 900), area(baikonur, 60.0, 1200)]
+        self.assertTrue(A.zigzag(baikonur, A.points(baikonur, zz)))
+        p = catalog.infer_path(baikonur, "Baikonur", [], areas=zz, inc=51.6)
+        self.assertEqual(len(p.get("via") or []), 1 if "via" in p else 0)
+        self.assertIn("drop zones side by side", p["basis"])
+        sohae = [124.705, 39.66]
+        dogleg = [A.dest(sohae, 191.9, 241), A.dest(sohae, 191.4, 365), A.dest(sohae, 170.1, 1609)]
+        self.assertFalse(A.zigzag(sohae, dogleg))  # one side only: a dog-leg
+
     def test_areas_at_one_distance_are_one_point(self):
         pad = [111.608, 38.849]
         pts = A.points(pad, [area(pad, 170.0, 600), area(pad, 172.0, 620), area(pad, 178.0, 1200)])
