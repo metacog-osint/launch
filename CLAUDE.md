@@ -5,8 +5,7 @@ with them, a launch history since 2012, and each pad's closure patterns.
 `tic-feed/2`, program id `launch`, prefix `LA`, method `launch-1.0`. Observations only. Site:
 https://launch.theintelligence.company (Cloudflare Pages project `launch`).
 
-Public file, lasting facts only. Notes, decisions, state and open items: the git-ignored
-`CLAUDE.local.md`. Detail is in each module's docstrings.
+Public file, lasting facts only. Notes, state, open items: git-ignored `CLAUDE.local.md`. Detail: docstrings.
 
 ## Commands
 ```bash
@@ -16,8 +15,9 @@ python tools/launch.py collect         # tfr, orbit, cordon, nms lanes -> data/s
 python tools/launch.py nfc fetch|build|links  # NotamForChina (pinned) -> history/nfc.json, history/nsf_links.json
 python tools/launch.py joey fetch|build       # Joey0609/notams (pinned) -> history/joey.json
 python tools/launch.py wayback fetch|build    # Internet Archive FAA TFRs and NGA warnings -> history/wayback.json
-python tools/launch.py build           # site/ (incl. data/launches.json); privacy check on site/
+python tools/launch.py build           # site/ (with data/launches.json); privacy check on site/
 python tools/launch.py timing          # opening-to-launch by site -> history/timing.json
+python tools/launch.py incbias         # inclination calibration -> history/inc_bias.json
 python tools/launch.py check           # registers, feed lint, public gate, privacy check
 python -m unittest discover -s tests   # offline tests
 python tools/serve.py                  # http://127.0.0.1:8771 with _headers (CSP)
@@ -27,8 +27,8 @@ check, then deploys `site/`. State is in the Actions cache (not durable); each r
 the cache, the published copies and this run, so a lost cache loses nothing.
 
 ## Layout
-- `launch/`: one module a job, most named below; `notam.py` parser, `catalog.py` the History list
-  and its joins, `programs.py` vehicles, sites, programmes, kinds, mission types; `ngawarn.py` archive only.
+- `launch/`: one module a job; `notam.py` parser, `catalog.py` the History list and joins, `programs.py`
+  vehicles, sites, programmes, kinds, mission types; `ngawarn.py` archive only.
 - `site_src/`: tabs `#live`, `#history`, `#patterns`, `#paste`, `#sources`; `traj.js`, `export.js`, `saved.js`
   tested in Node. `tic-nav.*`, `tic-time.*`, `tic-related.*` (hub) and `doctrine/kit/`
   are copies: fix them at their source.
@@ -127,6 +127,7 @@ reported, not failed.
   nearby live areas an `expect`. History, not a forecast.
 
 ## Matching (three levels, all shown; none says an area is for a launch)
+`inclination_est`: the bearing's reading less its error on past launches near that bearing (`incbias.py`).
 time (NET in a window of 6 h or less, or 1 h before) / time and place (`live.place_test`, `live.on_track`: near the pad,
 charted bands, a flown orbit's azimuth where those are thin, or a far area on its ground track) / grouped (GCAT
 launch from that site, within 30 NM, in the window). The feed carries TFRs and the last two only.
