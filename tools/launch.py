@@ -22,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
-from launch import (catalog, compare, feed, fetch, gcat, gnss, history, joey, live, ll2ledger, news, nfc, nms, nsf,  # noqa: E402
-                    overfly, patterns, privacy, public, schedule, timing, unlisted, wayback)
+from launch import (catalog, compare, feed, fetch, gcat, gnss, history, incbias, joey, live, ll2ledger, news, nfc, nms,  # noqa: E402
+                    nsf, overfly, patterns, privacy, public, schedule, timing, unlisted, wayback)
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
@@ -466,7 +466,9 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     led_rows = json.loads(led_path.read_text(encoding="utf-8")).get("launches") or [] if led_path.exists() else []
     flown = [{"lat": x["site"]["lat"], "lon": x["site"]["lon"], "inc": x["inc"]} for x in led_rows
              if x.get("kind") == "orbital" and x.get("inc") is not None and (x.get("site") or {}).get("lat") is not None]
-    snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [], flown)
+    bias_path = root / "history" / "inc_bias.json"
+    bias = json.loads(bias_path.read_text(encoding="utf-8"))["samples"] if bias_path.exists() else None
+    snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [], flown, bias)
     data_dir.mkdir(parents=True, exist_ok=True)
     # The Ascent move (19 Nov 2026): Launch's own schedule, LL2 ledger and the side-by-side check with Orbit's.
     ll2_led = None
@@ -692,6 +694,8 @@ def main(argv=None) -> int:
     sub.add_parser("check")
     sub.add_parser("timing", help="closure opening to launch, by site, from the built site/data/launches.json "
                                   "-> history/timing.json")
+    sub.add_parser("incbias", help="implied-inclination calibration samples, from the built site/data/launches.json "
+                                   "-> history/inc_bias.json")
     n = sub.add_parser("nfc", help="NotamForChina: fetch its files at the pinned commit, or build history/nfc.json")
     n.add_argument("step", choices=["fetch", "build", "links"],
                    help="links: its list of forum thread links -> history/nsf_links.json")
@@ -715,6 +719,13 @@ def main(argv=None) -> int:
         doc = {"rule": " ".join(timing.__doc__.split()), "sites": timing.by_site(recs)}
         print("Timing:", {k: (v["launches"], v["median_min"]) for k, v in doc["sites"].items()})
         (ROOT / "history" / "timing.json").write_text(dump(doc), encoding="utf-8", newline="\n")
+        return 0
+    if a.cmd == "incbias":
+        recs = json.loads((ROOT / "site" / "data" / "launches.json").read_text(encoding="utf-8"))["records"]
+        doc = {"rule": " ".join(incbias.__doc__.split()), "fields": ["lon", "lat", "bearing", "inc"],
+               "samples": incbias.samples(recs)}
+        print("Inclination calibration:", len(doc["samples"]), "samples")
+        (ROOT / "history" / "inc_bias.json").write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
         return 0
     if a.cmd == "joey":
         src = ROOT / "history" / "joey_source"
