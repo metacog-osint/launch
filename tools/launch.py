@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
 from launch import (catalog, compare, feed, fetch, gcat, gnss, history, joey, live, ll2ledger, news, nfc, nms, nsf,  # noqa: E402
-                    overfly, patterns, privacy, public, schedule, timing, wayback)
+                    overfly, patterns, privacy, public, schedule, timing, unlisted, wayback)
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
@@ -37,6 +37,11 @@ EMPTY = {"tfr": [], "orbit": {}, "cordon": {}, "nms": {}, "schedule": {}, "news"
 # The Ascent move's stores (19 Nov 2026), kept for good on this repository's public release `ledger`: the workflow
 # uploads them after each collect, and collect reads them back from there (a local copy, when there is one, too).
 STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "ascent-compare.json"}
+# The launch ledger and the NMS closure ledger are on the release too (ideas#222, 24 Nov 2026): before that they
+# lived only on the deployed site and in the Actions cache. The release copy is a third source in their union, so
+# a site that answers 404 or an emptied cache restores from it, not from empty. data/ledger.json is uploaded as
+# launch-ledger.json beside ll2-ledger.json; dated copies go to release `ledger-YYYY-qN` (kept for good).
+RELEASE_COPY = {"ledger": "launch-ledger.json", "closures": "nms-closures.json"}
 
 
 def dump(obj, compact: bool = False) -> str:
@@ -139,6 +144,7 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
         published = json.loads(body)
     except Exception as exc:  # the published copy is a safety net; the cache and the baseline still hold
         status = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:200], "failed_at": snap["generated_at"]}
+    released, _ = release_copy(RELEASE_COPY["ledger"], data_dir, getter)   # the durable copy (ideas#222)
     orb = snap.get("orbit") or {}
     now = snap["generated_at"]
     gcat_now = catalog.from_orbit(orb.get("launches") or [], now)
@@ -149,13 +155,14 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
              + catalog.flown_from_ll2(since_gcat, now),
              "closures": catalog.closures_from_matches(snap.get("matches") or [], areas, now),
              "sites": _sites_from_orbit(orb.get("launches") or [])}
-    before = len({r["id"] for lg in (base, prev, published) if lg for r in lg.get("launches") or []})
-    led = catalog.merge(base, published, prev, fresh)
+    before = len({r["id"] for lg in (base, prev, published, released) if lg for r in lg.get("launches") or []})
+    led = catalog.merge(base, published, released, prev, fresh)
     led["generated_at"] = now
     (data_dir / "ledger.json").write_text(dump(led, compact=True), encoding="utf-8", newline="\n")
     status.update({"records": len(led["launches"]), "added": len(led["launches"]) - before,
                    "base": len((base or {}).get("launches") or []), "cache": prev is not None,
-                   "published": published is not None, "gcat_last": gcat_last or None,
+                   "published": published is not None, "release": released is not None,
+                   "gcat_last": gcat_last or None,
                    "ll2_since_gcat": len(since_gcat)})
     return status
 
@@ -181,6 +188,17 @@ def load_store(name: str, data_dir: Path, getter=None, must: bool = True) -> tup
             raise RuntimeError(f"{name}: no local copy and the release copy is unreadable "
                                f"({type(exc).__name__}: {exc}); not writing a smaller store") from exc
         return local, None
+
+
+def release_copy(name: str, data_dir: Path, getter=None) -> tuple[dict | None, Exception | None]:
+    """(the release copy of `name`, or None; the error when it could not be read). A 404 is no copy yet."""
+    try:
+        body, _ = fetch.fetch("launch-release", ll2ledger.RELEASE + name, data_dir / "raw", "json", getter=getter,
+                              gz=True)
+        doc = gnss.published_json(body)
+        return doc, None
+    except Exception as exc:  # noqa: BLE001
+        return None, exc
 
 
 def _write(p: Path, doc) -> None:
@@ -284,27 +302,32 @@ def update_nms_ledger(snap: dict, data_dir: Path, getter=None) -> dict:
         prev = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
     except ValueError:
         prev = None
-    published, status = None, {"status": "ok"}
+    published, status, pub_exc = None, {"status": "ok"}, None
     try:
         body, _ = fetch.fetch("launch-nms-closures", nms.LEDGER_URL, data_dir / "raw", "json", getter=getter)
         published = gnss.published_json(body)   # Pages' 200 HTML fallback for an undeployed path = not published
     except Exception as exc:  # noqa: BLE001
-        if prev is None and getattr(exc, "code", None) != 404:
-            raise RuntimeError(f"NMS closure ledger: no cached copy and the published one is unreadable "
-                               f"({type(exc).__name__}: {exc}); not publishing a smaller ledger") from exc
-        status = {"status": "ok" if getattr(exc, "code", None) == 404 else "failed",
-                  "error": f"{type(exc).__name__}: {exc}"[:200]}
+        pub_exc = exc
+    released, rel_exc = release_copy(RELEASE_COPY["closures"], data_dir, getter)   # the durable copy (ideas#222)
+    unreadable = [e for e in (pub_exc, rel_exc) if e is not None and getattr(e, "code", None) != 404]
+    if prev is None and published is None and released is None and unreadable:
+        e = unreadable[0]
+        raise RuntimeError(f"NMS closure ledger: no cached copy, and neither the published nor the release copy "
+                           f"is readable ({type(e).__name__}: {e}); not publishing a smaller ledger") from e
+    if pub_exc is not None:
+        status = {"status": "ok" if getattr(pub_exc, "code", None) == 404 or released is not None else "failed",
+                  "error": f"{type(pub_exc).__name__}: {pub_exc}"[:200]}
     # This run's notices, or the copy a failed lane carries from its last good read, stamped with the time they
     # were read (the lane's fetched_at), so the closures Launch read itself before Cordon's first bulk stay too.
     lane = (snap.get("lanes") or {}).get("nms") or {}
     fresh = (snap.get("nms") or {}).get("notices") or []
     seen_at = lane.get("fetched_at") or snap["generated_at"]
-    before = len({nms.ledger_key(e) for d in (prev, published) if d for e in d.get("notices") or []})
-    led = nms.ledger([published, prev], fresh, seen_at)
+    before = len({nms.ledger_key(e) for d in (prev, published, released) if d for e in d.get("notices") or []})
+    led = nms.ledger([published, released, prev], fresh, seen_at)
     led["generated_at"] = snap["generated_at"]
     path.write_text(dump(led, compact=True), encoding="utf-8", newline="\n")
     status.update({"records": led["n"], "added": led["n"] - before, "cache": prev is not None,
-                   "published": published is not None})
+                   "published": published is not None, "release": released is not None})
     return status
 
 
@@ -333,7 +356,12 @@ def _lane_orbit(raw_dir: Path, prev: dict, getter):
 
 def _lane_cordon(raw_dir: Path, prev: dict, getter):
     body, rec = fetch.fetch("cordon-feed", live.CORDON_FEED, raw_dir, "json", getter=getter)
-    return {"cordon": live.cordon_read(body)}, [rec]
+    doc = live.cordon_read(body)
+    if doc.get("nga_state") in live.NGA_UNREAD:
+        # Cordon withholds its NGA set when its reader is stale or has never read: that is no reading, not zero
+        # warnings, so the lane fails and keeps its last good copy (ideas#222).
+        raise RuntimeError(f"Cordon's NGA warnings are withheld (its reader's state: {doc['nga_state']})")
+    return {"cordon": doc}, [rec]
 
 
 def _lane_nms(raw_dir: Path, prev: dict, getter):
@@ -432,8 +460,13 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     tim = json.loads(tim_path.read_text(encoding="utf-8"))["sites"] if tim_path.exists() else {}
     areas = (list(nav if nav is not None else orb.get("areas") or []) + live.tfr_areas(snap.get("tfr") or [], {})
              + nms.areas(snap.get("nms") or {}, {t["id"] for t in snap.get("tfr") or []}, tim))
-    snap["areas"] = [{k: v for k, v in a.items() if k != "detail"} for a in areas]
-    snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [])
+    # An area's text is read for live.match (named_in) and left out of the snapshot: each notice links its source.
+    snap["areas"] = [{k: v for k, v in a.items() if k not in ("detail", "text")} for a in areas]
+    led_path = root / "history" / "ledger.json"
+    led_rows = json.loads(led_path.read_text(encoding="utf-8")).get("launches") or [] if led_path.exists() else []
+    flown = [{"lat": x["site"]["lat"], "lon": x["site"]["lon"], "inc": x["inc"]} for x in led_rows
+             if x.get("kind") == "orbital" and x.get("inc") is not None and (x.get("site") or {}).get("lat") is not None]
+    snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [], flown)
     data_dir.mkdir(parents=True, exist_ok=True)
     # The Ascent move (19 Nov 2026): Launch's own schedule, LL2 ledger and the side-by-side check with Orbit's.
     ll2_led = None
@@ -444,6 +477,12 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
             snap["lanes"]["compare"] = update_compare(snap, store, ll2_led, orbit_doc, data_dir, getter)
         except Exception as exc:  # noqa: BLE001  the check never fails the run
             snap["lanes"]["compare"] = {"status": "failed", "error": _err(exc)}
+    # Closure with no listing (Ascent step 1b): only against a schedule read in this run or carried from a good one.
+    sched_lane = snap["lanes"].get("schedule") or {}
+    snap["unlisted"] = unlisted.closures(areas, (snap.get("schedule") or {}).get("records") or [], tim,
+                                         datetime.now(timezone.utc),
+                                         schedule_ok=bool((snap.get("schedule") or {}).get("read_at"))
+                                         and sched_lane.get("status") != "failed", matches=snap["matches"])
     snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter, ll2_led)
     if not only or "nms" in only:
         snap["lanes"]["nms_ledger"] = update_nms_ledger(snap, data_dir, getter)
