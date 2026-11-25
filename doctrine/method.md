@@ -35,6 +35,10 @@ history, and says which scheduled launches coincide with them. Observations only
    450 NM of a site with launch-timing history, with no exactly dated listed launch within 100 NM of that site in any
    of the notice's windows, and no time-and-place match to a listed launch elsewhere. A listing dated only to a day or
    month is named beside it. It says the schedule shows nothing for a closure, not that a launch is coming.
+   Each such row is also a record in the upcoming store (25 Nov 2026, Ascent step 1b): source `closure`, id
+   `upcoming:closure:<notice key>` (kept while any of its notices stays in a row), NET the window's opening with
+   precision "closure window". When a source lists an exactly dated launch within 100 NM of the site inside the
+   window, the two records are joined and the one seen first keeps its id. A closure record is never a listing.
    **Live paths** (`catalog.live_paths()`, 21 Nov 2026): a scheduled launch's estimated path runs through the matched
    areas within 2,500 NM of its pad, by the same rule as History's paths. A time-only match counts only within 15
    degrees of the launch's expected bearing, and a NET known only to the day ties nothing. A launch with no area on

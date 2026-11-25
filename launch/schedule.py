@@ -12,7 +12,9 @@ The record (`store["records"]`, one per expected launch):
             keeps its id and the other's id is kept in its `aliases` (and in `store["aliases"]`, so an old address
             still finds it).
   sources   the sources that hold it, first first; `refs` their own ids ({"ll2": uuid}); `evidence` the kinds
-            named on the page: "listed" (a schedule lists it). None is a forecast.
+            named on the page: "listed" (a schedule lists it), "closure with no listing" (launch/unlisted.py,
+            source `closure`: net is the closure window's opening, net_precision "closure window"). None is a
+            forecast.
   fields    name, net, window, status, provider, vehicle, mission, orbit, pad, place: from the first source in
             PRECEDENCE that holds the record.
   by_source per source: first_seen, last_seen, listed (still in that source's latest read), unlisted_at, the
@@ -298,6 +300,10 @@ def _public(r: dict) -> dict:
     out["net_changes"] = sum(1 for c in r.get("changes") or [] if "net" in c.get("fields", {}))
     if r.get("aliases"):
         out["aliases"] = r["aliases"]
+    cl = (r.get("by_source") or {}).get("closure")
+    if cl:  # launch/unlisted.py: the closure notices behind the record, and listings dated too roughly to place
+        out["closure"] = {"notices": cl.get("notices") or [], "maybe_listed": cl.get("maybe_listed") or [],
+                          "expect_at": cl.get("expect_at"), "listed": bool(cl.get("listed"))}
     return out
 
 
