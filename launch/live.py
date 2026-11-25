@@ -59,6 +59,15 @@ MIN_BAND_EVENTS = 10   # a pad with fewer charted events has bands too thin to r
 AZ_TOL = 5             # degrees either side of a launch azimuth for an inclination flown from the site
 MIN_FLOWN = 5          # launches GCAT shows at an inclination (to 0.5 degree) before it counts as the site's
 SITE_NM = 30           # a GCAT launch this near the pad counts as flown from its site
+# Ground track (track_fit): a far area that fails the place test fits when it lies under the launch's own ground track
+# at the time the track passes, on the orbit its nearer matched areas imply (an upper stage's disposal area, say).
+EARTH_RATE = 7.2921159e-5   # rad/s
+ORBIT_MIN = 90.0            # a low orbit's period; a few per cent either way moves the track tens of NM, not hundreds
+TRACK_NM = 150              # from the track to the area's edge
+TRACK_MIN = (10, 110)       # minutes after NET the track is followed: the first revolution, past the ascent
+TRACK_SLACK = (15, 25)      # minutes before and after the track's pass that the area's window may still open or close
+TRACK_STEP_S = 15
+TRACK_AZ_TOL = 10           # a flown orbit whose launch azimuth is this near the bearing of the launch's farthest area
 
 
 def _dt(s: str) -> datetime:
@@ -381,6 +390,61 @@ def _az_off(a: float, b: float) -> float:
     return abs((a - b + 180) % 360 - 180)
 
 
+def ground_track(lat: float, lon: float, inc: float, north: bool, t0_min: float, t1_min: float,
+                 step_s: int = TRACK_STEP_S, period_min: float = ORBIT_MIN) -> list[tuple[float, float, float]]:
+    """(minutes, lat, lon) of a circular orbit of `inc` that starts at the pad at NET, heading north or south, over a
+    rotating earth. Spherical, no ascent: the track runs ahead of the vehicle by a few minutes, which TRACK_SLACK covers."""
+    i, phi = math.radians(inc), math.radians(lat)
+    si = math.sin(i)
+    if si < 1e-6:
+        return []
+    u0 = math.asin(max(-1.0, min(1.0, math.sin(phi) / si)))
+    if not north:
+        u0 = math.pi - u0
+    rel0 = math.atan2(math.cos(i) * math.sin(u0), math.cos(u0))
+    n = 2 * math.pi / (period_min * 60)
+    out, t = [], t0_min * 60
+    while t <= t1_min * 60:
+        u = u0 + n * t
+        la = math.degrees(math.asin(si * math.sin(u)))
+        lo = lon + math.degrees(math.atan2(math.cos(i) * math.sin(u), math.cos(u)) - rel0 - EARTH_RATE * t)
+        out.append((t / 60, la, (lo + 180) % 360 - 180))
+        t += step_s
+    return out
+
+
+def track_orbits(lat: float, bearing: float, incs: list[float]) -> list[tuple[float, bool]]:
+    """Orbits (inclination, heading north) that fit a launch whose farthest matched area lies on `bearing`: the
+    flown inclinations whose launch azimuth is within TRACK_AZ_TOL of it, else the inclination the bearing implies
+    and 1.5 and 3 degrees either side (the bearing to an area runs a few degrees off the launch azimuth)."""
+    north = bearing >= 270 or bearing < 90
+    fits = [(i, north) for i in incs
+            if any(_az_off(bearing, x) <= TRACK_AZ_TOL and ((x >= 270 or x < 90) == north) for x in launch_azimuths(lat, i))]
+    if fits:
+        return fits
+    i0 = history.inclination(lat, bearing)
+    return [(i0 + d, north) for d in (-3, -1.5, 0, 1.5, 3) if 0 < i0 + d < 180]
+
+
+def track_fit(lat: float, lon: float, net: datetime, orbits: list[tuple[float, bool]], ring: list,
+              windows: list[tuple[datetime, datetime]]) -> dict | None:
+    """The first pass of any of `orbits`' ground tracks within TRACK_NM of the area's edge, at a time its window
+    allows (TRACK_SLACK either side), or None."""
+    la, lo = notam.centroid(ring)
+    radius = min(300.0, max((notam.haversine_nm(la, lo, p[1], p[0]) for p in ring), default=0.0))
+    best = None
+    for inc, north in orbits:
+        for t, tla, tlo in ground_track(lat, lon, inc, north, *TRACK_MIN):
+            d = notam.haversine_nm(la, lo, tla, tlo)
+            if d > TRACK_NM + radius:
+                continue
+            at = net + timedelta(minutes=t)
+            if any(s - timedelta(minutes=TRACK_SLACK[1]) <= at <= e + timedelta(minutes=TRACK_SLACK[0]) for s, e in windows):
+                if best is None or d < best["nm"]:
+                    best = {"inc": round(inc, 1), "north": north, "t_min": round(t), "nm": round(max(0.0, d - radius))}
+    return best
+
+
 def place_test(corridor: dict | None, incs: list[float], lat: float, az: float, dist: float) -> tuple[bool, str]:
     """Whether an area fits a launch from this pad in place, and why. A pad's charted bands (patterns.json) rule an
     area out only when they rest on MIN_BAND_EVENTS events or more; below that, an area on the azimuth (+-AZ_TOL) of
@@ -423,6 +487,7 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
         net = _dt(u["net"])
         corridor = corridor_of(corridors, u["lat"], u["lon"])
         incs = flown_inclinations(flown, u["lat"], u["lon"])
+        mine: list[dict] = []
         for i, a in enumerate(areas):
             if a.get("off_live"):   # a NOTAM whose text says it is not a launch (nms.off_live): shown on request only
                 continue
@@ -450,12 +515,33 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
                                 site["lat"], site["lon"], u["lat"], u["lon"]) <= 30:
                             grouped = {"launch_tag": g["launch_tag"], "time": g["time"], "vehicle": g["vehicle"]}
                             level = "grouped"
-            rows.append({"launch": u["id"], "launch_name": u["name"], "net": u["net"], "area": a.get("key") or a.get("id"),
+            mine.append({"launch": u["id"], "launch_name": u["name"], "net": u["net"], "area": a.get("key") or a.get("id"),
                          "area_i": i, "area_source": a.get("source"), "window": [_iso(hit[0]), _iso(hit[1])], "level": level,
                          "azimuth": round(az, 1), "distance_nm": round(dist), "place_basis": place_basis,
                          "inclination_est": history.inclination(u["lat"], az), "grouped_with": grouped,
-                         "named": name[0] if name else None, "named_by": name[1] if name else None})
+                         "named": name[0] if name else None, "named_by": name[1] if name else None, "track": None})
+        rows += on_track(u, net, mine, areas, incs)
     return rows
+
+
+def on_track(u: dict, net: datetime, mine: list[dict], areas: list[dict], incs: list[float]) -> list[dict]:
+    """A launch's time-only rows whose area lies under its ground track (track_fit) become time and place, with
+    `track` {inc, north, t_min, nm}. The orbit comes from the launch's own farthest place-matched area beyond
+    NEAR_PAD_NM; a launch without one has no direction, so its time-only rows stay as they are."""
+    placed = [r for r in mine if r["level"] != "time" and r["distance_nm"] > NEAR_PAD_NM]
+    if not placed:
+        return mine
+    far = max(placed, key=lambda r: r["distance_nm"])
+    orbits = track_orbits(u["lat"], far["azimuth"], incs)
+    for r in mine:
+        if r["level"] != "time":
+            continue
+        fit = track_fit(u["lat"], u["lon"], net, orbits, areas[r["area_i"]]["ring"], _windows_of(areas[r["area_i"]]))
+        if fit:
+            r["level"], r["track"] = "time and place", fit
+            r["place_basis"] = (f"under the ground track of a {fit['inc']:g}-degree orbit (from this launch's area "
+                                f"{far['area']}) about {fit['t_min']} min after NET, {fit['nm']} NM off the area")
+    return mine
 
 
 def tfr_areas(tfrs: list[dict], details: dict) -> list[dict]:

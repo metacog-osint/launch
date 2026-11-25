@@ -17,7 +17,10 @@ history, and says which scheduled launches coincide with them. Observations only
    a window of 6 h or less, or up to 1 h before it opens; Ariane 6 VA271's own areas ran 4.9 to 5.7 h); time and place (also within 30 NM of the pad, or inside an azimuth band the pad's
    charted history has; where that history rests on under 10 events, as at most US pads, also on the launch azimuth,
    +-5 degrees, of an inclination GCAT shows flown five or more times from the site, within 1,500 NM, added 24 Nov
-   2026 after NG-25's and USSF-380's own areas read time only; within 1,500 NM where the pad has neither); grouped (GCAT has since dated a launch from that site inside the window).
+   2026 after NG-25's and USSF-380's own areas read time only; within 1,500 NM where the pad has neither; or, for a far area, under the launch's own ground
+   track, on the orbit its farthest place-matched area implies, within 150 NM of the area at a time its window allows,
+   10 to 110 minutes after NET, over a rotating earth: an upper stage's disposal area, added 24 Nov 2026 after
+   NG-25's South Pacific areas read time only; a launch with no place match has no direction and gets none); grouped (GCAT has since dated a launch from that site inside the window).
    None says an area is for a launch.
    **Named** (22 Nov 2026), beside the level: the notice's text has the launch's mission designator (a word of letters
    and digits in LL2's mission name, hyphens ignored, such as NROL-136), which also lets a window of up to 7 days

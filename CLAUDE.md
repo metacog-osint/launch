@@ -127,8 +127,8 @@ reported, not failed.
   nearby live areas an `expect`. History, not a forecast.
 
 ## Matching (three levels, all shown; none says an area is for a launch)
-time (NET in a window of 6 h or less, or 1 h before) / time and place (`live.place_test`: near the pad, the pad's
-charted bands, or where those are thin a flown inclination's azimuth from `history/ledger.json`) / grouped (GCAT
+time (NET in a window of 6 h or less, or 1 h before) / time and place (`live.place_test`, `live.on_track`: near the pad,
+charted bands, a flown orbit's azimuth where those are thin, or a far area on its ground track) / grouped (GCAT
 launch from that site, within 30 NM, in the window). The feed carries TFRs and the last two only.
 `named` beside the level (`live.named_in`): the text has the mission designator (then a window up to 7 days counts;
 kept with the launch like time and place) or the vehicle's name with the place.
