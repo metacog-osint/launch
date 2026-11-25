@@ -19,7 +19,7 @@ name: update
 # suite's one NMS reader (18 Nov 2026), and the nms lane reads Cordon's published NOTAM subsets (launch/nms.py).
 # The GPS/GNSS NOTAM files (launch/gnss.py, for Noisefloor) keep their state and day files in data/gnss/, cached
 # with the rest. The ledger of every NMS closure notice ever kept (data/nms-closures.json) is not cached: each run
-# unions it with the published copy. Both are kept for good. Never change the path list below: actions/cache keys
+# unions it with the published copy and the release copy (ideas#222). Both are kept for good. Never change the path list below: actions/cache keys
 # an entry's version on it, so a changed list finds no earlier state (19 Nov 2026, run 44461432466).
 #
 # Ascent move (19 Nov 2026): the schedule lane makes one Launch Library 2 upcoming request a run, the LL2 ledger one
@@ -77,6 +77,36 @@ jobs:
             if [ -f "data/$f" ]; then files="$files data/$f"; fi
           done
           if [ -n "$files" ]; then gh release upload ledger $files --clobber; fi
+      # The launch ledger and the NMS closure ledger lived only on the site and in the Actions cache until 24 Nov 2026
+      # (ideas#222). Now the newest copy goes to release `ledger` (collect reads it back, so a lost cache or a site
+      # that answers 404 restores from it), and one dated copy a day to release `ledger-YYYY-qN`, kept for good (about
+      # 184 assets a quarter against the 1,000 limit; a same-day run replaces that day's copy). Nothing is deleted.
+      - name: Keep the launch ledger and the NMS closure ledger for good (releases `ledger` and `ledger-YYYY-qN`)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out=data/release-copy
+          mkdir -p "$out"
+          day=$(date -u +%Y-%m-%d)
+          now=""
+          dated=""
+          if [ -f data/ledger.json ]; then
+            cp data/ledger.json "$out/launch-ledger.json"
+            cp data/ledger.json "$out/launch-ledger-$day.json"
+            now="$now $out/launch-ledger.json"; dated="$dated $out/launch-ledger-$day.json"
+          fi
+          if [ -f data/nms-closures.json ]; then
+            cp data/nms-closures.json "$out/nms-closures.json"
+            cp data/nms-closures.json "$out/nms-closures-$day.json"
+            now="$now $out/nms-closures.json"; dated="$dated $out/nms-closures-$day.json"
+          fi
+          if [ -n "$now" ]; then gh release upload ledger $now --clobber; fi
+          if [ -n "$dated" ]; then
+            q="ledger-$(date -u +%Y)-q$(( (10#$(date -u +%m) - 1) / 3 + 1 ))"
+            gh release view "$q" >/dev/null 2>&1 || gh release create "$q" --prerelease --latest=false --title "$q" \
+              --notes "Launch's dated copies for one quarter, kept for good (nothing is deleted): launch-ledger-YYYY-MM-DD.json (every launch Launch holds, with its closures) and nms-closures-YYYY-MM-DD.json (every NOTAM closure notice Launch kept, read through Cordon from the FAA NOTAM service; not FAA data, and not authoritative for notices issued outside the United States). Public with the repository."
+            gh release upload "$q" $dated --clobber
+          fi
       - name: Build site/
         run: python tools/launch.py build
       - name: Feed check

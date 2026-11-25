@@ -81,6 +81,25 @@ class Keep(unittest.TestCase):
                   "A MISSILE RANGE CLOSED FOR A ROCKET LAUNCH"):
             self.assertIsNone(nms.off_live(t), t)
 
+    def test_off_live_24_nov(self):
+        """24 Nov 2026's live list: an EOD demolition, a navaid flight inspection, a 5,000 ft civilian rocket test and
+        a prohibited area matched launches. Launch and debris notices stay live."""
+        for t, why in (
+                ("H&HS EOD DEMOLITION OF EXPLOSIVES. LOCATION: TARGET ISLAND, MAX FRAGMENTATION DISTANCE VERTICAL: "
+                 "1,217 FT", "explosives demolition"),
+                ("ILS/NAVAID FLT INSPECTION OPS WILL TAKE PLACE\nFLT TEST ACFT HAVE PRIORITY", "navaid flight inspection"),
+                ("CIVILIAN ROCKET TEST WITHIN 1NM RADIUS OF 35-52-59N/126-47-40E , SFC TO 5,000 AGL ON 28 NOVEMBER",
+                 "ceiling under 10,000 ft"),
+                ("TEMPO PROHIBITED AREA ACT AS FLW:\n1. AREA : A CIRCLE RADIUS 2NM CENTERED ON 373508N1265440E",
+                 "prohibited area")):
+            self.assertEqual(nms.off_live(t), why, t)
+        for t in ("TRIGGER NOTAM - AIP AIRAC SUP 58/26. TEMPO DANGER AREAS ESTABLISHED IN CONNECTION WITH ROCKET "
+                  "LAUNCH FROM ANDOYA SPACE.",
+                  "SPECIAL OPS (AEROSPACE FLT ACT) WILL BE CONDUCTED BY CHINA. EST FALL AREA OF UNBURNED DEBRIS WI:",
+                  "A TEMPORARY DANGER AREA ESTABLISHED BOUNDED BY: 400000N1100000E, SFC TO UNL",
+                  "PROHIBITED AREA ACT DUE TO ROCKET LAUNCH", "SFC TO 60,000 FT AMSL ROCKET LAUNCH"):
+            self.assertIsNone(nms.off_live(t), t)
+
     def test_recurring(self):
         t = icao(fir="ULLL", a="ULLL", q="QRTCA", e="AIRSPACE CLSD WI AREA: 691700N0340000E-690000N0340000E-"
                  "690000N0325000E-691300N0331500E-691700N0340000E.", g="FL230", up="230",
@@ -228,6 +247,54 @@ class Ledger(unittest.TestCase):
             self.lane(down)
         st, led = self.lane(down, cached=nms.ledger([], [{**self.N, "number": "A0002/26"}], "2026-11-01T00:00:00Z"))
         self.assertEqual((st["status"], led["n"]), ("failed", 2))
+
+    def test_release_copy_restores_when_site_404_and_no_cache(self):
+        """ideas#222: a site that answers 404 and an empty cache restore from the release, not from empty."""
+        old = nms.ledger([], [{**self.N, "number": "A0003/26"}], "2026-11-01T00:00:00Z")
+
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                return json.dumps(old).encode()
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        st, led = self.lane(get)
+        self.assertEqual((st["status"], led["n"], st["published"], st["release"]), ("ok", 2, False, True))
+
+    def test_site_down_but_release_readable_goes_on(self):
+        old = nms.ledger([], [{**self.N, "number": "A0004/26"}], "2026-11-01T00:00:00Z")
+
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                return json.dumps(old).encode()
+            raise urllib.error.URLError("down")
+        st, led = self.lane(get)
+        self.assertEqual((st["status"], led["n"], st["release"]), ("ok", 2, True))
+
+    def test_release_down_and_site_404_with_no_cache_stops(self):
+        def get(url, timeout=0):
+            if "releases/download" in url:
+                raise urllib.error.URLError("down")
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        with self.assertRaises(RuntimeError):
+            self.lane(get)
+
+
+class CordonNgaState(unittest.TestCase):
+    """ideas#222: Cordon withholds its NGA set when its reader is stale or never read; Launch's lane is then unread
+    (it fails and keeps its last good copy), not zero warnings."""
+
+    def doc(self, state):
+        return json.dumps({"generated_at": "2026-11-24T00:00:00Z",
+                           "health": {"nga-navwarnings": {"state": state}}, "features": []}).encode()
+
+    def test_withheld_states_fail_the_lane(self):
+        import runpy
+        mod = runpy.run_path(str(Path(__file__).resolve().parents[1] / "tools" / "launch.py"), run_name="nga_test")
+        for state in ("stale", "never"):
+            with self.assertRaises(RuntimeError):
+                mod["_lane_cordon"](None, {}, lambda url, timeout=0, s=state: self.doc(s))
+        for state in ("fresh", "failing", None):
+            got, _ = mod["_lane_cordon"](None, {}, lambda url, timeout=0, s=state: self.doc(s))
+            self.assertEqual((got["cordon"]["nga_state"], got["cordon"]["areas"]), (state, []))
 
 
 class SiteSize(unittest.TestCase):
