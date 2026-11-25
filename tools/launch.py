@@ -220,13 +220,31 @@ def update_schedule(snap: dict, data_dir: Path, now: datetime, getter=None) -> d
         rep = schedule.ingest(store, "ll2", sch["rows"], sch["read_at"], link_key="ll2_url")
         lane["ingest"] = {k: len(v) if isinstance(v, (list, dict)) else v for k, v in rep.items()}
     _write(data_dir / STORE["upcoming"], store)
+    _schedule_view(snap, store, now)
+    return store
+
+
+def _schedule_view(snap: dict, store: dict, now: datetime) -> None:
     records = schedule.active(store, now)
     heads = news.for_records(snap.get("news") or {}, records)
     for r in records:
         r["news"] = heads.get(r["id"], [])
     snap["schedule"] = {"read_at": (store.get("reads") or {}).get("ll2"), "attribution": schedule.ATTRIBUTION,
                         "held": len(store["records"]), "records": records}
-    return store
+
+
+def update_closure_records(snap: dict, store: dict, sites: dict, data_dir: Path, now: datetime) -> None:
+    """Ascent step 1b: this run's closures with no listing as `closure` records in the upcoming store, joined to a
+    listed launch once one is listed in the window (launch/unlisted.py apply()). Never fails the run."""
+    lane = snap["lanes"].setdefault("schedule", {})
+    try:
+        rep = unlisted.apply(store, snap.get("unlisted") or [], sites, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    except Exception as exc:  # noqa: BLE001
+        lane["closure_records"] = {"status": "failed", "error": _err(exc)}
+        return
+    lane["closure_records"] = {k: len(v) if isinstance(v, (list, dict)) else v for k, v in rep.items()}
+    _write(data_dir / STORE["upcoming"], store)
+    _schedule_view(snap, store, now)
 
 
 def update_ll2_ledger(data_dir: Path, getter=None) -> tuple[dict | None, dict | None, dict]:
@@ -471,7 +489,7 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [], flown, bias)
     data_dir.mkdir(parents=True, exist_ok=True)
     # The Ascent move (19 Nov 2026): Launch's own schedule, LL2 ledger and the side-by-side check with Orbit's.
-    ll2_led = None
+    ll2_led, store = None, None
     if not only or "schedule" in only:
         store = update_schedule(snap, data_dir, datetime.now(timezone.utc), getter)
         ll2_led, orbit_doc, snap["lanes"]["ll2_ledger"] = update_ll2_ledger(data_dir, getter)
@@ -481,10 +499,11 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
             snap["lanes"]["compare"] = {"status": "failed", "error": _err(exc)}
     # Closure with no listing (Ascent step 1b): only against a schedule read in this run or carried from a good one.
     sched_lane = snap["lanes"].get("schedule") or {}
+    sched_ok = bool((snap.get("schedule") or {}).get("read_at")) and sched_lane.get("status") != "failed"
     snap["unlisted"] = unlisted.closures(areas, (snap.get("schedule") or {}).get("records") or [], tim,
-                                         datetime.now(timezone.utc),
-                                         schedule_ok=bool((snap.get("schedule") or {}).get("read_at"))
-                                         and sched_lane.get("status") != "failed", matches=snap["matches"])
+                                         datetime.now(timezone.utc), schedule_ok=sched_ok, matches=snap["matches"])
+    if store is not None and sched_ok and tim:
+        update_closure_records(snap, store, tim, data_dir, datetime.now(timezone.utc))
     snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter, ll2_led)
     if not only or "nms" in only:
         snap["lanes"]["nms_ledger"] = update_nms_ledger(snap, data_dir, getter)
