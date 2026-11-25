@@ -41,6 +41,8 @@ PERIODS = range(88, 108, 2)   # minutes: circular orbits ~200 to ~1,100 km
 EARTH_DEG_MIN = 360 / 1436.07
 BEND_NM = 25            # a point this far off the straight line from the pad to the last area makes a bend
                         # (traj.js flags a dog-leg at 25 NM)
+ZIGZAG_NM = 8           # area points this far off both sides of the line from the pad to the last are one line
+                        # (zigzag()); nearer, a point lies within its own drop zone's width of the line
 MAX_TURN_DEG = 40       # a point the path would turn sharper than this at is off the climb's line, not a dog-leg
                         # (areas side by side at about one distance); the largest real turns seen are ~30 deg
 CLUSTER_NM = 60         # areas within this (or CLUSTER_FRAC of the distance) of the same distance are one point
@@ -278,6 +280,24 @@ def _cross_nm(pad, end, p) -> float:
     n = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
     nn = math.sqrt(sum(x * x for x in n)) or 1
     return abs(math.asin(max(-1.0, min(1.0, sum(n[i] * c[i] for i in range(3)) / nn)))) * 3440.065
+
+
+def _side_nm(pad, end, p) -> float:
+    """How far p lies off the great circle from pad to end (NM), left of it negative."""
+    a, b, c = _unit(pad[1], pad[0]), _unit(end[1], end[0]), _unit(p[1], p[0])
+    n = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    nn = math.sqrt(sum(x * x for x in n)) or 1
+    return math.asin(max(-1.0, min(1.0, sum(n[i] * c[i] for i in range(3)) / nn))) * 3440.065
+
+
+def zigzag(pad, pts: list[list[float]]) -> bool:
+    """The points before the last lie on both sides of the straight line from the pad to the last, each side by
+    more than ZIGZAG_NM: no one turn explains them, so they are drop zones side by side about one line, not a
+    dog-leg (Soyuz MS-27 of 8 Apr 2025 from Baikonur: 22 NM one side at 450 NM out, 40 NM the other at 729)."""
+    if len(pts) < 3:
+        return False
+    off = [_side_nm(pad, pts[-1], p) for p in pts[:-1]]
+    return min(off) < -ZIGZAG_NM and max(off) > ZIGZAG_NM
 
 
 def bends(pad, pts: list[list[float]]) -> bool:
