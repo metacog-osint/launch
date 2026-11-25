@@ -74,8 +74,8 @@ const scheduled = (r) => ((snap.orbit || {}).upcoming || []).find((u) => u.id ==
 
 function tiles() {
   const box = $("tiles"); box.textContent = "";
-  const lv = {};
-  (snap.matches || []).forEach((m) => { lv[m.level] = (lv[m.level] || 0) + 1; });
+  const lv = {};   // one per launch and notice, as the list and the feed count them
+  LP.groupMatches(snap.matches || [], snap.areas || []).forEach((m) => { lv[m.level] = (lv[m.level] || 0) + 1; });
   const items = [
     ["Live closure areas (NGA warnings, NOTAMs, TFRs; Orbit counts warnings)", (snap.areas || []).filter((a) => !a.off_live).length],
     ["FAA space-operations TFRs", (snap.tfr || []).length],
@@ -130,10 +130,14 @@ const KEPT = { words: "launch words in the text", "cn-area": "China's surface-to
 // "If a launch from <site>, around <time>": the site's median minutes from closure opening to launch (history/timing.json).
 const expectText = (x) => x ? `if a launch from ${x.site}, around ${fmt(x.at, { date: false })} (median ${x.median_min} min after opening, ${x.launches} launches; middle half ${x.q1_min}-${x.q3_min} min)` : "";
 
+// Far time-only coincidences (LP.groupMatches `far`) fold away until the viewer asks for them.
+let showFar = false;
+const range = (lo, hi, f = (x) => x) => (lo === hi ? f(lo) : `${f(lo)}-${f(hi)}`);
 function liveTables() {
-  const ms = (snap.matches || []).slice().sort((a, b) => (a.net < b.net ? -1 : 1));
+  const all = LP.groupMatches(snap.matches || [], snap.areas || []);
+  const farN = all.filter((m) => m.far).length, ms = all.filter((m) => showFar || !m.far);
   const recOf = new Map(upcomingRecs().map((r) => [r.ll2, r]));
-  const onPath = (m) => ((recOf.get(m.launch) || {}).live || { closures: [] }).closures.some((c) => c.i === m.area_i && c.role === "path");
+  const onPath = (m) => ((recOf.get(m.launch) || {}).live || { closures: [] }).closures.some((c) => m.area_is.includes(c.i) && c.role === "path");
   const lvlBadge = (m) => {
     const s = el("span", "lvl");
     s.append(el("span", "badge" + (m.level === "time" ? "" : " badge-warn"), m.level));
@@ -143,8 +147,10 @@ function liveTables() {
   };
   put($("match-table"), ms.length ? table(
     ["Scheduled launch", "NET", "Area", "Window (UTC shown in your zone)", "Level", { label: "Az / NM", num: true }, "Why"],
-    ms.map((m) => ({ m, cells: [m.launch_name, fmt(m.net), m.area, span(m.window[0], m.window[1]),
-      lvlBadge(m), `${m.azimuth}° / ${m.distance_nm}`, m.level === "grouped" ? "GCAT launch " + m.grouped_with.launch_tag : m.place_basis] })),
+    ms.map((m) => ({ m, cells: [m.launch_name, fmt(m.net), m.area + (m.parts.length ? ` (areas ${m.parts.join(", ")})` : ""),
+      span(m.window[0], m.window[1]), lvlBadge(m), `${range(m.az[0], m.az[1], (x) => x + "°")} / ${range(m.nm[0], m.nm[1])}`,
+      (m.level === "grouped" ? "GCAT launch " + m.grouped_with.launch_tag : m.place_basis)
+        + (m.also.length ? `; the same notice also coincides in time and place with ${m.also.join(", ")}` : "")] })),
     (row) => {
       const rec = recOf.get(row.m.launch);
       if (rec) { // with no path, the card says why each closure is not on one, and the map shows the row's area
@@ -156,6 +162,15 @@ function liveTables() {
       const k = row.m.area_i !== undefined ? `live:${row.m.area}:${row.m.area_i}` : [...byKey.keys()].find((x) => x.startsWith("live:" + row.m.area + ":"));
       if (k) pickLive(k);
     }) : muted("No scheduled launch coincides with a live closure area."));
+  if (farN) {
+    const b = el("button", "linkish small", showFar ? `Fold away the ${farN} far time-only coincidence${farN === 1 ? "" : "s"}`
+      : `Show ${farN} far time-only coincidence${farN === 1 ? "" : "s"}: over 1,500 NM from the pad, naming nothing and on no ground track`);
+    b.type = "button";
+    b.addEventListener("click", () => { showFar = !showFar; liveTables(); });
+    const p = el("p", "small");
+    p.append(b);
+    $("match-table").append(p);
+  }
   const rows = (snap.areas || []).map((a, i) => ({ a, key: "live:" + (a.key || a.id) + ":" + i, cells: [
     srcLabel(a), a.key || a.id, (a.off_live ? `Not a launch (${a.off_live}): ` : "") + (a.label || (a.regions || []).join(", ") || ""),
     ((a.windows || []).slice(0, 2).map((w) => span(w.start, w.end)).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
