@@ -151,7 +151,7 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
     gcat_last = max((r.get("date") or "" for lg in (base, prev, published, {"launches": gcat_now}) if lg
                      for r in lg.get("launches") or [] if r.get("source") == "gcat"), default="")
     since_gcat = ll2ledger.after(ll2_led, gcat_last) if ll2_led and gcat_last else []
-    fresh = {"launches": gcat_now + catalog.flown_from_ll2(orb.get("upcoming") or [], now)
+    fresh = {"launches": gcat_now + catalog.flown_from_ll2(ll2_upcoming(snap), now)
              + catalog.flown_from_ll2(since_gcat, now),
              "closures": catalog.closures_from_matches(snap.get("matches") or [], areas, now),
              "sites": _sites_from_orbit(orb.get("launches") or [])}
@@ -208,6 +208,20 @@ def _write(p: Path, doc) -> None:
 
 def _err(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"[:300]
+
+
+def ll2_upcoming(snap: dict) -> list[dict]:
+    """Launch's own scheduled launches that Launch Library 2 lists, in the shape Orbit's `upcoming` lane had, for
+    live.match, the ledger and the site index (Ascent step 4, ideas#69). `id` is the LL2 uuid, as it was in Orbit's
+    copy, so match ids and ledger ids do not change. A record held only by a closure notice has no LL2 ref and is
+    left out: it came from the areas, so matching it against them would be circular."""
+    out = []
+    for r in (snap.get("schedule") or {}).get("records") or []:
+        ref = (r.get("refs") or {}).get("ll2")
+        if ref:
+            out.append({**{k: r.get(k) for k in schedule.FIELDS}, "id": ref,
+                        "ll2_url": (r.get("links") or {}).get("ll2"), "last_updated": r.get("updated")})
+    return out
 
 
 def update_schedule(snap: dict, data_dir: Path, now: datetime, getter=None) -> dict:
@@ -295,9 +309,13 @@ def update_ll2_ledger(data_dir: Path, getter=None) -> tuple[dict | None, dict | 
 def update_compare(snap: dict, store: dict, led: dict | None, orbit_doc: dict | None, data_dir: Path,
                    getter=None) -> dict:
     """One row of the side-by-side check with Orbit (launch/compare.py), kept with the earlier rows."""
+    orb = snap.get("orbit") or {}
+    if not orb.get("upcoming_read_at"):
+        # Orbit retired its schedule lanes (Ascent step 4); the check passed on 21 Nov 2026 and was accepted on 24 Nov.
+        # The stored runs stay in the release as they are.
+        return {"status": "ended", "note": "Orbit no longer publishes a schedule; the side-by-side check has ended"}
     local, rel = load_store(STORE["compare"], data_dir, getter, must=False)
     doc = compare.union(rel, local)
-    orb = snap.get("orbit") or {}
     mine = [{**(r["by_source"]["ll2"].get("fields") or {}), "id": r["refs"]["ll2"],
              "last_updated": r["by_source"]["ll2"].get("last_updated")}
             for r in store.get("records") or [] if (r.get("refs") or {}).get("ll2")
@@ -471,12 +489,11 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     pat_path = root / "history" / "patterns.json"
     corridors = json.loads(pat_path.read_text(encoding="utf-8"))["corridors"] if pat_path.exists() else []
     orb = snap.get("orbit") or {}
-    # NGA warnings come from Cordon (decided 17 Nov 2026). Orbit's copy is used only until Cordon's lane has
-    # succeeded once, so a first run with Cordon down still has warnings.
-    nav = (snap.get("cordon") or {}).get("areas")
+    # NGA warnings come from Cordon (decided 17 Nov 2026); Orbit's copy retired with the Ascent move (ideas#69).
+    nav = (snap.get("cordon") or {}).get("areas") or []
     tim_path = root / "history" / "timing.json"
     tim = json.loads(tim_path.read_text(encoding="utf-8"))["sites"] if tim_path.exists() else {}
-    areas = (list(nav if nav is not None else orb.get("areas") or []) + live.tfr_areas(snap.get("tfr") or [], {})
+    areas = (list(nav) + live.tfr_areas(snap.get("tfr") or [], {})
              + nms.areas(snap.get("nms") or {}, {t["id"] for t in snap.get("tfr") or []}, tim))
     # An area's text is read for live.match (named_in) and left out of the snapshot: each notice links its source.
     snap["areas"] = [{k: v for k, v in a.items() if k not in ("detail", "text")} for a in areas]
@@ -486,7 +503,6 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
              if x.get("kind") == "orbital" and x.get("inc") is not None and (x.get("site") or {}).get("lat") is not None]
     bias_path = root / "history" / "inc_bias.json"
     bias = json.loads(bias_path.read_text(encoding="utf-8"))["samples"] if bias_path.exists() else None
-    snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [], flown, bias)
     data_dir.mkdir(parents=True, exist_ok=True)
     # The Ascent move (19 Nov 2026): Launch's own schedule, LL2 ledger and the side-by-side check with Orbit's.
     ll2_led, store = None, None
@@ -497,6 +513,8 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
             snap["lanes"]["compare"] = update_compare(snap, store, ll2_led, orbit_doc, data_dir, getter)
         except Exception as exc:  # noqa: BLE001  the check never fails the run
             snap["lanes"]["compare"] = {"status": "failed", "error": _err(exc)}
+    # Scheduled launches against closure areas: Launch's own schedule (Ascent step 4), read after the store is updated.
+    snap["matches"] = live.match(ll2_upcoming(snap), areas, corridors, orb.get("launches") or [], flown, bias)
     # Closure with no listing (Ascent step 1b): only against a schedule read in this run or carried from a good one.
     sched_lane = snap["lanes"].get("schedule") or {}
     sched_ok = bool((snap.get("schedule") or {}).get("read_at")) and sched_lane.get("status") != "failed"
@@ -594,7 +612,7 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     # Closure areas no other source carries, each checked against a published copy (history/published_notices.json).
     pub_path = root / "history" / "published_notices.json"
     published = json.loads(pub_path.read_text(encoding="utf-8"))["notices"] if pub_path.exists() else None
-    index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
+    index = catalog.build_index(hist, ledger, ll2_upcoming(snap), pat["corridors"],
                                 snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries),
                                 nsf_doc=nsf_doc, site_fixes=fixes, published=published,
                                 live={"matches": snap.get("matches") or [], "areas": snap.get("areas") or []})

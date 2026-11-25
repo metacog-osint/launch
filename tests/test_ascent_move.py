@@ -309,6 +309,32 @@ class Wiring(unittest.TestCase):
             store2 = cli.update_schedule(snap2, d, NOW, self.getter({}))
             self.assertEqual(store2["reads"]["ll2"], "2026-11-13T22:00:00Z")
 
+    def test_match_reads_launchs_own_schedule(self):
+        """Ascent step 4: live.match, the ledger and the site index read Launch's LL2-listed records, keyed by the LL2
+        uuid as Orbit's copy was; a record held only by a closure notice is left out."""
+        rows = [{k: v for k, v in r.items() if k != "mission_description"}
+                for r in schedule.ll2_parse((FIX / "ll2_upcoming.json").read_bytes())]
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = {"generated_at": "2026-11-13T22:00:00Z", "lanes": {"schedule": {"status": "ok"}},
+                    "schedule": {"read_at": "2026-11-13T22:00:00Z", "rows": rows}, "news": {}}
+            cli.update_schedule(snap, Path(tmp), NOW, self.getter({}))
+        snap["schedule"]["records"].append({"id": "closure:x", "sources": ["closure"], "refs": {"closure": "x"},
+                                            "net": "2026-11-14T00:00:00Z", "lat": 28.5, "lon": -80.6})
+        up = cli.ll2_upcoming(snap)
+        listed = {r["id"]: r for r in rows if schedule.within([r], NOW)}
+        self.assertEqual({u["id"] for u in up}, set(listed))
+        for u in up:
+            for k in ("name", "net", "lat", "lon", "status", "vehicle", "mission", "pad"):
+                self.assertEqual(u[k], listed[u["id"]][k], k)
+            self.assertEqual(u["ll2_url"], listed[u["id"]]["ll2_url"])
+
+    def test_compare_ends_when_orbit_has_no_schedule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = cli.update_compare({"generated_at": "t", "orbit": {"launches": []}}, {"records": []}, None, None,
+                                     Path(tmp), self.getter({}))
+            self.assertEqual(out["status"], "ended")
+            self.assertFalse(any(Path(tmp).iterdir()))
+
     def test_ledger_rows_since_gcat_become_provisional_records(self):
         led = {"launches": [dict(schedule.ll2_row(rec(1, "2026-11-01T00:00:00Z"))),
                             dict(schedule.ll2_row(rec(2, "2026-11-12T00:00:00Z"))),
