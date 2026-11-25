@@ -2,7 +2,7 @@
 // from this site at world zoom, OpenFreeMap's vector map past DETAIL_ZOOM, Natural Earth alone if OpenFreeMap
 // can't be reached. Colours come from style.css tokens through MapLibre paint (no inline styles, CSP).
 // Layers: live closure areas (Orbit's navigational warnings, FAA space-operations TFRs), scheduled launches' estimated
-// paths through them, scheduled launch pads,
+// paths through them, scheduled launch pads, launches of the past seven days,
 // recurring drop zones, pasted notices. The History tab has its own map (hmap.js).
 import * as ml from "./vendor/maplibre-gl/maplibre-gl.mjs";
 
@@ -182,7 +182,7 @@ export async function createMap(container, model, { onPick }) {
   addProjectionToggle(map);
   collapseAttribution(map);
   map.getCanvas().setAttribute("aria-label", "Map of launch and reentry closure areas. Every item on it is also listed on this page.");
-  const data = { live: model.live, paths: model.paths || EMPTY, pads: model.pads, zones: EMPTY, paste: EMPTY, traj: EMPTY, trajpad: EMPTY };
+  const data = { live: model.live, paths: model.paths || EMPTY, pads: model.pads, recent: model.recent || EMPTY, zones: EMPTY, paste: EMPTY, traj: EMPTY, trajpad: EMPTY };
   const note = (on) => {
     container.parentElement.querySelectorAll(".fallback-note").forEach((e) => e.remove());
     if (on) { const p = document.createElement("p"); p.className = "fallback-note small muted"; p.textContent = "Detailed base map unavailable: showing outline land."; container.parentElement.append(p); }
@@ -206,6 +206,8 @@ export async function createMap(container, model, { onPick }) {
     map.addLayer({ id: "path-line", type: "line", source: "la_paths", layout: { "line-cap": "round" }, paint: { "line-color": actor, "line-width": 2.2, "line-dasharray": [2.4, 1.4] } });
     map.addLayer({ id: "paste-fill", type: "fill", source: "la_paste", paint: { "fill-color": accent, "fill-opacity": 0.2 } });
     map.addLayer({ id: "paste-line", type: "line", source: "la_paste", paint: { "line-color": accent, "line-width": 2 } });
+    // Launches of the past seven days (off unless the viewer turns them on): a filled dot in the country's colour.
+    map.addLayer({ id: "recent", type: "circle", source: "la_recent", paint: { "circle-radius": 4.5, "circle-color": actor, "circle-stroke-color": panel, "circle-stroke-width": 1.4, "circle-opacity": 0.9 } });
     map.addLayer({ id: "pads", type: "circle", source: "la_pads", paint: { "circle-radius": 5.5, "circle-color": panel, "circle-stroke-color": actor, "circle-stroke-width": 2.6 } });
     // The Paste tab's trajectory: the great circle from the chosen pad through the pasted areas, and the pad.
     map.addLayer({ id: "traj-casing", type: "line", source: "la_traj", layout: { "line-cap": "round" }, paint: { "line-color": panel, "line-width": 5 } });
@@ -214,7 +216,7 @@ export async function createMap(container, model, { onPick }) {
   }
   map.on("style.load", addLayers);
   dark.addEventListener("change", async () => { const n = await buildStyle(); note(n.fellBack); map.setStyle(n.style, { diff: false }); });
-  const CLICK = ["pads", "path-hit", "live-fill", "zones-fill", "paste-fill"]; // in the order a click prefers them
+  const CLICK = ["pads", "recent", "path-hit", "live-fill", "zones-fill", "paste-fill"]; // in the order a click prefers them
   const pick = (pt) => {
     const f = map.queryRenderedFeatures([[pt.x - 6, pt.y - 6], [pt.x + 6, pt.y + 6]], { layers: CLICK.filter((l) => map.getLayer(l)) });
     if (!f.length) return null;
