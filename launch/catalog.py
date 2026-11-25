@@ -115,7 +115,8 @@ def from_gcat_tables(launch_rows: list[dict], sat_rows: list[dict], sites: dict,
     suborbital, crewed suborbital, atmospheric, missile, lofted missile) dated since `since`, with each launch's
     payloads from the object catalogs (satcat, satcat100k). The launching country is the first launch agency's
     state (GCAT orgs.tsv), else the site's. A site GCAT gives with a "?" is read as that site and marked uncertain;
-    a suborbital launch keeps its apogee and range (km, GCAT) and has no inclination."""
+    a suborbital launch keeps its apogee and range (km, GCAT) and has no inclination; an orbital one its orbit
+    reached, `orbit_km` [perigee, apogee] (km, GCAT), when GCAT gives both."""
     pls: dict[str, list] = {}
     for o in sat_rows:
         if (o.get("Type") or "")[:1] != "P":
@@ -156,6 +157,11 @@ def from_gcat_tables(launch_rows: list[dict], sat_rows: list[dict], sites: dict,
         extra = {}
         if raw_site.endswith("?"):
             extra["site_uncertain"] = True
+        if orbital:
+            try:
+                extra["orbit_km"] = [float(r.get("Perigee") or "x"), float(r.get("Apogee") or "x")]
+            except ValueError:
+                pass
         if not orbital:
             for col, key in (("Apogee", "apogee_km"), ("Range", "range_km")):
                 try:
@@ -555,7 +561,7 @@ def _going_north(pad, az: float, inc: float, site: str | None) -> bool | None:
 
 def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None, inc_note=None,
                orbit_code=None, orbit=None, suborbital=False, coarse=False, time=None, others=None,
-               used: list | None = None) -> dict | None:
+               used: list | None = None, orbit_km=None) -> dict | None:
     """{kind, az, nm, basis} for a record, or None; kind is always "estimated". `areas`: [{azimuth, downrange_nm}],
     optionally with centroid, tie, notice, windows and schedule (`ascent.select()`). A path through its closure
     areas that bends (`ascent.bends()`) has `via` ([[lon, lat]], the ascent areas in order of distance) and runs on
@@ -569,7 +575,8 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
     area, ~97 for the station). `coarse`: the pad is a coarse site point (a region, a sea launch), so nearer areas
     than COARSE_MIN_NM count for nothing. `others`: a list that gains the areas set aside as another event's
     (ascent.select()). `used`: a list that gains the areas a path was drawn through (live_paths()). An internal `_by`
-    key ("areas", "inc", ...) is popped by build_index."""
+    key ("areas", "inc", ...) is popped by build_index. `orbit_km`: GCAT's [perigee, apogee] for the launch, for the
+    later-pass test (ascent.Orbit)."""
     if not pad:
         return None
     ar = [x for x in (areas or []) if x.get("azimuth") is not None and x.get("downrange_nm")]
@@ -587,7 +594,7 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
     beyond = [x for x in ar if x["downrange_nm"] > AREA_NM]
     opts, direct = branches(pad[1], target) if target is not None else (None, False)
     kept, aside = A.select(pad, near, beyond, time=time, inc=target, own=own, area_nm=AREA_NM, spread=SPREAD_DEG,
-                           branch_az=opts if (own and direct) else None, others=others)
+                           branch_az=opts if (own and direct) else None, others=others, orbit_km=orbit_km)
     set_aside = "; set aside: " + ", ".join(f"{n} {A.WHY[k]}" for k, n in aside.items()) if aside else ""
     gave_way = None
     if kept:
@@ -1683,12 +1690,15 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
     recs, used_ll2 = [], set()
 
     def gcat_extra(r: dict, g: dict):
-        """What GCAT says of a suborbital launch: its category, apogee and range, and a site given with a "?"."""
+        """What GCAT says of a launch: a suborbital one's category, apogee and range, an orbital one's orbit
+        reached, and a site given with a "?"."""
         if r["kind"] != P.ORBITAL:
             r["gcat_category"] = _dash(g.get("category")) or None
             for k in ("apogee_km", "range_km"):
                 if g.get(k) is not None:
                     r[k] = g[k]
+        elif g.get("orbit_km"):
+            r["orbit_km"] = g["orbit_km"]
         if g.get("site_uncertain"):
             r["site_uncertain"] = True
         if g.get("site_fix"):
@@ -1800,7 +1810,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
         path = infer_path(r.get("pad"), site, bands_by_site.get(site or "", []), areas=areas, inc=inc,
                           inc_note=note, orbit_code=orbit_code, orbit=r.get("orbit"),
                           coarse=coarse_site(r) and r.get("pad_basis") != "chart",
-                          time=r.get("time") if r.get("time_basis") == "time" else None, others=others)
+                          time=r.get("time") if r.get("time_basis") == "time" else None, others=others,
+                          orbit_km=r.get("orbit_km"))
         if path:
             path["_inc"] = _target_inc(inc, note, orbit_code, r.get("orbit"))[0]
             r["path"] = path
