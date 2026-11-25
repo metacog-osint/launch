@@ -199,7 +199,8 @@
         "terms": "Not read: the site did not answer this client (HTTP 403).",
         "robots": "Not read: the site did not answer this client (HTTP 403).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "Internet Archive captures to 17 Oct 2026 (read through archive.org only, 20-21 Nov 2026): 38 pages read, no launch notice found. The scan was bounded, so this does not show that none was issued."
       }
     },
     {
@@ -216,7 +217,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -233,7 +235,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -250,7 +253,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -267,7 +271,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -284,7 +289,8 @@
         "terms": "Not read: the site did not answer this client (HTTP 447).",
         "robots": "Not read: the site did not answer this client (HTTP 447).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -301,7 +307,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "Internet Archive captures to 5 Nov 2026 (read through archive.org only, 20-21 Nov 2026): 37 pages read, no launch notice found. The scan was bounded, so this does not show that none was issued."
       }
     },
     {
@@ -318,7 +325,8 @@
         "terms": "Footer and /rules read. Use requires a hyperlink; automated collection is not addressed.",
         "robots": "Allows / and /news/; refuses the site search path.",
         "lead_time": "Not measured: the search path is refused.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "Internet Archive captures to 18 Nov 2026 (read through archive.org only, 20-21 Nov 2026). The article scan timed out, so no notice was sampled."
       }
     },
     {
@@ -334,8 +342,9 @@
         "read": "20-21 Nov 2026",
         "terms": "Terms (/a_tos) read. Links are the most Launch could use without written permission.",
         "robots": "Allows / and /story/; refuses the site search path.",
-        "lead_time": "Not measured: the search path is refused.",
-        "sample": "None taken."
+        "lead_time": "About 23 hours, from one 2021 notice found in the Internet Archive. The live search path is refused, so nothing more recent was measured.",
+        "sample": "The 14 Feb 2021 fall-zone notice for Progress MS-16, read in the Internet Archive.",
+        "archive": "Internet Archive captures to 18 Nov 2026 (read through archive.org only, 20-21 Nov 2026). One usable fall-zone notice: published 05:40 UTC 14 Feb 2021, relaying the Altai Republic civil-defence office, with the launch time and reserve dates. Progress MS-16 launched 04:45 UTC 15 Feb 2021 (GCAT)."
       }
     },
     {
@@ -351,8 +360,9 @@
         "read": "20-21 Nov 2026",
         "terms": "Not read: the site did not answer this client (HTTP 403).",
         "robots": "Not read: the site did not answer this client (HTTP 403).",
-        "lead_time": "Not measured.",
-        "sample": "None taken."
+        "lead_time": "Under 2 days, from one 2026 press release (its hour of release was not read).",
+        "sample": "The 10 Jun 2026 press release on the rescheduled H3 F6 launch, read in the Internet Archive.",
+        "archive": "Internet Archive captures to 15 Nov 2026 (read through archive.org only, 20-21 Nov 2026). A press release of 10 Jun 2026 gave the rescheduled H3 F6 launch time; the launch was at 00:53 UTC 12 Jun 2026. JAXA's IP policy is not a reuse licence for the site, so the reuse terms are still unread."
       }
     },
     {
