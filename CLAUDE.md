@@ -77,8 +77,7 @@ check, then deploys `site/`. Each run unions the committed baseline, the Actions
   only, gaps under 25 NM closed. A ground track is not airspace. Filter `ovf=`.
 - **Ranges** (`history.js` `RANGES`, `inc=`, `far=` as `lo-hi`): payload inclination; farthest area from the pad
   (`catalog.farthest_nm()`), not one set aside as another event's (`ascent.select(others=)`). A launch without the number hides while its range is set.
-- **Downloads** (`export.js`): CSV, GeoJSON, KML of the filtered launches, only data the page holds; antimeridian
-  cut; UTC plus the viewer's named zone; formula-guarded CSV; sources and licences in every file.
+- **Downloads** (`export.js`): CSV, GeoJSON, KML of the filtered launches (rules in its docstring).
 - **Maps:** great-circle edges, globe toggle, `fitCoords()`. Filters live in the address (`#history?veh=...`).
 - **Paste tab:** pad trajectory (`traj.js`, dog-leg at 25 NM); saved notices stay in the browser (`launch.saved`).
 - **Source rules:** NotamForChina (Apache-2.0, `nfc.SHA`) and Joey0609/notams (MIT, `joey.SHA`) are fetched into
@@ -109,23 +108,19 @@ reported, not failed.
   Windows UTC (`tfr_windows`).
 - `orbit`: Orbit's `data/snapshot.json` (scheduled and GCAT launches, payload `inc`); its NGA warnings until
   `cordon` first succeeds.
-- **Ascent move** (from Orbit, 19 Nov 2026): `schedule` (one LL2 request;
-  multi-source records `upcoming:<first source>:<its id>`, kept by later joins), `news` (links only), LL2 ledger
-  (`ll2ledger.py`; launches since GCAT's newest become provisional `ll2:` rows),
-  `compare.py`. Stores kept for good on release `ledger`.
+- **Ascent move** (from Orbit, 19 Nov 2026): `schedule` (one LL2 request; ids `upcoming:<source>:<id>`), `news`
+  (links), LL2 ledger (`ll2ledger.py`; provisional `ll2:` rows after GCAT's newest), `compare.py`; release `ledger`.
 - `cordon`: Cordon's feed, `launch` category (the one NGA reader): launch, debris, reentry hazards; Orbit's keys.
 - `nms` (`nms.py`): FAA NMS-API NOTAMs via Cordon's `data/notams/` index and `launch-areas.json` (the active set);
   Cordon holds the keys and makes every FAA request.
   `nms.keep` (rules in its docstring). Never "FAA data", not authoritative for non-US NOTAMs (`nms.SOURCE_NOTE`).
   Every kept notice stays in `data/nms-closures.json` (cache, site, release unioned; none readable, not 404, stops
-  the run). Cordon's NGA state `stale` or `never` fails the `cordon` lane. `nms.off_live`: text that says it is
-  something else (exercise, missile firing, airdrop, demolition, navaid check, ceiling under 10,000 ft, prohibited
-  area, amateur rocketry, aerodrome, ended): matches no launch, hidden until the viewer ticks "Show non-launch NOTAMs".
-- **GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): Cordon's `gnss.json`, no launch filters (Q-code GA/GW,
-  signal text, `refers`). `data/gnss-notams/` (active, a file per ended UTC day, all, index), kept
-  for good.
-- **Timing** (`timing.py`): median opening-to-launch per site (5+ launches; 450 NM, windows 6 h or less) gives
-  nearby live areas an `expect`. History, not a forecast.
+  the run). Cordon's NGA state `stale` or `never` fails the `cordon` lane. `nms.off_live` (reasons in the code):
+  text that says it is not a launch matches none and is hidden until "Show non-launch NOTAMs".
+- **GNSS NOTAMs** (`gnss.py`, `gnss-1.0`, for Noisefloor): Cordon's `gnss.json`, unfiltered; `data/gnss-notams/`
+  (active, a file per ended UTC day, all, index), kept for good.
+- **Timing** (`timing.py`): median opening-to-launch per site (5+ launches; 450 NM, windows 6 h or less and no
+  longer than the site's longest, `max_window_min`) gives nearby live areas an `expect`. History, not a forecast.
 
 ## Matching (three levels, all shown; none says an area is for a launch)
 `inclination_est`: the bearing's reading less its error on past launches near that bearing (`incbias.py`).
