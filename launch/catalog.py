@@ -21,7 +21,7 @@ more than TURN_DEG off it; else the path a launch from the same site to the same
 inclination took through its own areas (borrow_paths()); else the payloads' inclination (GCAT) or the orbit's usual
 one (sun-synchronous, a space station), with the direction (north- or south-going) from the pad's closure history;
 GTO, GEO and deep-space launches go east (a deep-space payload's inclination is its final orbit's, so it sets
-nothing; not from a site in P.NO_EAST); else the pad's most-used corridor. cos i = cos(latitude) x sin(az) holds
+nothing; not from a site in P.NO_EAST, which takes P.DEEP_SPACE_AZ); else the pad's most-used corridor. cos i = cos(latitude) x sin(az) holds
 for a launch without a dog-leg. An estimated path is great circles, not a ground track. A suborbital launch or a missile has no
 orbit to infer an azimuth from: its path is the bearing to its farthest closure area (drawn to that area, at any
 distance), else none.
@@ -674,6 +674,10 @@ def infer_path(pad, site: str | None, bands: list[dict], *, areas=None, inc=None
             return {"kind": "estimated", "az": b["from"] + 2.5, "nm": DEFAULT_PATH_NM,
                     "basis": f"{bound}: the site's most-used easterly corridor ({b['events']} events)"}
         return {"kind": "estimated", "az": 90.0, "nm": DEFAULT_PATH_NM, "basis": f"{bound}: due east"}
+    if orbit == "Deep space / lunar" and site in P.DEEP_SPACE_AZ:
+        az, why = P.DEEP_SPACE_AZ[site]
+        return {"kind": "estimated", "az": az, "nm": DEFAULT_PATH_NM,
+                "basis": f"bound for deep space or the Moon from a site that launches nothing east: {why}"}
     good = [b for b in bands or [] if b["events"] >= 3]
     if good:
         b = max(good, key=lambda b: b["events"])

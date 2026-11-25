@@ -120,6 +120,11 @@ SITE_DIRECTION = {
 # Sites that launch nothing east (Vandenberg flies south or west over the Pacific: InSight, 2018, and DART, 2021,
 # went south), so a deep-space launch from them takes no estimated eastward path.
 NO_EAST = {"Vandenberg"}
+# ... and the heading such a launch takes instead, with its source. Vandenberg: south-south-east, as DART flew
+# ("toward the south-southeast", Spaceflight Now, 24 Nov 2021); InSight flew south, towards the pole (JPL press kit,
+# 2018).
+DEEP_SPACE_AZ = {"Vandenberg": (157.5, "south-south-east, as DART flew (Spaceflight Now, 24 Nov 2021); InSight "
+                                       "went south too (JPL, 2018)")}
 POLAR_DIRECTION = {"Cape Canaveral": "S", "Kennedy (KSC)": "S", "Mahia": "S", "Kourou": "N"}
 # A south-going polar launch from the Cape does not fly its orbit's azimuth from the pad, which would cross the
 # Florida peninsula: it heads south-east over the Atlantic, turns south and runs parallel to the east coast, close

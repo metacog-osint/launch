@@ -185,7 +185,7 @@ class Azimuths(unittest.TestCase):
         lucy = catalog.infer_path([-80.5774, 28.5619], "Cape Canaveral", [], orbit="Deep space / lunar",
                                   areas=[{"azimuth": 300.0, "downrange_nm": 5}])
         self.assertEqual((lucy["az"], lucy["basis"]), (90.0, "bound for deep space or the Moon: due east"))
-        self.assertIsNone(catalog.infer_path([-120.61, 34.63], "Vandenberg", [], orbit="Deep space / lunar"))
+        self.assertEqual(catalog.infer_path([-120.61, 34.63], "Vandenberg", [], orbit="Deep space / lunar")["az"], 157.5)
         self.assertIsNone(catalog.infer_path(pad, "Wenchang", [{"from": 100, "to": 105, "events": 2}]))  # too few to use
         self.assertIsNone(catalog.infer_path(None, None, [], inc=50))
 
