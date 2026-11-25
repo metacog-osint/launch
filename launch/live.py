@@ -547,6 +547,9 @@ def on_track(u: dict, net: datetime, mine: list[dict], areas: list[dict], incs: 
         fit = track_fit(u["lat"], u["lon"], net, orbits, areas[r["area_i"]]["ring"], _windows_of(areas[r["area_i"]]))
         if fit:
             r["level"], r["track"] = "time and place", fit
+            # The bearing to an area thousands of miles downrange says nothing of the orbit (NG-25's South Pacific
+            # areas read 134.6 against a 51.5-degree track, 25 Nov 2026): the track's own inclination stands.
+            r["inclination_est"], r["inclination_basis"] = fit["inc"], "the ground track that passes over the area"
             r["place_basis"] = (f"under the ground track of a {fit['inc']:g}-degree orbit (from this launch's area "
                                 f"{far['area']}) about {fit['t_min']} min after NET, {fit['nm']} NM off the area")
     return mine
