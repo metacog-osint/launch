@@ -60,3 +60,10 @@ A TFR's event time runs from its first window's start to its last window's end, 
 window. Its `last_change` is `new` at the FAA's issue time. A TFR issued within 72 hours is tier anomaly, and its
 `signal` is the hours since issue. A coincidence carries the closure area's window, and its `last_change` is `none`,
 because a coincidence has no source date and Launch keeps no log of its feed items.
+
+**Upcoming launches** (Ascent step 3, 25 Nov 2026): each record in the schedule's live view is a feed item
+(LA-PIR-3), id and `subject_id` both `launch:upcoming:<record id>` with spaces as hyphens, so
+`launch:upcoming:ll2:<LL2 id>` or `launch:upcoming:closure:<notice key>`. A record keeps its id when another source
+joins it, and so does its item. `measures.evidence` says what the record rests on ("listed", "closure with no
+listing"). A listed launch's time is LL2's, floored to its stated precision; a closure record's times are the
+window's, not a launch time. `last_change` is `new` at the time Launch first read the record.

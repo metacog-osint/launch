@@ -4,7 +4,12 @@ for these TFRs before it left them to Launch, 14 Nov 2026). Items:
   - each FAA SPACE OPERATIONS TFR in the active list (its polygon);
   - each scheduled launch that coincides with a closure area in time and place, or that GCAT has since dated
     inside the area's window ("grouped"), drawn as the area. Time-only coincidences stay on the page: across
-    oceans they are mostly chance (Orbit found one on 13 Nov 2026).
+    oceans they are mostly chance (Orbit found one on 13 Nov 2026);
+  - each upcoming-launch record in Launch's multi-source schedule (launch/schedule.py `active()`, Ascent move step 3,
+    25 Nov 2026), id `launch:upcoming:<record id>` with spaces as hyphens: `launch:upcoming:ll2:<LL2 id>` for a listed
+    launch and `launch:upcoming:closure:<notice key>` for a closure with no listing (marked by `measures.evidence`).
+    The record keeps its id when a later source joins it, so the item does too. A scheduled time is the provider's
+    or press's; a closure record's time is the closure window's opening, not a launch time.
 Orbit's own navigational-warning areas are not repeated here; they are in Orbit's feed.
 """
 from __future__ import annotations
@@ -33,6 +38,10 @@ SRC_ORBIT = {"id": "orbit-snapshot", "publisher": "Orbit, The Intelligence Compa
              "title": "Scheduled launches (Launch Library 2), GCAT launches, launch-hazard navigational warnings",
              "url": "https://orbit.theintelligence.company", "licence": "Each item keeps its source's terms",
              "grade": "B2", "independence_group": "orbit", "source_type": "aggregator"}
+SRC_LL2 = {"id": "ll2-thespacedevs", "publisher": "The Space Devs (Launch Library 2)",
+           "title": "Launch Library 2: upcoming launches", "url": "https://thespacedevs.com/llapi",
+           "licence": "Free access stated by The Space Devs; no data licence stated (read 16 Nov 2026)", "grade": "B2",
+           "independence_group": "thespacedevs", "source_type": "aggregator"}
 SRC_CORDON = {"id": "cordon-feed", "publisher": "Cordon, The Intelligence Company",
               "title": "NGA navigational warnings (launch category), windows and hazard as parsed by Cordon",
               "url": "https://cordon.theintelligence.company", "licence": "NGA: US public domain",
@@ -165,6 +174,104 @@ def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: s
     return {"type": "Feature", "geometry": _geom(rings or [area["ring"]]), "properties": props}
 
 
+# Launch Library 2's NET precision words as the contract's event_time_precision (Orbit's map, plus the parts of a day,
+# where the day is known and the time is not). Second and Minute need none; a closure window's times are exact.
+NET_PRECISION = {"Hour": "hour", "Day": "day", "Week": "day", "Month": "month", "Quarter": "month", "Year": "month",
+                 "Fiscal Year": "month"}
+DAY_PARTS = ("Morning", "Afternoon", "Night")
+
+
+def _precision(word: str | None) -> str | None:
+    word = word or ""
+    return NET_PRECISION.get(word) or ("day" if word.startswith(DAY_PARTS) else None)
+
+
+def _floor(iso: str, precision: str | None) -> str:
+    """A time at the start of its period, as the contract's event_time_precision reads it."""
+    return {"month": f"{iso[:7]}-01T00:00:00Z", "day": f"{iso[:10]}T00:00:00Z",
+            "hour": f"{iso[:13]}:00:00Z"}.get(precision or "", iso)
+
+
+def _upcoming_item(r: dict, generated: str, read_at: str, notice_src: dict) -> dict | None:
+    """One record of Launch's upcoming-launch store as a feed item, or None when it has no time."""
+    try:
+        net = _iso(_dt(r["net"]))
+        end = _iso(_dt(r.get("window_end") or r["net"]))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+    closure = not (r.get("refs") or {}).get("ll2") and "closure" in (r.get("sources") or [])
+    precision = None if closure else _precision(r.get("net_precision"))
+    start, stop = _floor(net, precision), _floor(end, precision)
+    when = net[:16].replace("T", " ")
+    item_id = _subject(f"launch:{r['id']}")
+    lat, lon = r.get("lat"), r.get("lon")
+    if closure:
+        cl = r.get("closure") or {}
+        notices = cl.get("notices") or list((r.get("refs") or {}).values())
+        srcs = []
+        for k in notices:
+            # The notice's own lane (launch/unlisted.py rows); NOTAM keys not found there are read through NMS.
+            src = SRC_CORDON if notice_src.get(k) == "cordon-navwarn" else SRC_NMS
+            if src not in srcs:
+                srcs.append(src)
+        maybe = cl.get("maybe_listed") or []
+        title = f"Closure with no listed launch near {r.get('location')}: window opens {when} UTC"
+        summary = (f"Closure notice {', '.join(notices)} has a window {when}-{end[11:16]} UTC near "
+                   f"{r.get('location')}, a site with launch history, and no schedule Launch reads lists a launch "
+                   "from that site in it."
+                   + (f" The site's own history puts a launch in such a window at about "
+                      f"{cl['expect_at'][11:16]} UTC." if cl.get("expect_at") else "")
+                   + (f" {len(maybe)} listed launch" + ("es are" if len(maybe) != 1 else " is")
+                      + " dated only to a day or month, so not placed in the window." if maybe else "")
+                   + " Closures are also issued for tests and other activity, and some are cancelled: this says a "
+                   "closure exists and no launch is listed for it, not that a launch is coming.")
+        sources = [{**x, "accessed_at": read_at} for x in srcs]
+    else:
+        mission_bits = [b for b in (r.get("mission_type"), r.get("orbit_name")) if b and b != "Unknown"]
+        title = f"Scheduled launch: {r.get('name')} ({r.get('status')}), {when} UTC"
+        summary = (f"Launch Library 2 lists {r.get('name')} for {when} UTC (status "
+                   f"{r.get('status_name') or r.get('status')}; NET precision {r.get('net_precision') or 'not given'}) "
+                   f"from {r.get('pad')}, {r.get('location')}. Provider {r.get('provider')}."
+                   + (f" Mission: {', '.join(mission_bits)}." if mission_bits else "")
+                   + " A scheduled time is the provider's or press's, not Launch's, and often moves.")
+        link = (r.get("links") or {}).get("ll2")
+        sources = [{**SRC_LL2, "url": link or SRC_LL2["url"], "accessed_at": read_at}]
+    point = lat is not None and lon is not None
+    props = {
+        **_base(generated),
+        "id": item_id,
+        "subject_id": item_id,
+        "event_start": start,
+        **({"event_end": stop} if stop > start else {}),
+        **({"event_time_precision": precision} if precision else {}),
+        # The record is new when Launch first read it; its time changes are counted in measures.net_changes.
+        "last_change": "new",
+        "last_change_at": min(r.get("first_seen") or generated, generated),
+        "title": title,
+        "summary": summary,
+        "data_as_of": min(read_at, generated),
+        "valid_until": _iso(max(_dt(end) + timedelta(hours=6), _dt(generated) + timedelta(hours=6))),
+        "countries": _countries(r.get("pad_country"), *(r.get("provider_countries") or []),
+                                geo.country_at(lat, lon) if point else None),
+        "requirement_ids": ["LA-PIR-3"],
+        "coverage_fraction": 1.0,
+        "precision_class": "point" if point else "none",
+        # A pad on land has no sea area; a sea platform's is the sea it lies in (coarse sea outlines put coastal
+        # pads such as Mahia at sea, so land is tested first).
+        **({"place_basis": "location",
+            "sea_areas": [] if geo.country_at(lat, lon) else [x for x in [geo.sea_at(lat, lon)] if x]}
+           if point else {}),
+        "visual": {"type": "table", "url": f"{SITE}/#live"},
+        "sources": sources,
+        "measures": {"record_id": r["id"], "evidence": r.get("evidence") or [],
+                     "schedule_sources": r.get("sources") or [],
+                     **({"aliases": r["aliases"]} if r.get("aliases") else {}),
+                     **({"net_changes": r["net_changes"]} if r.get("net_changes") else {})},
+    }
+    geom = {"type": "Point", "coordinates": [lon, lat]} if point else None
+    return {"type": "Feature", "geometry": geom, "properties": props}
+
+
 def _parts(parts: list[str] | None) -> str:
     return f" (areas {', '.join(parts)})" if parts and len(parts) > 1 else ""
 
@@ -198,16 +305,25 @@ def build_feed(snap: dict) -> dict:
             parts = [x.get("label") or "" for x in own]
             features.append(_match_item(best, a, generated, orb_at, cor_at, rings=[x["ring"] for x in own] or None,
                                         parts=sorted(parts) if all(parts) else None))
+    sch = snap.get("schedule") or {}
+    read_at = sch.get("read_at") or (lanes.get("schedule") or {}).get("fetched_at") or generated
+    notice_src = {n["key"]: n.get("source") for u in snap.get("unlisted") or [] for n in u.get("notices") or []
+                  if n.get("key")}
+    for r in sch.get("records") or []:
+        item = _upcoming_item(r, generated, read_at, notice_src)
+        if item:
+            features.append(item)
     return {
         "type": "FeatureCollection", "contract": CONTRACT, "contract_rev": "2.1", "kit": KIT_VERSION,
         "program": "launch", "generated_at": generated,
         "method_version": METHOD,
         "licence": "FAA TFRs and NGA warnings: US Government works. NOTAMs read through the FAA NOTAM Management "
                    "Service API: redistribution allowed under its terms of service. Orbit's items keep their sources' "
-                   "terms (GCAT CC BY 4.0).",
+                   "terms (GCAT CC BY 4.0). Launch Library 2 (The Space Devs): free access, "
+                   "no data licence stated.",
         "attribution": "Launch, The Intelligence Company. FAA TFRs; NOTAMs read through the FAA NOTAM Management "
                        "Service API via Cordon (not FAA data, and not authoritative for notices issued outside the "
-                       "United States); NGA navigational warnings via Cordon; Orbit (Launch Library 2, GCAT by "
-                       "J. McDowell)",
+                       "United States); NGA navigational warnings via Cordon; Launch Library 2 "
+                       "(The Space Devs); Orbit (Launch Library 2, GCAT by J. McDowell)",
         "language_key": LANGUAGE_KEY, "features": features,
     }
