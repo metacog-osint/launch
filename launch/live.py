@@ -38,7 +38,7 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
-from . import history, notam
+from . import history, incbias, notam
 
 TFR_LIST = "https://tfr.faa.gov/tfrapi/exportTfrList"
 TFR_SHAPES = ("https://tfr.faa.gov/geoserver/TFR/ows?service=WFS&version=1.1.0&request=GetFeature"
@@ -418,16 +418,17 @@ def ground_track(lat: float, lon: float, inc: float, north: bool, t0_min: float,
     return out
 
 
-def track_orbits(lat: float, bearing: float, incs: list[float]) -> list[tuple[float, bool]]:
+def track_orbits(lat: float, bearing: float, incs: list[float],
+                 implied: float | None = None) -> list[tuple[float, bool]]:
     """Orbits (inclination, heading north) that fit a launch whose farthest matched area lies on `bearing`: the
-    flown inclinations whose launch azimuth is within TRACK_AZ_TOL of it, else the inclination the bearing implies
-    and 1.5 and 3 degrees either side (the bearing to an area runs a few degrees off the launch azimuth)."""
+    flown inclinations whose launch azimuth is within TRACK_AZ_TOL of it, else `implied` (the area's
+    inclination_est, incbias.implied; the bearing's plain reading when not given) and 1.5 and 3 degrees either side."""
     north = bearing >= 270 or bearing < 90
     fits = [(i, north) for i in incs
             if any(_az_off(bearing, x) <= TRACK_AZ_TOL and ((x >= 270 or x < 90) == north) for x in launch_azimuths(lat, i))]
     if fits:
         return fits
-    i0 = history.inclination(lat, bearing)
+    i0 = history.inclination(lat, bearing) if implied is None else implied
     return [(i0 + d, north) for d in (-3, -1.5, 0, 1.5, 3) if 0 < i0 + d < 180]
 
 
@@ -483,8 +484,9 @@ def place_test(corridor: dict | None, incs: list[float], lat: float, az: float, 
 
 
 def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent: list[dict],
-          flown: list[dict] | None = None) -> list[dict]:
-    """`flown`: GCAT launches as {lat, lon, inc} (history/ledger.json), read where a pad's charted bands are thin."""
+          flown: list[dict] | None = None, bias: list[list] | None = None) -> list[dict]:
+    """`flown`: GCAT launches as {lat, lon, inc} (history/ledger.json), read where a pad's charted bands are thin.
+    `bias`: incbias samples (history/inc_bias.json), which correct each area's implied inclination."""
     rows = []
     for u in upcoming:
         if u.get("lat") is None or not u.get("net"):
@@ -506,6 +508,7 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
             la, lo = notam.centroid(a["ring"])
             az = history.bearing(u["lat"], u["lon"], la, lo)
             dist = notam.haversine_nm(u["lat"], u["lon"], la, lo)
+            inc_est, inc_n = incbias.implied(u["lat"], u["lon"], az, bias)
             place, place_basis = place_test(corridor, incs, u["lat"], az, dist)
             level = "time and place" if place else "time"
             if name and name[1] == "vehicle" and not place:
@@ -523,7 +526,7 @@ def match(upcoming: list[dict], areas: list[dict], corridors: list[dict], recent
             mine.append({"launch": u["id"], "launch_name": u["name"], "net": u["net"], "area": a.get("key") or a.get("id"),
                          "area_i": i, "area_source": a.get("source"), "window": [_iso(hit[0]), _iso(hit[1])], "level": level,
                          "azimuth": round(az, 1), "distance_nm": round(dist), "place_basis": place_basis,
-                         "inclination_est": history.inclination(u["lat"], az), "grouped_with": grouped,
+                         "inclination_est": inc_est, "inclination_basis": incbias.basis(inc_n), "grouped_with": grouped,
                          "named": name[0] if name else None, "named_by": name[1] if name else None, "track": None})
         rows += on_track(u, net, mine, areas, incs)
     return rows
@@ -537,7 +540,7 @@ def on_track(u: dict, net: datetime, mine: list[dict], areas: list[dict], incs: 
     if not placed:
         return mine
     far = max(placed, key=lambda r: r["distance_nm"])
-    orbits = track_orbits(u["lat"], far["azimuth"], incs)
+    orbits = track_orbits(u["lat"], far["azimuth"], incs, far.get("inclination_est"))
     for r in mine:
         if r["level"] != "time":
             continue
