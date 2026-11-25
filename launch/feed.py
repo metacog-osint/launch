@@ -126,7 +126,10 @@ def _tfr_item(t: dict, generated: str, accessed: str) -> dict:
     return {"type": "Feature", "geometry": _geom(t["rings"]), "properties": props}
 
 
-def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: str | None = None) -> dict:
+def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: str | None = None,
+                rings: list | None = None, parts: list[str] | None = None) -> dict:
+    """One feed item per launch and notice. A notice with lettered areas (NAVAREA XII 836/26 A, B and C) is one item:
+    `rings` are all its matched areas and `parts` their letters; `m` is the best-rated part's match."""
     end = _dt(m["window"][1])
     lvl = m["level"]
     what = ("GCAT has since dated launch " + m["grouped_with"]["launch_tag"] + f" ({m['grouped_with']['vehicle']}) "
@@ -138,7 +141,7 @@ def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: s
         "event_start": _iso(_dt(m["window"][0])),
         "event_end": _iso(end),
         "last_change": "none",   # a coincidence has no source date, and Launch keeps no log of its feed items
-        "title": f"Closure area {m['area']} coincides ({lvl}) with scheduled launch {m['launch_name']}",
+        "title": f"Closure area {m['area']}{_parts(parts)} coincides ({lvl}) with scheduled launch {m['launch_name']}",
         "summary": (f"{m['launch_name']} is scheduled for {m['net'][:16].replace('T', ' ')} UTC (Launch Library 2 via "
                     f"Orbit). Closure area {m['area']} ({area.get('source')}) has a window "
                     f"{m['window'][0][11:16]}-{m['window'][1][11:16]} UTC on {m['window'][0][:10]} and lies "
@@ -157,7 +160,16 @@ def _match_item(m: dict, area: dict, generated: str, accessed: str, cordon_at: s
                       if area.get("source") == "cordon-navwarn" else [])
                    + ([{**SRC_NMS, "accessed_at": accessed}] if area.get("source") == "faa-nms" else []),
     }
-    return {"type": "Feature", "geometry": _geom([area["ring"]]), "properties": props}
+    if parts and len(parts) > 1:
+        props["measures"] = {"parts": parts}
+    return {"type": "Feature", "geometry": _geom(rings or [area["ring"]]), "properties": props}
+
+
+def _parts(parts: list[str] | None) -> str:
+    return f" (areas {', '.join(parts)})" if parts and len(parts) > 1 else ""
+
+
+LEVEL_RANK = {"grouped": 0, "time and place": 1, "time": 2}
 
 
 def build_feed(snap: dict) -> dict:
@@ -167,20 +179,35 @@ def build_feed(snap: dict) -> dict:
     orb_at = (lanes.get("orbit") or {}).get("fetched_at") or generated
     cor_at = (lanes.get("cordon") or {}).get("fetched_at") or generated
     features = [_tfr_item(t, generated, tfr_at) for t in snap.get("tfr") or []]
-    areas = {(a.get("key") or a.get("id")): a for a in snap.get("areas") or []}
+    listed = snap.get("areas") or []
+    areas = {(a.get("key") or a.get("id")): a for a in listed}
     now = _dt(generated)
+    # One item per launch and notice: a notice's lettered areas each match on their own (the ledger keeps every ring),
+    # but they share the item id, so the feed folds them (24 Nov 2026: 19 items held 14 ids).
+    groups: dict[tuple, list[dict]] = {}
     for m in snap.get("matches") or []:
         if m["level"] in ("time and place", "grouped") and _dt(m["window"][1]) >= now - timedelta(hours=24):
-            a = areas.get(m["area"])
-            if a:
-                features.append(_match_item(m, a, generated, orb_at, cor_at))
+            groups.setdefault((m["launch"], m["area"]), []).append(m)
+    for ms in groups.values():
+        ms.sort(key=lambda m: (LEVEL_RANK.get(m["level"], 3), m["distance_nm"]))
+        best = ms[0]
+        own = [listed[m["area_i"]] for m in ms if isinstance(m.get("area_i"), int) and m["area_i"] < len(listed)]
+        a = (listed[best["area_i"]] if isinstance(best.get("area_i"), int) and best["area_i"] < len(listed)
+             else areas.get(best["area"]))
+        if a:
+            parts = [x.get("label") or "" for x in own]
+            features.append(_match_item(best, a, generated, orb_at, cor_at, rings=[x["ring"] for x in own] or None,
+                                        parts=sorted(parts) if all(parts) else None))
     return {
         "type": "FeatureCollection", "contract": CONTRACT, "contract_rev": "2.1", "kit": KIT_VERSION,
         "program": "launch", "generated_at": generated,
         "method_version": METHOD,
-        "licence": "FAA TFRs and NGA warnings: US Government works. Orbit's items keep their sources' terms "
-                   "(GCAT CC BY 4.0).",
-        "attribution": "Launch, The Intelligence Company. FAA TFRs; NGA navigational warnings via Cordon; Orbit "
-                       "(Launch Library 2, GCAT by J. McDowell)",
+        "licence": "FAA TFRs and NGA warnings: US Government works. NOTAMs read through the FAA NOTAM Management "
+                   "Service API: redistribution allowed under its terms of service. Orbit's items keep their sources' "
+                   "terms (GCAT CC BY 4.0).",
+        "attribution": "Launch, The Intelligence Company. FAA TFRs; NOTAMs read through the FAA NOTAM Management "
+                       "Service API via Cordon (not FAA data, and not authoritative for notices issued outside the "
+                       "United States); NGA navigational warnings via Cordon; Orbit (Launch Library 2, GCAT by "
+                       "J. McDowell)",
         "language_key": LANGUAGE_KEY, "features": features,
     }

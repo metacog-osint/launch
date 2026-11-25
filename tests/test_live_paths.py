@@ -159,6 +159,15 @@ const out = {
     week("2026-11-18T22:51:00Z", "mid"), week("2026-11-21T12:00:01Z", "later"), week("2026-11-20T00:00:00Z", "up", "upcoming"), { id: "no-time", status: "launched" }], now).map((r) => r.id),
   bad: L.pastWeek([week("2026-11-20T00:00:00Z", "x")], "not a date"),
   href: L.historyHref({ id: "ll2:7b d" }),
+  grouped: L.groupMatches([
+    { launch: "u", launch_name: "U", net: "2026-11-29T04:39:00Z", area: "nav", area_i: 0, level: "time and place", distance_nm: 287, azimuth: 154.3 },
+    { launch: "u", launch_name: "U", net: "2026-11-29T04:39:00Z", area: "nav", area_i: 1, level: "time and place", distance_nm: 65, azimuth: 152.5 },
+    { launch: "u", launch_name: "U", net: "2026-11-29T04:39:00Z", area: "nav", area_i: 2, level: "time", distance_nm: 360, azimuth: 155.1 },
+    { launch: "c", launch_name: "C", net: "2026-11-29T03:50:00Z", area: "nav", area_i: 0, level: "time", distance_nm: 5592, azimuth: 40.8 },
+    { launch: "c", launch_name: "C", net: "2026-11-29T03:50:00Z", area: "far", area_i: 3, level: "time", distance_nm: 8000, azimuth: 320, named: null, track: null },
+    { launch: "c", launch_name: "C", net: "2026-11-29T03:50:00Z", area: "named", area_i: 4, level: "time", distance_nm: 8000, azimuth: 320, named: "C-1", named_by: "mission" },
+    { launch: "c", launch_name: "C", net: "2026-11-29T03:50:00Z", area: "near", area_i: 5, level: "time", distance_nm: 900, azimuth: 120 },
+  ], [{ label: "A" }, { label: "B" }, { label: "C" }, {}, {}, {}]).map((r) => [r.launch, r.area, r.level, r.parts.join(""), r.nm.join("-"), r.az.join("-"), r.area_is.join(","), r.also.join(","), r.far]),
 };
 console.log(JSON.stringify(out));
 """
@@ -189,6 +198,17 @@ class LivePathsJsTest(unittest.TestCase):
 
     def test_history_link_is_encoded(self):
         self.assertEqual(self.o["href"], "#history?sel=ll2%3A7b%20d")
+
+    def test_matches_fold_by_notice_and_far_time_only_is_marked(self):
+        """24 Nov 2026: NAVAREA XII 836/26's three parts were three rows (and three feed items sharing one id)."""
+        g = {(r[0], r[1]): r for r in self.o["grouped"]}
+        self.assertEqual(len(self.o["grouped"]), 5)
+        self.assertEqual(g[("u", "nav")][2:], ["time and place", "ABC", "65-360", "152.5-155.1", "1,0,2", "", False])
+        self.assertEqual(g[("c", "nav")][7:], ["U", True])     # time only, far, and the notice fits U in place
+        self.assertTrue(g[("c", "far")][8])
+        self.assertFalse(g[("c", "named")][8])                # a notice that names the launch never folds away
+        self.assertFalse(g[("c", "near")][8])
+        self.assertEqual([r[0] for r in self.o["grouped"]], ["c", "c", "c", "c", "u"])   # by NET
 
 
 if __name__ == "__main__":
