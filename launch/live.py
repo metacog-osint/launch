@@ -232,6 +232,11 @@ def _rings(geom: dict | None) -> list[list[list[float]]]:
     return []
 
 
+# Cordon's health states for its NGA reader in which it withholds the warnings (cordon/feed.py): Launch reads
+# those as no reading. "failing" still serves the held set, so it is read.
+NGA_UNREAD = ("stale", "never")
+
+
 def cordon_read(body: bytes) -> dict:
     """NGA launch, debris and reentry warnings from Cordon's feed, as areas for matching. A warning whose
     `measures.hazard` is null (a missile firing, which Cordon also files under `launch`) is left out."""
