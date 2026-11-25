@@ -28,7 +28,8 @@ history, and says which scheduled launches coincide with them. Observations only
    kept with the launch and may set its live path like a time-and-place match. Still a coincidence of words.
    **Off the live view** (`nms.off_live()`, 22 Nov 2026): a kept NOTAM whose text says it is an amateur rocketry
    window, no longer in force or an aerodrome notice, or, without space words (space, satellite, orbit, reentry,
-   debris, rocket launch), a missile firing, an airdrop or airlift, or a military exercise, stays in the closure
+   debris, rocket launch), a missile firing, an airdrop or airlift, a military exercise, an explosives demolition or a navaid flight
+   inspection, or a stated ceiling under 10,000 ft (24 Nov 2026), or a prohibited area with no launch word, stays in the closure
    ledger, matches no launch, and is hidden on the Live map and list until the viewer turns such notices on. Terse notices ("AIRSPACE CLSD", "ACT") say nothing and stay.
    **Closure with no listing** (`launch/unlisted.py`, 21 Nov 2026): a window of 6 h or less in the next 14 days, within
    450 NM of a site with launch-timing history, with no exactly dated listed launch within 100 NM of that site in any
