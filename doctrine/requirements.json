@@ -31,6 +31,15 @@
       ]
     },
     {
+      "id": "LA-PIR-3",
+      "type": "pir",
+      "parent": "LA-REQ-1",
+      "question": "Which launches are scheduled in the next 14 days, from which sources, and which launch-site closures have no listed launch?",
+      "series": [
+        "launch_schedule"
+      ]
+    },
+    {
       "id": "LA-EEI-1",
       "type": "eei",
       "parent": "LA-PIR-2",
