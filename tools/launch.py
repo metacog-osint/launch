@@ -347,8 +347,8 @@ def update_closure_records(snap: dict, store: dict, sites: dict, data_dir: Path,
 
 def update_ll2_ledger(data_dir: Path, getter=None) -> tuple[dict | None, dict | None, dict]:
     """One verify-and-extend pull of the LL2 ledger (launch/ll2ledger.py): one request and at most one by-id
-    lookup. Begun from Orbit's published ledger when Launch holds none. A failed pull changes nothing and is not
-    retried. Returns (ledger, Orbit's ledger for the comparison, lane status)."""
+    lookup. Begun from Orbit's frozen ledger only when Launch holds none; otherwise Orbit's copy is not read. A failed
+    pull changes nothing and is not retried. Returns (ledger, Orbit's ledger when it was read, lane status)."""
     import copy
     import urllib.error
     get = getter or fetch.get
@@ -357,12 +357,12 @@ def update_ll2_ledger(data_dir: Path, getter=None) -> tuple[dict | None, dict | 
     led = ll2ledger.union(rel, local)
     status = {"status": "ok", "from_release": rel is not None, "local": local is not None}
     orbit_doc, orbit_sha = None, None
-    try:
-        body, rec = fetch.fetch("orbit-ledger", ll2ledger.ORBIT_LEDGER, raw, "json", getter=getter, gz=True)
-        orbit_doc, orbit_sha = json.loads(body), rec["sha256"]
-    except Exception as exc:  # noqa: BLE001  (only the seed and the comparison need it)
-        status["orbit_ledger_error"] = _err(exc)
     if led is None:
+        try:  # only the seed needs it: Orbit's ledger is frozen and the side-by-side check has ended
+            body, rec = fetch.fetch("orbit-ledger", ll2ledger.ORBIT_LEDGER, raw, "json", getter=getter, gz=True)
+            orbit_doc, orbit_sha = json.loads(body), rec["sha256"]
+        except Exception as exc:  # noqa: BLE001
+            status["orbit_ledger_error"] = _err(exc)
         if orbit_doc is None:
             status.update({"status": "failed", "error": "no ledger held and Orbit's unreadable: not starting over "
                                                           "from 1 Jan 2024; the next run tries again"})
