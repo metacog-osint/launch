@@ -2,9 +2,9 @@
 
   tfr     FAA temporary flight restrictions (tfr.faa.gov, no key): the list, the shapes from the FAA's own map
           service, and each SPACE OPERATIONS TFR's XML for its altitudes. Only space operations are kept.
-  orbit   Orbit's published snapshot (orbit.theintelligence.company/data/snapshot.json, one request): its
-          scheduled launches, its launch-hazard navigational warnings (NGA, NAVAREA XI) and GCAT's launches of
-          the last 30 days. Launch reads them rather than fetching those sources a second time.
+  orbit   Orbit's published snapshot (orbit.theintelligence.company/data/snapshot.json, one request): GCAT's
+          launches of the last 30 days, which Launch reads rather than fetching GCAT a second time. Scheduled
+          launches come from Launch's own schedule lane (launch/schedule.py); Orbit no longer publishes them.
   cordon  Cordon's published feed (cordon.theintelligence.company/data/feed.geojson, one request): NGA's
           navigational warnings in its `launch` category, with the windows, hazard and cancels Cordon parses
           (method cordon-feed-1.1). Cordon is the suite's one NGA reader (decided 17 Nov 2026); Launch takes the

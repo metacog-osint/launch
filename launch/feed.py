@@ -35,7 +35,7 @@ SRC_NMS = {"id": "faa-nms", "publisher": "NOTAMs read through the FAA NOTAM Mana
            "url": "https://api-nms.aim.faa.gov/", "licence": "Redistribution allowed (FAA NMS-API terms of service)",
            "grade": "A2", "independence_group": "faa", "source_type": "official"}
 SRC_ORBIT = {"id": "orbit-snapshot", "publisher": "Orbit, The Intelligence Company",
-             "title": "Scheduled launches (Launch Library 2), GCAT launches, launch-hazard navigational warnings",
+             "title": "GCAT launches (Orbit's published snapshot)",
              "url": "https://orbit.theintelligence.company", "licence": "Each item keeps its source's terms",
              "grade": "B2", "independence_group": "orbit", "source_type": "aggregator"}
 SRC_LL2 = {"id": "ll2-thespacedevs", "publisher": "The Space Devs (Launch Library 2)",
