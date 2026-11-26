@@ -6,6 +6,7 @@
                                            # schedule, LL2 ledger, comparison -> data/*.json for the release
     python tools/launch.py build           # site/ from history/ and data/snapshot.json
     python tools/launch.py check           # registers + feed lint + public gate + privacy check
+    python tools/launch.py payloads        # reference rates for unknown payloads -> history/payloads_source/ (private)
 
 collect never makes data up. A failed lane keeps its last good copy (from_previous) or stays empty, and the
 snapshot's "lanes" block says which.
@@ -23,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
 from launch import (catalog, compare, feed, fetch, gcat, gnss, history, incbias, joey, live, ll2ledger, news, nfc, nms,  # noqa: E402
-                    nsf, overfly, patterns, privacy, public, rll, schedule, timing, unlisted, wayback)
+                    nsf, overfly, patterns, payloads, privacy, public, rll, schedule, timing, unlisted, wayback)
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
@@ -42,6 +43,9 @@ STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "
 # a site that answers 404 or an emptied cache restores from it, not from empty. data/ledger.json is uploaded as
 # launch-ledger.json beside ll2-ledger.json; dated copies go to release `ledger-YYYY-qN` (kept for good).
 RELEASE_COPY = {"ledger": "launch-ledger.json", "closures": "nms-closures.json"}
+SITE_DATA = "https://launch.theintelligence.company/data/"
+# Payload reference rates and their scoring ledger: git-ignored, never published, never pruned (payloads.py).
+PAYLOADS_DIR = ROOT / "history" / "payloads_source"
 
 
 def dump(obj, compact: bool = False) -> str:
@@ -751,6 +755,32 @@ def check_all(root: Path = ROOT) -> list[str]:
     return errs + perrs + serrs
 
 
+def run_payloads(data: Path | None = None, out: Path = PAYLOADS_DIR, now: datetime | None = None,
+                 getter=None) -> dict:
+    """Reference rates for every upcoming unknown-payload launch, from the published launches.json and snapshot.json
+    (or the copies in `data`) and history/history.json; writes out/rates.json and appends to out/ledger.jsonl."""
+    def read(name):
+        if data is not None:
+            return json.loads((data / name).read_text(encoding="utf-8"))
+        return json.loads((getter or fetch.get)(SITE_DATA + name))
+    recs, snap = read("launches.json")["records"], read("snapshot.json")
+    hist = ROOT / "history" / "history.json"
+    charted = payloads.charted_index(json.loads(hist.read_text(encoding="utf-8")) if hist.exists() else None)
+    at = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    results = payloads.build(recs, snap, charted)
+    out.mkdir(parents=True, exist_ok=True)
+    led_p = out / "ledger.jsonl"
+    ledger = [json.loads(x) for x in led_p.read_text(encoding="utf-8").splitlines() if x.strip()] if led_p.exists() else []
+    new = payloads.score(ledger, results, recs, at)
+    with led_p.open("a", encoding="utf-8", newline="\n") as f:
+        for e in new:
+            f.write(json.dumps(e, ensure_ascii=False, separators=(",", ":")) + "\n")
+    doc = {"generated_at": at, "method": payloads.METHOD, "rule": " ".join(payloads.__doc__.split()),
+           "snapshot_at": snap.get("generated_at"), "launches": results, "score": payloads.summary(ledger + new)}
+    (out / "rates.json").write_text(dump(doc), encoding="utf-8", newline="\n")
+    return {"launches": len(results), "new_ledger_lines": len(new), "score": doc["score"], "results": results}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Launch: launch and reentry closure areas, history and matching.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -762,6 +792,9 @@ def main(argv=None) -> int:
     c.add_argument("--only", nargs="*", choices=sorted(LANES))
     sub.add_parser("build")
     sub.add_parser("check")
+    pl = sub.add_parser("payloads", help="reference rates for upcoming launches with an unknown payload, from the "
+                                         "published data -> history/payloads_source/ (git-ignored, private)")
+    pl.add_argument("--data", help="read launches.json and snapshot.json from this folder instead of the site")
     sub.add_parser("timing", help="closure opening to launch, by site, from the built site/data/launches.json "
                                   "-> history/timing.json")
     sub.add_parser("incbias", help="implied-inclination calibration samples, from the built site/data/launches.json "
@@ -775,6 +808,15 @@ def main(argv=None) -> int:
     w.add_argument("step", choices=["fetch", "build"])
     w.add_argument("--since", help="fetch TFR detail pages listed from this date (YYYY-MM-DD) only; newest first")
     a = ap.parse_args(argv)
+    if a.cmd == "payloads":
+        res = run_payloads(Path(a.data) if a.data else None)
+        for r in res["results"]:
+            print(f"{(r['net'] or '')[:16]}  {r['vehicle']} from {r['site']}  ({r['label']})")
+            for s in r["steps"]:
+                top = "; ".join(f"{x['class']} {x['k']}/{s['n']} ({x['lo']:.0%}-{x['hi']:.0%})" for x in s["series"][:4])
+                print(f"    {s['step']}: n={s['n']}{'' if s['used'] else ' (too few, not used)'}  {top}")
+        print("Payloads:", {k: v for k, v in res.items() if k != "results"}, "->", PAYLOADS_DIR)
+        return 0
     if a.cmd == "wayback":
         src = ROOT / "history" / "wayback_source"
         if a.step == "fetch":
