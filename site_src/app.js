@@ -61,6 +61,13 @@ function table(head, rows, onRow) {
 }
 const put = (box, node) => { box.textContent = ""; box.appendChild(node); };
 const muted = (t) => el("p", "muted small", t);
+// Orbit (orbit.theintelligence.company) holds what launches put in orbit: its launch rows cover GCAT's last 7 days;
+// its object search finds every piece of a launch by its COSPAR launch id (GCAT's tag), any year.
+const ORBIT = {
+  site: "https://orbit.theintelligence.company/",
+  launchRow: (tag) => ORBIT.site + "launches.html#launch-" + encodeURIComponent(String(tag).replace(/ /g, "-")),
+  objects: (tag) => ORBIT.site + "?q=" + encodeURIComponent(tag) + "#obj-search",
+};
 // Long tables fold with the hub's tic-fold.js at every width: the first 10 rows on a phone and 15 wider (each table
 // lists the soonest or largest first), then "Show all"; a find box over 25 or more. It re-applies when a table is
 // redrawn. The History tab's list has its own paging and is left.
@@ -248,8 +255,16 @@ function pastWeek() {
     if (r.provisional) { s.append(" "); s.append(el("span", "badge", "provisional")); }
     return s;
   };
-  put($("past-table"), rows.length ? table(["Launched", "Launch", "Site", "Country", "Orbit", "Outcome"],
-    rows.map((r) => ({ cells: [fmt(r.time), name(r), r.site || "", mark(r.actor), r.orbit || "", result(r)] })))
+  // Payloads as GCAT lists them; what each reached, and its path, is Orbit's (its launch row, by GCAT tag).
+  const payloads = (r) => {
+    const p = r.payloads || {}, box = el("span", "");
+    if (!p.count) { box.textContent = r.gcat ? "Not yet cataloged" : ""; return box; }
+    box.textContent = p.names.slice(0, 3).join(", ") + (p.count > 3 ? ` and ${p.count - 3} more` : "") + " ";
+    if (r.gcat) { const a = el("a", "", "On Orbit"); a.href = ORBIT.launchRow(r.gcat); a.rel = "noopener"; box.append(a); }
+    return box;
+  };
+  put($("past-table"), rows.length ? table(["Launched", "Launch", "Site", "Country", "Orbit", "Payloads", "Outcome"],
+    rows.map((r) => ({ cells: [fmt(r.time), name(r), r.site || "", mark(r.actor), r.orbit || "", payloads(r), result(r)] })))
     : muted("No launch is recorded in the past seven days."));
 }
 

@@ -41,6 +41,7 @@ function mark(cc) {
 }
 
 const STATUS = { launched: "Launched", upcoming: "Scheduled (next 14 days)", notice: "Notices with no identified launch" };
+const ORBITAL_KINDS = ["orbital", "deep space", "near-orbital"];   // launch/programs.py ORBITAL_KINDS
 const SOURCES = { chart: "Launch's charted notices", gcat: "GCAT launch record", ll2: "Launch Library 2", nfc: "NotamForChina", joey: "Joey0609/notams", wayback: "FAA and NGA notices (Internet Archive)", published: "Published notices (reviewed copies)", saved: "Saved in this browser" };
 const OUTCOME = { success: "Success", failure: "Failure", "": "Not known" };
 const NK = "Not known";
@@ -569,6 +570,13 @@ function detail(r) {
   if (r.apogee_km != null || r.range_km != null) fact(dl, "Apogee and range", [r.apogee_km != null ? `apogee about ${r.apogee_km.toLocaleString("en-US")} km` : "", r.range_km != null ? `range about ${r.range_km.toLocaleString("en-US")} km` : ""].filter(Boolean).join(", ") + " (GCAT)");
   fact(dl, r.notice_set ? "Charted payload" : "Payload", r.payload);
   if (r.payloads && r.payloads.count) fact(dl, "Payloads (GCAT)", `${r.payloads.count}: ${r.payloads.names.join(", ")}${r.payloads.more ? ` and ${r.payloads.more} more` : ""}`);
+  // What an orbital launch put in orbit is Orbit's: its object search lists every piece of the launch by GCAT's tag
+  // (the COSPAR launch id), each with its own page.
+  if (r.gcat && ORBITAL_KINDS.includes(r.kind)) {
+    const a = el("a", "", `Every object of ${r.gcat} on Orbit`);
+    a.href = "https://orbit.theintelligence.company/?q=" + encodeURIComponent(r.gcat) + "#obj-search"; a.rel = "noopener";
+    fact(dl, "In orbit", a);
+  }
   const notes = (r.programmes || []).map((p) => IX.programme_notes[p] ? `${p} (${IX.programme_notes[p]})` : p);
   fact(dl, "Type", r.mtype + (notes.length ? ` · ${notes.join(", ")}` : ""));
   fact(dl, "Orbit", r.orbit + (r.inc ? ` · payload inclination ${r.inc}° (GCAT)` : ""));
