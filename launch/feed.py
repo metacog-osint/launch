@@ -42,6 +42,12 @@ SRC_LL2 = {"id": "ll2-thespacedevs", "publisher": "The Space Devs (Launch Librar
            "title": "Launch Library 2: upcoming launches", "url": "https://thespacedevs.com/llapi",
            "licence": "Free access stated by The Space Devs; no data licence stated (read 16 Nov 2026)", "grade": "B2",
            "independence_group": "thespacedevs", "source_type": "aggregator"}
+SRC_RLL = {"id": "rocketlaunch-live", "publisher": "RocketLaunch.Live",
+           "title": "RocketLaunch.Live: the next five launches (free tier). Data by RocketLaunch.Live",
+           "url": "https://www.rocketlaunch.live", "licence": "No licence stated; credit asked: \"Data by "
+           "RocketLaunch.Live\" (API page read 21 Nov 2026)", "grade": "B3",
+           "independence_group": "rocketlaunch-live", "source_type": "aggregator"}
+LISTING_SOURCES = {"ll2": "Launch Library 2", "rll": "RocketLaunch.Live"}
 SRC_CORDON = {"id": "cordon-feed", "publisher": "Cordon, The Intelligence Company",
               "title": "NGA navigational warnings (launch category), windows and hazard as parsed by Cordon",
               "url": "https://cordon.theintelligence.company", "licence": "NGA: US public domain",
@@ -192,14 +198,15 @@ def _floor(iso: str, precision: str | None) -> str:
             "hour": f"{iso[:13]}:00:00Z"}.get(precision or "", iso)
 
 
-def _upcoming_item(r: dict, generated: str, read_at: str, notice_src: dict) -> dict | None:
+def _upcoming_item(r: dict, generated: str, read_at: str, notice_src: dict, reads: dict | None = None) -> dict | None:
     """One record of Launch's upcoming-launch store as a feed item, or None when it has no time."""
     try:
         net = _iso(_dt(r["net"]))
         end = _iso(_dt(r.get("window_end") or r["net"]))
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
-    closure = not (r.get("refs") or {}).get("ll2") and "closure" in (r.get("sources") or [])
+    listing = [s for s in LISTING_SOURCES if (r.get("refs") or {}).get(s)]
+    closure = not listing and "closure" in (r.get("sources") or [])
     precision = None if closure else _precision(r.get("net_precision"))
     start, stop = _floor(net, precision), _floor(end, precision)
     when = net[:16].replace("T", " ")
@@ -228,14 +235,22 @@ def _upcoming_item(r: dict, generated: str, read_at: str, notice_src: dict) -> d
         sources = [{**x, "accessed_at": read_at} for x in srcs]
     else:
         mission_bits = [b for b in (r.get("mission_type"), r.get("orbit_name")) if b and b != "Unknown"]
-        title = f"Scheduled launch: {r.get('name')} ({r.get('status')}), {when} UTC"
-        summary = (f"Launch Library 2 lists {r.get('name')} for {when} UTC (status "
-                   f"{r.get('status_name') or r.get('status')}; NET precision {r.get('net_precision') or 'not given'}) "
-                   f"from {r.get('pad')}, {r.get('location')}. Provider {r.get('provider')}."
+        status = r.get("status_name") or r.get("status")
+        names = " and ".join(LISTING_SOURCES[s] for s in listing) or "A schedule"
+        where = ", ".join(x for x in (r.get("pad"), r.get("location")) if x) or "a pad not given"
+        title = f"Scheduled launch: {r.get('name')}" + (f" ({r.get('status')})" if r.get("status") else "") + f", {when} UTC"
+        summary = (f"{names} list{'s' if len(listing) == 1 else ''} {r.get('name')} for {when} UTC ("
+                   + (f"status {status}; " if status else "")
+                   + f"NET precision {r.get('net_precision') or 'not given'}) from {where}."
+                   + (f" Provider {r.get('provider')}." if r.get("provider") else "")
                    + (f" Mission: {', '.join(mission_bits)}." if mission_bits else "")
+                   + (" Data by RocketLaunch.Live." if "rll" in listing else "")
                    + " A scheduled time is the provider's or press's, not Launch's, and often moves.")
-        link = (r.get("links") or {}).get("ll2")
-        sources = [{**SRC_LL2, "url": link or SRC_LL2["url"], "accessed_at": read_at}]
+        links, reads = r.get("links") or {}, reads or {}
+        sources = []
+        for s, src in (("ll2", SRC_LL2), ("rll", SRC_RLL)):
+            if s in listing:
+                sources.append({**src, "url": links.get(s) or src["url"], "accessed_at": reads.get(s) or read_at})
     point = lat is not None and lon is not None
     props = {
         **_base(generated),
@@ -312,7 +327,7 @@ def build_feed(snap: dict) -> dict:
     notice_src = {n["key"]: n.get("source") for u in snap.get("unlisted") or [] for n in u.get("notices") or []
                   if n.get("key")}
     for r in sch.get("records") or []:
-        item = _upcoming_item(r, generated, read_at, notice_src)
+        item = _upcoming_item(r, generated, read_at, notice_src, sch.get("reads"))
         if item:
             features.append(item)
     return {
@@ -322,10 +337,10 @@ def build_feed(snap: dict) -> dict:
         "licence": "FAA TFRs and NGA warnings: US Government works. NOTAMs read through the FAA NOTAM Management "
                    "Service API: redistribution allowed under its terms of service. Orbit's items keep their sources' "
                    "terms (GCAT CC BY 4.0). Launch Library 2 (The Space Devs): free access, "
-                   "no data licence stated.",
+                   "no data licence stated. RocketLaunch.Live: no licence stated; Data by RocketLaunch.Live.",
         "attribution": "Launch, The Intelligence Company. FAA TFRs; NOTAMs read through the FAA NOTAM Management "
                        "Service API via Cordon (not FAA data, and not authoritative for notices issued outside the "
                        "United States); NGA navigational warnings via Cordon; Launch Library 2 "
-                       "(The Space Devs); Orbit (Launch Library 2, GCAT by J. McDowell)",
+                       "(The Space Devs); Data by RocketLaunch.Live; Orbit (GCAT by J. McDowell)",
         "language_key": LANGUAGE_KEY, "features": features,
     }

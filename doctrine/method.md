@@ -51,6 +51,13 @@ history, and says which scheduled launches coincide with them. Observations only
    Library 2 first), with Launch's own id; each kind of evidence is named ("listed" so far), none is a forecast.
    Headlines are links only. The LL2 ledger is verified and extended each run; its launches GCAT has not listed are
    provisional until a GCAT launch joins them.
+   **RocketLaunch.Live** (`launch/rll.py`, 26 Nov 2026): the free tier's next five launches, one request a run, a
+   second listing source (`rll`, id `upcoming:rll:<its id>`). A RocketLaunch.Live record and a Launch Library 2 record
+   are one launch, and are joined (the one seen first keeps its id), when they share a place word, their NETs are
+   within 3 h (36 h when either is dated only to a day or coarser) and their vehicles do not differ; with two equally
+   near candidates neither joins. Launch Library 2's fields are shown when both hold a record. The free tier gives no
+   coordinates or status: a record takes the coordinates of a Launch Library 2 launch at the same place, else none,
+   and only Launch Library 2's records go to matching. Every copy says "Data by RocketLaunch.Live".
 6. **Not for navigation.**
 
 ## Feed contract revision 2.1 (23 Nov 2026)
@@ -64,7 +71,8 @@ because a coincidence has no source date and Launch keeps no log of its feed ite
 
 **Upcoming launches** (Ascent step 3, 25 Nov 2026): each record in the schedule's live view is a feed item
 (LA-PIR-3), id and `subject_id` both `launch:upcoming:<record id>` with spaces as hyphens, so
-`launch:upcoming:ll2:<LL2 id>` or `launch:upcoming:closure:<notice key>`. A record keeps its id when another source
+`launch:upcoming:ll2:<LL2 id>`, `launch:upcoming:rll:<RocketLaunch.Live id>` or
+`launch:upcoming:closure:<notice key>`. Each listed item cites the sources that list it. A record keeps its id when another source
 joins it, and so does its item. `measures.evidence` says what the record rests on ("listed", "closure with no
 listing"). A listed launch's time is LL2's, floored to its stated precision; a closure record's times are the
 window's, not a launch time. `last_change` is `new` at the time Launch first read the record.

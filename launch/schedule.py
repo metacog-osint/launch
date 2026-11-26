@@ -36,7 +36,7 @@ SCHEMA = "launch-upcoming/1"
 LL2_API = "https://ll.thespacedevs.com/2.3.0/launches/upcoming/"
 HORIZON_DAYS = 14
 ATTRIBUTION = "Launch data: Launch Library 2, The Space Devs (thespacedevs.com)"
-PRECEDENCE = ("ll2",)        # whose fields a record shows, first first; later sources are added here
+PRECEDENCE = ("ll2", "rll")  # whose fields a record shows, first first (rll: RocketLaunch.Live, launch/rll.py)
 FIELDS = ("name", "net", "net_precision", "window_start", "window_end", "status", "status_name", "provider",
           "provider_type", "provider_countries", "vehicle", "mission", "mission_type", "orbit", "orbit_name", "pad",
           "location", "pad_country", "lat", "lon")
