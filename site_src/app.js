@@ -70,7 +70,11 @@ async function getJSON(p) { const r = await fetch(p, { cache: "no-cache" }); if 
 let snap, hist, pat, srcs, ix, map, H = null, Hstart = null, liveM = null, openCard = null;
 const byKey = new Map();
 const upcomingRecs = () => ix.records.filter((r) => r.status === "upcoming");
-const scheduled = (r) => ((snap.orbit || {}).upcoming || []).find((u) => u.id === r.ll2) || null;
+// Scheduled launches Launch Library 2 lists, from Launch's own schedule (snap.schedule.records), in the shape Orbit's
+// `upcoming` lane had: `id` is the LL2 uuid. The same rows tools/launch.py ll2_upcoming() matches against the areas.
+// (Orbit stopped publishing `upcoming` in Ascent step 4, ideas#69, so snap.orbit.upcoming is now always empty.)
+const upcomingRows = () => ((snap.schedule || {}).records || []).filter((r) => (r.refs || {}).ll2).map((r) => ({ ...r, id: r.refs.ll2, ll2_url: (r.links || {}).ll2 }));
+const scheduled = (r) => upcomingRows().find((u) => u.id === r.ll2) || null;
 
 function tiles() {
   const box = $("tiles"); box.textContent = "";
@@ -79,7 +83,7 @@ function tiles() {
   const items = [
     ["Live closure areas (NGA warnings, NOTAMs, TFRs; Orbit counts warnings)", (snap.areas || []).filter((a) => !a.off_live).length],
     ["FAA space-operations TFRs", (snap.tfr || []).length],
-    ["Scheduled launches, 14 days", ((snap.orbit || {}).upcoming || []).length],
+    ["Scheduled launches, 14 days", upcomingRows().length],
     ["Coincidences: time / time and place / grouped", `${lv.time || 0} / ${lv["time and place"] || 0} / ${lv.grouped || 0}`],
     [`Launches since ${(ix.ledger_since || "2012").slice(0, 4)}`, ix.records.filter((r) => r.status === "launched" && (r.time || "") >= (ix.ledger_since || "2012")).length],
     ["Recurring drop zones", pat.recurring.length],
@@ -88,7 +92,7 @@ function tiles() {
   $("asof").textContent = "Live areas read " + fmt(snap.generated_at) + ".";
   // Today's reading (tic-shell): this run's counts. A closure announces intent, so a coincidence is only that.
   const num = (v) => el("b", "", String(v));
-  const areas = (snap.areas || []).filter((a) => !a.off_live).length, tfr = (snap.tfr || []).length, up = ((snap.orbit || {}).upcoming || []).length, both = lv["time and place"] || 0;
+  const areas = (snap.areas || []).filter((a) => !a.off_live).length, tfr = (snap.tfr || []).length, up = upcomingRows().length, both = lv["time and place"] || 0;
   $("reading").replaceChildren(el("span", "tic-reading-k", "Today\u2019s reading"),
     num(areas), ` live closure area${areas === 1 ? "" : "s"}, `, num(tfr), ` FAA space-operations TFR${tfr === 1 ? "" : "s"} and `,
     num(up), ` launch${up === 1 ? "" : "es"} scheduled in the next 14 days. `, num(both),
@@ -114,7 +118,7 @@ function liveModel() {
     return { type: "Feature", properties: { key, group: group(r.actor) }, geometry: { type: "LineString", coordinates: N.estimatedLine(r.pad, r.path) } };
   }) };
   const pads = { type: "FeatureCollection", features: [] };
-  ((snap.orbit || {}).upcoming || []).forEach((u) => {
+  upcomingRows().forEach((u) => {
     if (u.lat === null || u.lat === undefined) return;
     const key = "pad:" + u.id;
     byKey.set(key, { kind: "pad", u, r: upcomingRecs().find((x) => x.ll2 === u.id) || null });
@@ -214,7 +218,7 @@ function pastWeek() {
 function related() {
   const box = $("tic-related");
   if (!box || !window.TicRelated) return;
-  const up = (snap.orbit || {}).upcoming || [];
+  const up = upcomingRows();
   const matched = new Set((snap.matches || []).map((m) => m.launch));
   const score = new Map();
   up.forEach((u, i) => {
