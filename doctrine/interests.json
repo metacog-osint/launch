@@ -4,7 +4,7 @@
   "interests": [
     {
       "id": "LA-INT-1",
-      "about": "Orbit's scheduled launches, GCAT launches and launch-hazard navigational warnings are Launch's live inputs.",
+      "about": "GCAT launches from Orbit's published snapshot are one of Launch's live inputs.",
       "programs": [
         "orbit"
       ],

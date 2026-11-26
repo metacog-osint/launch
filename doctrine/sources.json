@@ -14,7 +14,7 @@
     },
     {
       "id": "orbit-snapshot",
-      "name": "Orbit (The Intelligence Company): scheduled launches (Launch Library 2) and GCAT launches; its NGA warnings only until Cordon's lane has run; its launch ledger file (orbit releases/ledger), read to begin Launch's own and for the side-by-side check while both run (Ascent move, 19 Nov 2026)",
+      "name": "Orbit (The Intelligence Company): GCAT launches of the last 30 days, from its published snapshot; and its frozen launch ledger file (orbit releases/ledger), read once to begin Launch's own LL2 ledger. Scheduled launches come from Launch's own schedule lane, and NGA warnings from Cordon",
       "url": "https://orbit.theintelligence.company/data/snapshot.json",
       "licence": "Each item keeps its source's terms: GCAT CC BY 4.0; Launch Library 2 free access, no licence stated; NGA US Government work; Japan Coast Guard Government Standard Terms of Use 2.0",
       "use": "ingest",
