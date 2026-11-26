@@ -23,17 +23,17 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
 from launch import (catalog, compare, feed, fetch, gcat, gnss, history, incbias, joey, live, ll2ledger, news, nfc, nms,  # noqa: E402
-                    nsf, overfly, patterns, privacy, public, schedule, timing, unlisted, wayback)
+                    nsf, overfly, patterns, privacy, public, rll, schedule, timing, unlisted, wayback)
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
 # Not imported: the exercise layer holds scenario text, not public notices.
 EXCLUDED_LAYERS = {"Previous Exercise NOTAMs"}
 LANE_FIELDS = {"tfr": ["tfr"], "orbit": ["orbit"], "cordon": ["cordon"], "nms": ["nms"], "schedule": ["schedule"],
-               "news": ["news"]}
+               "news": ["news"], "rll": ["rll"]}
 # The published ledger, read back on each run so a lost Actions cache loses no launch (merge is a union).
 LIVE_LEDGER = "https://launch.theintelligence.company/data/ledger.json"
-EMPTY = {"tfr": [], "orbit": {}, "cordon": {}, "nms": {}, "schedule": {}, "news": {}}
+EMPTY = {"tfr": [], "orbit": {}, "cordon": {}, "nms": {}, "schedule": {}, "news": {}, "rll": {}}
 # The Ascent move's stores (19 Nov 2026), kept for good on this repository's public release `ledger`: the workflow
 # uploads them after each collect, and collect reads them back from there (a local copy, when there is one, too).
 STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "ascent-compare.json"}
@@ -233,9 +233,30 @@ def update_schedule(snap: dict, data_dir: Path, now: datetime, getter=None) -> d
     if lane.get("status") == "ok" and isinstance(sch.get("rows"), list):
         rep = schedule.ingest(store, "ll2", sch["rows"], sch["read_at"], link_key="ll2_url")
         lane["ingest"] = {k: len(v) if isinstance(v, (list, dict)) else v for k, v in rep.items()}
+    update_rll(snap, store)
     _write(data_dir / STORE["upcoming"], store)
     _schedule_view(snap, store, now)
     return store
+
+
+def update_rll(snap: dict, store: dict) -> None:
+    """RocketLaunch.Live's next five (launch/rll.py) into the upcoming store, when its lane read them this run, then
+    each RocketLaunch.Live record joined to the Launch Library 2 record that is the same launch. Never fails the run."""
+    got, lane = snap.get("rll") or {}, snap["lanes"].get("rll") or {}
+    if lane.get("status") != "ok" or not isinstance(got.get("rows"), list):
+        return
+    try:
+        rows = [dict(x) for x in got["rows"]]
+        rll.place(rows, store)
+        rep = schedule.ingest(store, rll.SOURCE, rows, got["read_at"], link_key="rll_url")
+        joined = [schedule.join(store, b, a, got["read_at"], "RocketLaunch.Live and Launch Library 2: same place, "
+                                f"NETs within {rll.JOIN_HOURS:g} h, vehicles do not differ")["id"]
+                  for a, b in rll.pairs(store)]
+    except Exception as exc:  # noqa: BLE001
+        lane["ingest"] = {"status": "failed", "error": _err(exc)}
+        return
+    lane["ingest"] = {**{k: len(v) if isinstance(v, (list, dict)) else v for k, v in rep.items()},
+                      "joined": len(joined)}
 
 
 def _schedule_view(snap: dict, store: dict, now: datetime) -> None:
@@ -244,6 +265,8 @@ def _schedule_view(snap: dict, store: dict, now: datetime) -> None:
     for r in records:
         r["news"] = heads.get(r["id"], [])
     snap["schedule"] = {"read_at": (store.get("reads") or {}).get("ll2"), "attribution": schedule.ATTRIBUTION,
+                        "reads": dict(store.get("reads") or {}),
+                        "credits": {"ll2": schedule.ATTRIBUTION, rll.SOURCE: rll.CREDIT},
                         "held": len(store["records"]), "records": records}
 
 
@@ -454,8 +477,17 @@ def _lane_news(raw_dir: Path, prev: dict, getter, snap=None):
     return {"news": {"read_at": rec["fetched_at"], "source": news.SITE, **news.parse(body, ids)}}, [rec]
 
 
+def _lane_rll(raw_dir: Path, prev: dict, getter, snap=None):
+    """RocketLaunch.Live's next five launches (launch/rll.py), free tier: one request. Applied to the upcoming
+    store after the lanes (update_rll)."""
+    now = datetime.now(timezone.utc)
+    body, rec = fetch.fetch("rll-next5", rll.API, raw_dir, "json", getter=getter)
+    rows = schedule.within(rll.parse(body), now)
+    return {"rll": {"read_at": rec["fetched_at"], "credit": rll.CREDIT, "rows": rows}}, [rec]
+
+
 LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit, "cordon": _lane_cordon, "nms": _lane_nms,
-         "schedule": _lane_schedule, "news": _lane_news}
+         "schedule": _lane_schedule, "news": _lane_news, "rll": _lane_rll}
 
 
 def collect(root: Path = ROOT, getter=None, only=None) -> dict:
@@ -637,7 +669,8 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     sch = snap.get("schedule") or {}
     files["data/upcoming.json"] = dump({
         "schema": schedule.SCHEMA, "generated_at": snap["generated_at"], "read_at": sch.get("read_at"),
-        "attribution": [schedule.ATTRIBUTION, "Headlines: Spaceflight News API (spaceflightnewsapi.net), links only"],
+        "attribution": [schedule.ATTRIBUTION, rll.CREDIT + " (rocketlaunch.live), source rll",
+                        "Headlines: Spaceflight News API (spaceflightnewsapi.net), links only"],
         "store": ll2ledger.RELEASE + STORE["upcoming"], "ledger": ll2ledger.PUBLIC_URL,
         "records": sch.get("records") or []})
     cmp_path = root / "data" / STORE["compare"]

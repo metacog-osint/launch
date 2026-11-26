@@ -136,18 +136,18 @@
     },
     {
       "id": "rocketlaunch-live",
-      "name": "Candidate, not read by any lane: RocketLaunch.Live JSON API, free tier (next 5 launches)",
+      "name": "RocketLaunch.Live JSON API, free tier: the next 5 launches (the rll lane, a second source for the upcoming store)",
       "url": "https://www.rocketlaunch.live/api",
       "licence": "No licence stated; the API page asks for the credit \"Data by RocketLaunch.Live\" near the data",
-      "use": "excluded",
-      "grade": "F6",
+      "use": "ingest",
+      "grade": "B3",
       "independence_group": "rocketlaunch-live",
       "commercial_ok": "unknown",
       "vetting": {
         "read": "20-21 Nov 2026",
         "terms": "API page read. /terms answers 404; no terms of use found.",
         "robots": "Allows /api and /json/launches/next/5 for all agents; names no AI agents.",
-        "lead_time": "Not measurable from the free tier, which holds no history.",
+        "lead_time": "Not measurable from the free tier, which holds no history. Measured from the upcoming store once it has history: each rll record's first_seen against its NET, and against Launch Library 2's first_seen for joined records.",
         "sample": "Next 5 read 21 Nov 2026: a CASC launch from Taiyuan at 03:50Z 21 Nov (record modified 18 Nov) was not among the 16 Launch Library 2 records Launch published from its 01:15Z read. USSF-266 is 23 Nov here and 24 Nov in Launch Library 2."
       }
     },
