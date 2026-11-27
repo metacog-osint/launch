@@ -118,12 +118,19 @@
                 <option value="3">in the next 3 days</option><option value="7">in the next 7 days</option>
                 <option value="14">in the next 14 days</option>
               </select></label>
+          </fieldset>
+          <fieldset><legend>Site and launch</legend>
+            <label>Pad site <select id="layers-site"><option value="">every site</option></select></label>
+            <label>Scheduled launch <select id="layers-launch"><option value="">every launch</option></select></label>
+            <label><input type="checkbox" id="layers-place"> Hide time-only coincidences</label>
             <button type="button" class="linkish" id="layers-reset">Back to the default view</button>
           </fieldset>
           <p class="muted">An area's country is that of the scheduled launch whose path it lies on, else the state that
             issued it (FAA TFRs are the United States'). A navigational warning on no launch's path, or a NOTAM with no
-            issuing state, is under Everyone else. These choose what the map draws; the lists below stay complete. The address keeps your choice,
-            so you can share this view.</p>
+            issuing state, is under Everyone else. A site or launch keeps its scheduled launches and the closures that coincide with them; a
+            site also keeps closures whose launch-timing note names it. These choose what the map and the launch board
+            show; the lists below stay complete, except that "Hide time-only coincidences" also leaves those rows out of
+            the coincidence list. The address keeps your choice, so you can share this view.</p>
         </details>
       </div>
       <div class="map-stage"><div id="map" class="map"></div></div>
