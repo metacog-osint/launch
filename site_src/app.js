@@ -77,7 +77,7 @@ const upcomingRecs = () => ix.records.filter((r) => r.status === "upcoming");
 // Scheduled launches Launch Library 2 lists, from Launch's own schedule (snap.schedule.records), in the shape Orbit's
 // `upcoming` lane had: `id` is the LL2 uuid. The same rows tools/launch.py ll2_upcoming() matches against the areas.
 // (Orbit no longer publishes `upcoming`, so snap.orbit.upcoming is now always empty.)
-const upcomingRows = () => ((snap.schedule || {}).records || []).filter((r) => (r.refs || {}).ll2).map((r) => ({ ...r, id: r.refs.ll2, ll2_url: (r.links || {}).ll2 }));
+const upcomingRows = () => ((snap.schedule || {}).records || []).filter((r) => (r.refs || {}).ll2 && (r.listed_by || ["ll2"]).includes("ll2")).map((r) => ({ ...r, id: r.refs.ll2, ll2_url: (r.links || {}).ll2 }));
 const scheduled = (r) => upcomingRows().find((u) => u.id === r.ll2) || null;
 
 function tiles() {
