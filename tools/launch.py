@@ -116,6 +116,14 @@ def build_backfill(gdir: Path, root: Path = ROOT) -> dict:
            "gcat_updated": stamp, "citation": gcat.CITATION, "generated_at": now, "launches": launches, "closures": [],
            "sites": catalog.site_table(sites, used)}
     (root / "history" / "ledger.json").write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
+    # The payload owners' names, for the History tab's owner filter (the ledger carries GCAT's codes).
+    names = gcat.owner_names(orgs, (o for g in launches for o in (g.get("payloads") or {}).get("owners") or []))
+    # A name the privacy check would refuse (a school or body named for a person on its list) stays a bare code.
+    terms = privacy.private_terms()
+    names = {c: n for c, n in names.items() if not privacy.hits(n, terms)}
+    (root / "history" / "owners.json").write_text(
+        dump({"version": 1, "citation": gcat.CITATION, "gcat_updated": stamp.get("orgs"), "owners": names}, compact=True),
+        encoding="utf-8", newline="\n")
     return {"launches": len(launches), "sites": len(doc["sites"]), "gcat_updated": stamp.get("launch")}
 
 
@@ -667,9 +675,12 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     # Closure areas no other source carries, each checked against a published copy (history/published_notices.json).
     pub_path = root / "history" / "published_notices.json"
     published = json.loads(pub_path.read_text(encoding="utf-8"))["notices"] if pub_path.exists() else None
+    # Payload owners' names by GCAT code (history/owners.json, written by `backfill`).
+    own_path = root / "history" / "owners.json"
+    owners = json.loads(own_path.read_text(encoding="utf-8"))["owners"] if own_path.exists() else None
     index = catalog.build_index(hist, ledger, ll2_upcoming(snap), pat["corridors"],
                                 snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries),
-                                nsf_doc=nsf_doc, site_fixes=fixes, published=published,
+                                nsf_doc=nsf_doc, site_fixes=fixes, published=published, owner_names=owners,
                                 live={"matches": snap.get("matches") or [], "areas": snap.get("areas") or []})
     for tag in (index.get("site_fixes") or {}).get("stale") or []:
         print(f"site_fixes.json: {tag} no longer has the site its fix names in GCAT; review and drop the fix")

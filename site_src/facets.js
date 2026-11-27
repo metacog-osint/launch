@@ -1,4 +1,4 @@
-/* History tab facets that read a record's notices (history.js FACETS), kept apart from the page so they run in Node
+/* History tab facets that read a record's notices or payloads (history.js FACETS), kept apart from the page so they run in Node
    (tests/test_facets.py).
    firs(r, events): the flight information regions (four-letter ICAO codes) of every notice on the record: charted
    notices (`events`, the record's charted events from data/history.json), NotamForChina, Joey0609/notams, stored live
@@ -11,6 +11,18 @@ const firOf = (s) => (typeof s === "string" && FIR.test(s.trim()) ? s.trim() : n
 
 export const NO_FIR = "No FIR";
 export const NO_JOIN = "No notice joined";
+export const NO_OWNER = "None listed";
+
+/* owners(r): GCAT's codes for the owners of the record's payloads, a joint owner ("ESA/NASA") counted under each,
+   the doubt mark dropped (gcat.owner_codes). Records without a GCAT payload list none. */
+export function owners(r) {
+  const out = new Set();
+  ((r.payloads || {}).owners || []).forEach((o) => String(o).split("/").forEach((p) => {
+    const c = p.trim().replace(/\?+$/, "");
+    if (c && c !== "-") out.add(c);
+  }));
+  return out.size ? [...out].sort() : [NO_OWNER];
+}
 
 export function firs(r, events) {
   const out = new Set();
