@@ -428,5 +428,25 @@ class Feed(unittest.TestCase):
         self.assertEqual((p["event_start"], p["event_time_precision"]), ("2026-11-14T00:00:00Z", "day"))
 
 
+class SiteReadsSchedule(unittest.TestCase):
+    """Orbit no longer publishes `upcoming`, so the page must count and draw scheduled launches from
+    Launch's own schedule, the same rows ll2_upcoming() matches. Reading snap.orbit.upcoming showed 0 scheduled
+    launches beside a list of coincidences with scheduled launches."""
+
+    APP = (ROOT / "site_src" / "app.js").read_text(encoding="utf-8")
+
+    def test_no_read_of_orbit_upcoming(self):
+        self.assertNotIn("(snap.orbit || {}).upcoming", self.APP)
+
+    def test_rows_from_schedule_with_ll2_ids(self):
+        self.assertIn("(snap.schedule || {}).records", self.APP)
+        self.assertIn("id: r.refs.ll2", self.APP)
+
+    def test_same_rows_as_the_matcher(self):
+        snap = {"schedule": {"records": [{"id": "a", "name": "A", "refs": {"ll2": "u1"}, "links": {"ll2": "x"}},
+                                         {"id": "b", "name": "B", "refs": {}}]}}
+        self.assertEqual([u["id"] for u in cli.ll2_upcoming(snap)], ["u1"])
+
+
 if __name__ == "__main__":
     unittest.main()
