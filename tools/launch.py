@@ -134,7 +134,11 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
                   ll2_led: dict | None = None) -> dict:
     """Baseline (committed) + last run's ledger (Actions cache) + the published copy + this run's launches. The LL2
     ledger's launches since GCAT's newest launch go in as provisional records (catalog.flown_from_ll2), which a GCAT
-    launch joins once GCAT lists it."""
+    launch joins once GCAT lists it. When the release copy is unreadable (anything but a 404, which is no copy yet) and
+    the published copy is unreadable too, the run stops before writing, as the NMS closure ledger and the Ascent stores
+    do: the local copy may be older than the release (a restored or stale cache), and the workflow uploads what is
+    written here over the release's copy and that day's dated copy. The published copy is deployed with the same
+    ledger the release holds, so with it read nothing the release holds is lost."""
     def read(p: Path):
         try:
             return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
@@ -148,7 +152,11 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
         published = json.loads(body)
     except Exception as exc:  # the published copy is a safety net; the cache and the baseline still hold
         status = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:200], "failed_at": snap["generated_at"]}
-    released, _ = release_copy(RELEASE_COPY["ledger"], data_dir, getter)   # the durable copy (ideas#222)
+    released, rel_exc = release_copy(RELEASE_COPY["ledger"], data_dir, getter)   # the durable copy
+    if released is None and published is None and rel_exc is not None and getattr(rel_exc, "code", None) != 404:
+        raise RuntimeError(f"launch ledger: the release copy is unreadable ({type(rel_exc).__name__}: {rel_exc}) and "
+                           "so is the published copy; not writing a ledger that could be smaller than the release's"
+                           ) from rel_exc
     orb = snap.get("orbit") or {}
     now = snap["generated_at"]
     gcat_now = catalog.from_orbit(orb.get("launches") or [], now)
