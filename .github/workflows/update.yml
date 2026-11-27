@@ -2,12 +2,14 @@ name: update
 # Written 13 Nov 2026 from Orbit's update.yml. It deploys nothing until the Cloudflare Pages project `launch`
 # exists and the secrets below are set.
 #
-# Every hour (25 Nov 2026; every 6 hours before), on every push to main, and by hand. The hub's tic-dispatch Worker
-# starts it, because GitHub fires this account's schedules 4-9 hours late; the cron below (:11) is only the fallback.
-# Each run is short: three FAA TFR requests plus one XML per space-operations TFR (5 on 13 Nov 2026), one request for
-# Orbit's published snapshot, and Cordon's published NOTAM and NGA sets. About 24 runs a day, a minute or two each;
-# the repository is public, so its Actions minutes are free, and each run's deploy is a direct upload, not a Pages
-# build.
+# Every hour (27 Nov 2026; every 6 hours before), on every push to main, and by hand. The hub's tic-dispatch Worker
+# starts it at :45 past each UTC hour, or :55 at 01, 05, 09, 13, 17 and 21 UTC, because GitHub fires this account's
+# schedules 4-9 hours late; the cron below (:11) is only the fallback. Each run is short: three FAA TFR requests plus
+# one XML per space-operations TFR (5 on 13 Nov 2026), one request for Orbit's published snapshot, Cordon's published
+# NOTAM and NGA sets, and one RocketLaunch.Live request (launch/rll.py). About 24 runs a day, a minute or two each;
+# the repository is public, so its Actions minutes are free. Each deploy is a Wrangler direct upload: Cloudflare's
+# Pages limits page (developers.cloudflare.com/pages/platform/limits/) counts builds from Git pushes against the
+# Free plan's 500 builds a month and does not mention direct uploads.
 #
 # State: the last snapshot and the launch ledger are kept in this repository's private Actions cache, so a failed
 # lane keeps its last good copy and every launch already seen stays. Each run merges the committed baseline
@@ -27,9 +29,9 @@ name: update
 #
 # Ascent move (19 Nov 2026): the schedule lane makes one Launch Library 2 upcoming request a run, the LL2 ledger one
 # pull and at most one by-id lookup, and the news lane one Spaceflight News request. That is at most 3 LL2 requests a
-# run (Orbit's own LL2 lanes are retired). An hourly run plus the runs that pushes and manual starts add stay under
-# LL2's 15 requests an hour without a key unless five runs fall in one hour; a 429 fails only that lane, which keeps
-# its last good copy until the next run. Their stores
+# run (Orbit's own LL2 lanes are retired). The hourly run plus the runs that pushes, manual starts and the fallback
+# cron add stay within LL2's 15 requests an hour without a key while no more than five runs fall in one hour; a 429
+# fails only that lane, which keeps its last good copy until the next run. Their stores
 # (the multi-source schedule, the LL2 ledger and the side-by-side check with Orbit) are kept for good on this
 # repository's public release `ledger`, uploaded after collect; collect reads them back from there (a 404 is a
 # first run; anything else with no local copy stops the run). That is why this job may write contents.
