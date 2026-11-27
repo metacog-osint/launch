@@ -28,6 +28,11 @@ name: update
 # (the multi-source schedule, the LL2 ledger and the side-by-side check with Orbit) are kept for good on this
 # repository's public release `ledger`, uploaded after collect; collect reads them back from there (a 404 is a
 # first run; anything else with no local copy stops the run). That is why this job may write contents.
+#
+# Private archive (the last step): every run's source replies, run state, history/ and deployed site/ also go to the
+# PRIVATE repo metacog-osint/tic-archive (tools/tic_archive.py), where nothing is replaced or deleted. When the
+# Actions cache or release `ledger` lacks part of the state, the step before collect reads the newest archived copy
+# back. Secret TIC_ARCHIVE_TOKEN: a fine-grained token with contents read/write on tic-archive only.
 on:
   push:
     branches: [main]
@@ -64,7 +69,50 @@ jobs:
       - name: Say so when there was no state
         if: steps.state.outputs.cache-matched-key == ''
         run: echo "::warning::No state in the Actions cache, so this run has no last good copy to fall back on."
+      # The private archive's lane `state` holds the state of every run whose collect succeeded (the last step). It
+      # is read back only when the Actions cache had no state or release `ledger` lacks one of the stores collect
+      # reads from it (the Ascent stores are not in the cache). A file goes into data/ only where data/ has none, so
+      # the cache's copies stay; collect then unions what is there with the release and the published copies, as
+      # before. A restore that fails or is not possible never stops the run: those other sources still hold.
+      - name: Fill gaps in the state from the private archive (when the cache or release `ledger` lacks them)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_TOKEN: ${{ secrets.TIC_ARCHIVE_TOKEN }}
+          CACHED: ${{ steps.state.outputs.cache-matched-key }}
+        run: |
+          need=""
+          [ -n "$CACHED" ] || need="no state in the Actions cache"
+          have=$(gh release view ledger --json assets --jq '.assets[].name' 2>/dev/null || true)
+          for f in upcoming-store.json ll2-ledger.json launch-ledger.json nms-closures.json; do
+            printf '%s\n' "$have" | grep -qx "$f" || need="${need:+$need; }no $f on release ledger"
+          done
+          if [ -z "$need" ]; then echo "state: the cache and release ledger hold it; the archive is not read"; exit 0; fi
+          echo "state: $need"
+          if [ -z "$ARCHIVE_TOKEN" ]; then
+            echo "::warning::secret TIC_ARCHIVE_TOKEN is not set, so no state was read back from the private archive"
+            exit 0
+          fi
+          if GH_TOKEN="$ARCHIVE_TOKEN" python tools/tic_archive.py restore --program launch --lane state \
+               --dest "$RUNNER_TEMP/archive-state"; then
+            python - "$RUNNER_TEMP/archive-state" data <<'PY' || echo "::warning::the archived state was not copied into data/"
+          import shutil, sys
+          from pathlib import Path
+          src, dest = Path(sys.argv[1]), Path(sys.argv[2])
+          n = 0
+          for p in sorted(src.rglob("*")):
+              q = dest / p.relative_to(src)
+              if p.is_file() and not q.exists():
+                  q.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(p, q)
+                  n += 1
+          print(f"state: {n} files from the private archive, where data/ had none")
+          PY
+            echo "::warning::filled gaps in the state from the newest copy in the private archive ($need)"
+          else
+            echo "::warning::the private archive's state could not be read; collect goes on with the cache, release ledger and the published copies"
+          fi
       - name: Live collection (a failed lane keeps its last good copy and says so on the page)
+        id: collect
         run: python tools/launch.py collect
       - name: Keep the schedule, the LL2 ledger and the comparison for good (release `ledger`)
         env:
@@ -120,6 +168,7 @@ jobs:
             data/gnss
           key: launch-state-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Deploy site/ to Cloudflare Pages
+        id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -137,3 +186,51 @@ jobs:
             fi
           done
           echo "::error::Cloudflare Pages deploy failed three times"; exit 1
+      # What this public repository discards, keeps only for a while or replaces goes to the PRIVATE repo
+      # metacog-osint/tic-archive (tools/tic_archive.py), one lane each, release launch-<lane>-YYYY-MM: a snapshot per
+      # run, only changed files uploaded, nothing replaced or deleted.
+      #   raw      data/raw: this run's source replies and their fetch index, which the runner discards. Whenever
+      #            collect fetched any, even in a run that failed later.
+      #   state    data/ without data/raw and the release copies (byte copies of data/ files): the snapshot, the
+      #            launch ledger, the NMS closure ledger, the GNSS NOTAM store and day files, and the Ascent stores.
+      #            The Actions cache keeps them 7 days, release `ledger` replaces them each run, a same-day run
+      #            replaces that day's dated copy, and the GNSS store trims its run log. Once collect succeeded; the
+      #            step before collect reads this lane back.
+      #   history  history/ as checked out: the committed baseline and the charted, NotamForChina, Joey0609 and
+      #            Internet Archive histories, with their licence files. A run with no change uploads nothing.
+      #   site     site/ as deployed: every published file, each replaced by the next deploy. Once the deploy step
+      #            succeeded.
+      # No source Launch reads takes a key, so nothing is redacted and the archived bytes match the files here.
+      # Each lane is tried even if another failed; a missing token or any failed lane turns the run red after the
+      # live site is updated.
+      - name: Private archive (raw replies, run state, history and site, to tic-archive)
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.TIC_ARCHIVE_TOKEN }}
+          COLLECTED: ${{ steps.collect.outcome }}
+          DEPLOYED: ${{ steps.deploy.outcome }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::secret TIC_ARCHIVE_TOKEN is not set, so nothing went to the private archive"; exit 1
+          fi
+          failed=0
+          if [ -d data/raw ]; then
+            python tools/tic_archive.py put --program launch --lane raw --src data/raw || failed=1
+          else
+            echo "raw: collect fetched nothing this run, so there are no replies to archive"
+          fi
+          if [ "$COLLECTED" = "success" ]; then
+            python tools/tic_archive.py put --program launch --lane state --src data --exclude 'raw/*' \
+              --exclude 'release-copy/*' || failed=1
+          else
+            echo "state: collect did not succeed this run, so the state was not archived"
+          fi
+          python tools/tic_archive.py put --program launch --lane history --src history || failed=1
+          if [ "$DEPLOYED" = "success" ]; then
+            python tools/tic_archive.py put --program launch --lane site --src site || failed=1
+          else
+            echo "site: not deployed this run, so not archived"
+          fi
+          if [ "$failed" != 0 ]; then
+            echo "::error::a lane did not reach the private archive this run (see above)"; exit 1
+          fi
