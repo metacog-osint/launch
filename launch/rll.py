@@ -156,10 +156,13 @@ def candidates(rec: dict, others: list[dict]) -> list[tuple[float, dict]]:
 def pairs(store: dict) -> list[tuple[str, str]]:
     """(RocketLaunch.Live record id, Launch Library 2 record id) for each pair that is one launch. Only records
     one of the two sources holds (a RocketLaunch.Live record may also hold a closure notice); a record with two
-    equally near candidates joins neither."""
+    equally near candidates joins neither. Only Launch Library 2 records LL2 still lists are candidates: one it has
+    stopped listing (a launch that flew, say) could otherwise take a new launch from the same pad within the join
+    window, and a join is never undone."""
     recs = store.get("records") or []
     rll_only = [r for r in recs if SOURCE in (r.get("refs") or {}) and "ll2" not in (r.get("refs") or {})]
-    ll2 = [r for r in recs if "ll2" in (r.get("refs") or {}) and SOURCE not in (r.get("refs") or {})]
+    ll2 = [r for r in recs if "ll2" in (r.get("refs") or {}) and SOURCE not in (r.get("refs") or {})
+           and ((r.get("by_source") or {}).get("ll2") or {}).get("listed")]
     out, used = [], set()
     for r in rll_only:
         c = [(h, o) for h, o in candidates(r, ll2) if o["id"] not in used]
