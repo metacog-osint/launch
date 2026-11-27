@@ -69,6 +69,21 @@ class Closures(unittest.TestCase):
         named = [{"area": "A1/26", "level": "time", "named": "NG-25"}]
         self.assertEqual(self.run_it([area()], matches=named), [])
 
+    def test_separate_notice_for_a_reserve_day_is_out(self):
+        """A warning placed on a listed launch lists the launch day and reserve days; a separate notice for each
+        reserve day, its window ending at the same minute, is that launch's, not a closure with no listing."""
+        warn = area("NAV-1/26", start="2026-11-29T21:10:00Z", end="2026-11-29T21:36:00Z")
+        warn["windows"] += [{"start": "2026-11-30T20:50:00Z", "end": "2026-11-30T21:16:00Z"},
+                            {"start": "2026-12-01T20:30:00Z", "end": "2026-12-01T20:56:00Z"}]
+        day2 = area("A2/26", start="2026-11-30T20:44:00Z", end="2026-11-30T21:16:00Z")
+        day3 = area("A3/26", start="2026-12-01T20:24:00Z", end="2026-12-01T20:56:00Z")
+        placed = [{"area": "NAV-1/26", "level": "time and place"}]
+        self.assertEqual(self.run_it([warn, day2, day3], matches=placed), [])
+        # Without the placed warning (it is then a row itself), or on another day's hours, they stay rows.
+        self.assertEqual(len(self.run_it([warn, day2, day3])), 3)
+        other = area("A4/26", start="2026-11-30T09:00:00Z", end="2026-11-30T09:30:00Z")
+        self.assertEqual([r["id"] for r in self.run_it([warn, other], matches=placed)], ["unlisted:A4/26"])
+
     def test_areas_opening_together_are_one_row(self):
         rows = self.run_it([area("A1/26"), area("A2/26", start="2026-11-29T21:20:00Z", end="2026-11-29T21:50:00Z"),
                             area("A3/26", start="2026-11-30T09:00:00Z", end="2026-11-30T09:30:00Z")])
