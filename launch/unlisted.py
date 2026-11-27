@@ -3,7 +3,9 @@
 An area qualifies when it has a window of MAX_WINDOW_H or less ahead, inside the schedule's horizon, and
 `timing.expect` finds a site with launch-timing history within its NEAR_NM. A notice is judged whole: if a listed launch
 from within LISTED_NM of that site falls in any of its windows, the other windows are that launch's reserve days and
-the notice is left out. A listing dated only to a day or a month cannot be placed in a window, so it is named beside
+the notice is left out. The same holds for a launch that has flown (`flown`: Launch Library 2's flown launches, which
+its upcoming read drops about a day after launch): a notice with a window in which a launch flew from within LISTED_NM
+of the site is that launch's, and its later windows are reserve days. A listing dated only to a day or a month cannot be placed in a window, so it is named beside
 the closure (`maybe_listed`) and the closure stays. Areas at one site opening within GROUP_H are one row.
 
 This says a closure exists and the schedule shows no launch for it. It does not say a launch is coming: closures are
@@ -86,7 +88,8 @@ def _listing(rec: dict) -> bool:
 
 
 def closures(areas: list[dict], records: list[dict], sites: dict, now: datetime,
-             schedule_ok: bool = True, matches: list[dict] | None = None) -> list[dict]:
+             schedule_ok: bool = True, matches: list[dict] | None = None,
+             flown: list[dict] | None = None) -> list[dict]:
     """`matches` are live.match's rows: an area that already coincides in time and place with a listed launch from
     any site (a downrange area, say, nearer another site), or whose text names a listed launch, is that launch's to
     explain, so it is left out. An area marked `off_live` (its text says it is not a launch) is left out too."""
@@ -114,6 +117,10 @@ def closures(areas: list[dict], records: list[dict], sites: dict, now: datetime,
         near = [r for r in records if r.get("lat") is not None and r.get("lon") is not None
                 and notam.haversine_nm(r["lat"], r["lon"], pad[1], pad[0]) <= LISTED_NM]
         if any(_exact(r) and _in_window(r, s, e) for r in near for s, e in ahead):
+            continue
+        flew = [r for r in flown or [] if r.get("lat") is not None and r.get("lon") is not None
+                and notam.haversine_nm(r["lat"], r["lon"], pad[1], pad[0]) <= LISTED_NM]
+        if any(_exact(r) and _in_window(r, s, e) for r in flew for s, e in _windows(a)):
             continue
         maybe = sorted({r.get("name") or "" for r in near if not _exact(r) and _may_be(r, short[0][0])} - {""})
         found.append({"key": a.get("key") or a.get("id"), "source": a.get("source"), "start": short[0][0],

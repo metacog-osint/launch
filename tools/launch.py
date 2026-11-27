@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -235,6 +235,15 @@ def ll2_upcoming(snap: dict) -> list[dict]:
             out.append({**{k: r.get(k) for k in schedule.FIELDS}, "id": ref,
                         "ll2_url": (r.get("links") or {}).get("ll2"), "last_updated": r.get("updated")})
     return out
+
+
+def recent_flown(ll2_led: dict | None, now: datetime, days: int = unlisted.HORIZON_DAYS + 2) -> list[dict]:
+    """The LL2 ledger's flown launches of the last `days` days, for unlisted.closures: a notice with a window one of
+    them flew in is that launch's, not a closure with no listing."""
+    since = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    until = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [r for r in (ll2_led or {}).get("launches") or []
+            if r.get("status") in catalog.LL2_FLOWN and since <= (r.get("net") or "") <= until]
 
 
 def update_schedule(snap: dict, data_dir: Path, now: datetime, getter=None) -> dict:
@@ -564,7 +573,8 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     sched_lane = snap["lanes"].get("schedule") or {}
     sched_ok = bool((snap.get("schedule") or {}).get("read_at")) and sched_lane.get("status") != "failed"
     snap["unlisted"] = unlisted.closures(areas, (snap.get("schedule") or {}).get("records") or [], tim,
-                                         datetime.now(timezone.utc), schedule_ok=sched_ok, matches=snap["matches"])
+                                         datetime.now(timezone.utc), schedule_ok=sched_ok, matches=snap["matches"],
+                                         flown=recent_flown(ll2_led, datetime.now(timezone.utc)))
     if store is not None and sched_ok and tim:
         update_closure_records(snap, store, tim, data_dir, datetime.now(timezone.utc))
     snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter, ll2_led)

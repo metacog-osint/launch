@@ -158,5 +158,40 @@ class ClosureRecords(unittest.TestCase):
         self.assertEqual(len(store["records"]), 3)
 
 
+class FlownLaunch(unittest.TestCase):
+    """A notice with reserve-day windows: once its launch flew and the schedule dropped it, the notice is that
+    launch's, not a closure with no listing."""
+    WINDOWS = [{"start": "2026-11-20T21:06:00Z", "end": "2026-11-20T21:36:00Z"},
+               {"start": "2026-11-22T21:06:00Z", "end": "2026-11-22T21:36:00Z"}]
+
+    def flown(self, lat=41.0, lon=100.3, net="2026-11-20T21:15:00Z", precision="Minute"):
+        return [{"name": "LM-2D", "net": net, "net_precision": precision, "lat": lat, "lon": lon, "status": "Success"}]
+
+    def test_reserve_day_after_the_launch_flew_is_no_row(self):
+        a = area(windows=self.WINDOWS)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW)), 1)
+        self.assertEqual(unlisted.closures([a], [], SITES, NOW, flown=self.flown()), [])
+
+    def test_a_launch_elsewhere_or_outside_the_windows_keeps_the_row(self):
+        a = area(windows=self.WINDOWS)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(lat=28.5, lon=-80.6))), 1)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(net="2026-11-19T10:00:00Z"))), 1)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(precision="Day"))), 1)
+
+    def test_recent_flown_from_the_ll2_ledger(self):
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location("launch_cli_unlisted",
+                                                      Path(__file__).resolve().parents[1] / "tools" / "launch.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        led = {"launches": [{"id": "a", "net": "2026-11-20T21:15:00Z", "status": "Success"},
+                            {"id": "b", "net": "2026-11-20T22:00:00Z", "status": "Go"},
+                            {"id": "c", "net": "2026-10-01T00:00:00Z", "status": "Success"},
+                            {"id": "d", "net": "2026-11-23T00:00:00Z", "status": "Success"}]}
+        self.assertEqual([r["id"] for r in cli.recent_flown(led, NOW)], ["a"])
+        self.assertEqual(cli.recent_flown(None, NOW), [])
+
+
 if __name__ == "__main__":
     unittest.main()
