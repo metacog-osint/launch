@@ -75,7 +75,13 @@ def _may_be(rec: dict, s: datetime) -> bool:
 
 
 def _listing(rec: dict) -> bool:
-    """A schedule record that some source lists (not only this module's own closure records)."""
+    """A schedule record that a source other than this module lists in its latest read. A record joined to a listing
+    that has since gone reads as a closure with no listing again. Public records carry `listed_by`; store records
+    their per-source `listed`; a bare row (tests, older copies) counts as listed unless its evidence says otherwise."""
+    if "listed_by" in rec:
+        return any(s != SOURCE for s in rec["listed_by"] or [])
+    if rec.get("by_source"):
+        return any(s != SOURCE for s in schedule.listed_by(rec))
     return "listed" in (rec.get("evidence") or ["listed"])
 
 

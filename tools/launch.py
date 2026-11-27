@@ -216,13 +216,14 @@ def _err(exc: Exception) -> str:
 
 def ll2_upcoming(snap: dict) -> list[dict]:
     """Launch's own scheduled launches that Launch Library 2 lists, in the shape Orbit's `upcoming` lane had, for
-    live.match, the ledger and the site index (Ascent step 4, ideas#69). `id` is the LL2 uuid, as it was in Orbit's
+    live.match, the ledger and the site index. `id` is the LL2 uuid, as it was in Orbit's
     copy, so match ids and ledger ids do not change. A record held only by a closure notice has no LL2 ref and is
-    left out: it came from the areas, so matching it against them would be circular."""
+    left out: it came from the areas, so matching it against them would be circular. So is a record LL2 has stopped
+    listing (`listed_by`), whose LL2 fields are no longer shown."""
     out = []
     for r in (snap.get("schedule") or {}).get("records") or []:
         ref = (r.get("refs") or {}).get("ll2")
-        if ref:
+        if ref and "ll2" in r.get("listed_by", ["ll2"]):
             out.append({**{k: r.get(k) for k in schedule.FIELDS}, "id": ref,
                         "ll2_url": (r.get("links") or {}).get("ll2"), "last_updated": r.get("updated")})
     return out

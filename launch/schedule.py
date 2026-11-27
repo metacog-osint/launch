@@ -16,7 +16,9 @@ The record (`store["records"]`, one per expected launch):
             source `closure`: net is the closure window's opening, net_precision "closure window"). None is a
             forecast.
   fields    name, net, window, status, provider, vehicle, mission, orbit, pad, place: from the first source in
-            PRECEDENCE that holds the record.
+            PRECEDENCE that still lists the record (then the other sources in order; a record no source lists keeps
+            the first reading in that order). A source that stops listing a launch no longer supplies its fields.
+  listed_by (public records only) the sources that list the record in their latest read, in `sources` order.
   by_source per source: first_seen, last_seen, listed (still in that source's latest read), unlisted_at, the
             source's own last_updated, and its link.
   changes   every change of a compared field, with the time read and the source (kept for good, never cut).
@@ -137,13 +139,22 @@ def _index(store: dict) -> dict[tuple[str, str], dict]:
     return {(s, ref): r for r in store["records"] for s, ref in (r.get("refs") or {}).items()}
 
 
+def listed_by(r: dict) -> list[str]:
+    """The sources that list a record in their latest read, in `sources` order."""
+    bs = r.get("by_source") or {}
+    return [s for s in r.get("sources") or [] if (bs.get(s) or {}).get("listed")]
+
+
 def _fields_from(r: dict) -> None:
-    """Set a record's shown fields from the first source in PRECEDENCE that holds it."""
-    for s in list(PRECEDENCE) + [s for s in r["sources"] if s not in PRECEDENCE]:
-        reading = (r.get("by_source") or {}).get(s, {}).get("fields")
-        if reading:
-            r.update({k: reading.get(k) for k in FIELDS})
-            return
+    """Set a record's shown fields from the first source in PRECEDENCE that still lists it, else (no source lists
+    it) from the first that holds a reading."""
+    order = list(PRECEDENCE) + [s for s in r["sources"] if s not in PRECEDENCE]
+    bs = r.get("by_source") or {}
+    held = [s for s in order if (bs.get(s) or {}).get("fields")]
+    pick = next((s for s in held if bs[s].get("listed")), held[0] if held else None)
+    if pick:
+        reading = bs[pick]["fields"]
+        r.update({k: reading.get(k) for k in FIELDS})
 
 
 def _new(source: str, ref: str, read_at: str, evidence: str) -> dict:
@@ -195,6 +206,7 @@ def ingest(store: dict, source: str, rows: list[dict], read_at: str, evidence: s
             bs.update({"listed": False, "unlisted_at": read_at})
             rec["updated"] = read_at
             rep["unlisted"].append(rec["id"])
+            _fields_from(rec)
     store["reads"][source] = read_at
     store["updated_at"] = read_at
     return rep
@@ -297,6 +309,7 @@ def active(store: dict, now: datetime, days: int = HORIZON_DAYS) -> list[dict]:
 def _public(r: dict) -> dict:
     """A record as the site and readers get it: shown fields, sources and links, no per-source copies."""
     out = {k: r.get(k) for k in ("id", "sources", "refs", "evidence", "first_seen", "updated", *FIELDS)}
+    out["listed_by"] = listed_by(r)
     out["links"] = {s: b.get("link") for s, b in (r.get("by_source") or {}).items() if b.get("link")}
     moves = sorted((c for c in r.get("changes") or [] if len((c.get("fields") or {}).get("net") or []) == 2),
                    key=lambda c: c.get("at") or "")
