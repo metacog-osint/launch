@@ -81,8 +81,23 @@ def orgs_table(rows: list[dict]) -> dict[str, dict]:
     for r in rows:
         code = (r.get("Code") or "").strip()
         if code and (code not in out or r.get("TStop", "") in ("*", "-", "")):
-            out[code] = {"name": r.get("Name", ""), "state": r.get("StateCode", "")}
+            out[code] = {"name": r.get("Name", ""), "state": r.get("StateCode", ""),
+                         "english": next((r[k] for k in ("EName", "ShortEName") if (r.get(k) or "-") != "-"), "")}
     return out
+
+
+def owner_codes(owner: str) -> list[str]:
+    """The organisation codes in one satcat owner field: a joint owner ('ESA/NASA') is each of its codes, GCAT's
+    doubt mark ('?') is dropped."""
+    return [c for c in (p.strip().rstrip("?") for p in (owner or "").split("/")) if c not in ("", "-")]
+
+
+def owner_names(orgs: dict, owners) -> dict[str, str]:
+    """Code -> readable name for the owner fields given: orgs.tsv's English name where it has one, else its name. A
+    code orgs.tsv does not list is left out."""
+    codes = sorted({c for o in owners for c in owner_codes(o)})
+    return {c: orgs[c].get("english") or orgs[c]["name"] for c in codes
+            if c in orgs and (orgs[c].get("english") or orgs[c]["name"]) not in ("", "-")}
 
 
 def agency_country(agency: str, orgs: dict) -> str | None:

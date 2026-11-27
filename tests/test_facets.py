@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 const recs = JSON.parse(readFileSync(0, "utf8"));
 const out = recs.map((r) => ({ firs: F.firs(r, r._events || []), joined: F.joinedBy(r) }));
 out.push({ notes: Object.keys(F.JOIN_NOTES).length });
+out.push({ owners: [F.owners({ payloads: { owners: ["ESA/NASA", "NASA", "SPXS?", "-"] } }), F.owners({})] });
 console.log(JSON.stringify(out));
 """
 
@@ -44,7 +45,7 @@ class TestFacets(unittest.TestCase):
         return json.loads(r.stdout)
 
     def test_made_up_records(self):
-        a, b, c, d, e, f, notes = self.run_js(RECORDS)
+        a, b, c, d, e, f, notes, own = self.run_js(RECORDS)
         self.assertEqual(a["firs"], ["ZGZU", "ZJSA", "ZLHW", "ZPKM", "ZSHA"])
         self.assertEqual(a["joined"], ["Charted notice: same time and place", "NotamForChina: lists this launch",
                                        "Notice: same NOTAM number and FIR", "Notice: its window holds the launch"])
@@ -60,11 +61,12 @@ class TestFacets(unittest.TestCase):
         self.assertEqual(e, {"firs": ["KZAK"], "joined": ["Notice saved in this browser"]})
         self.assertEqual(f, {"firs": ["No FIR"], "joined": ["No notice joined"]})
         self.assertEqual(notes, {"notes": 9})
+        self.assertEqual(own, {"owners": [["ESA", "NASA", "SPXS"], ["None listed"]]})
 
     @unittest.skipUnless((ROOT / "site" / "data" / "launches.json").exists(), "site/ not built")
     def test_built_data_every_value_is_worded(self):
         recs = json.loads((ROOT / "site" / "data" / "launches.json").read_text(encoding="utf-8"))["records"]
-        out = self.run_js(recs)[:-1]
+        out = self.run_js(recs)[:-2]   # the last two lines are the script's own checks
         firs = {v for o in out for v in o["firs"]}
         self.assertTrue(all(v == "No FIR" or (len(v) == 4 and v.isalpha() and v.isupper()) for v in firs), firs)
         joined = {v for o in out for v in o["joined"]}

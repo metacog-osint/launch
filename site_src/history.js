@@ -56,6 +56,7 @@ const FACETS = [
   { k: "site", label: "Launch site", get: (r) => r.site || NK, search: true },
   { k: "prog", label: "Programme", get: (r) => (r.programmes && r.programmes.length ? r.programmes : ["None found"]), search: true },
   { k: "mt", label: "Mission type", get: (r) => r.mtype },
+  { k: "own", label: "Payload owner", get: (r) => cached(r, "own", () => FX.owners(r)), name: (v) => (IX.owners || {})[v] || v, search: true },
   { k: "orb", label: "Orbit", get: (r) => r.orbit || NK },
   { k: "out", label: "Outcome", get: (r) => (r.status === "upcoming" ? "Scheduled" : r.outcome === "success" ? "Success" : r.outcome ? "Failure or partial" : NK) },
   { k: "src", label: "Source", get: (r) => r.sources, name: (v) => SOURCES[v] || v },
