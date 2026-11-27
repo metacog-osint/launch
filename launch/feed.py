@@ -205,7 +205,9 @@ def _upcoming_item(r: dict, generated: str, read_at: str, notice_src: dict, read
         end = _iso(_dt(r.get("window_end") or r["net"]))
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
-    listing = [s for s in LISTING_SOURCES if (r.get("refs") or {}).get(s)]
+    # The sources that list it now (schedule.listed_by); a copy without the field falls back to every source held.
+    now_listing = r["listed_by"] if "listed_by" in r else list(r.get("refs") or {})
+    listing = [s for s in LISTING_SOURCES if s in now_listing]
     closure = not listing and "closure" in (r.get("sources") or [])
     precision = None if closure else _precision(r.get("net_precision"))
     start, stop = _floor(net, precision), _floor(end, precision)

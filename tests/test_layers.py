@@ -78,6 +78,7 @@ const f = (iso) => "T(" + iso + ")";
 const N = "2026-11-30T00:00:00Z";
 out.net = ["Minute", "Hour", "Day", "Month", "Week", "Quarter (Q1)", null, "closure window"].map((p) => B.netWords(N, p, f));
 out.netBad = B.netWords("", "Hour", f);
+out.seen = [{ at: "a", from: "b", to: "c", source: "ll2" }, { at: "a", from: "b", to: "c", source: "rll" }, null].map((m) => B.seenText(m, f));
 out.coarse = [
   L.launchShown("US", "2026-11-26T00:00:00Z", s({ within: 3 }), now, "Month"),
   L.launchShown("US", "2026-11-26T00:00:00Z", D, now, "Month"),
@@ -86,6 +87,23 @@ out.coarse = [
 ];
 out.stacks = L.stacks([{ k: 1, at: [-120.61, 34.63] }, { k: 2, at: [100, 40] }, { k: 3, at: [-120.61, 34.632] }, { k: 4, at: [-120.5, 34.63] }], 5)
   .map((g) => g.map((m) => m.k));
+const fr = [
+  { status: "upcoming", ll2: "a", site: "Taiyuan", live: { closures: [{ i: 0, level: "time and place" }, { i: 1, level: "time" }] } },
+  { status: "upcoming", ll2: "b", site: "Vandenberg", live: { closures: [{ i: 2, level: "time" }] } },
+  { status: "upcoming", ll2: "c", site: "Taiyuan" },
+  { status: "launched", ll2: "d", site: "Taiyuan", live: { closures: [{ i: 9, level: "time" }] } },
+];
+const fm = [{ launch: "a", area_i: 3, level: "time" }, { launch: "c", area_i: 4, level: "grouped" }, { launch: "b", area_i: 5, level: "time and place" }];
+const fa = [{}, {}, {}, {}, {}, {}, { expect: { site: "Taiyuan" } }, { expect: { site: "Xichang" } }];
+const F = (o) => { const x = L.focus(s(o), fr, fm, fa); return x && [[...x.launches].sort(), [...x.areas].sort((m, n) => m - n)]; };
+out.focus = [F({}), F({ match: "place" }), F({ site: "Taiyuan" }), F({ site: "Taiyuan", match: "place" }), F({ launch: "a" }), F({ launch: "b", match: "place" })];
+const q = "site=Hainan+commercial+%%28Wenchang%%29&match=place";
+out.siteQ = [L.parse(q).site, L.parse(q).match, L.query(L.parse(q)), L.parse("match=bogus").match];
+out.settle = [L.settle(s({ site: "Nowhere", launch: "z" }), ["Taiyuan"], ["a"]), L.settle(s({ site: "Taiyuan", launch: "a" }), ["Taiyuan"], ["a"])]
+  .map((x) => [x.site, x.launch]);
+out.matchShown = ["time", "time and place", "grouped"].map((level) => [L.matchShown({ level }, D), L.matchShown({ level }, s({ match: "place" }))]);
+const rv = { actor: "CN", site: "Taiyuan" }, rs = (o) => L.recentShown(rv, s({ show: ["recent"], ...o }));
+out.recentFocus = [rs({ site: "Taiyuan" }), rs({ site: "Xichang" }), rs({ launch: "a" })];
 console.log(JSON.stringify(out));
 """
 
@@ -102,11 +120,13 @@ class LayersJsTest(unittest.TestCase):
 
     def test_the_default_is_areas_paths_and_pads_everywhere_for_14_days(self):
         self.assertEqual(self.o["dflt"], {"show": ["areas", "paths", "pads"], "src": ["notam", "nga", "tfr"],
-                                          "cc": ["us", "cn", "ru", "other"], "within": 0})
+                                          "cc": ["us", "cn", "ru", "other"], "within": 0,
+                                          "site": "", "launch": "", "match": "all"})
         self.assertEqual(self.o["dq"], "")
 
     def test_the_address_round_trips_and_drops_unknown_names(self):
-        self.assertEqual(self.o["parsed"], {"show": ["recent", "paths"], "src": ["tfr"], "cc": ["cn", "ru"], "within": 3})
+        self.assertEqual(self.o["parsed"], {"show": ["recent", "paths"], "src": ["tfr"], "cc": ["cn", "ru"], "within": 3,
+                                            "site": "", "launch": "", "match": "all"})
         self.assertEqual(self.o["q"], "show=paths,recent&src=tfr&cc=cn,ru&within=3")   # canonical order
         self.assertEqual(self.o["none"]["show"], [])
         self.assertEqual(self.o["noneQ"], "show=none")
@@ -124,6 +144,22 @@ class LayersJsTest(unittest.TestCase):
     def test_which_launches_show(self):
         self.assertEqual(self.o["launches"], [True, False, True, False, True, True])
         self.assertEqual(self.o["recent"], [False, True, False])
+
+    def test_a_site_or_launch_narrows_to_its_launches_and_closures(self):
+        none, level_only, site, site_place, launch, other = self.o["focus"]
+        self.assertIsNone(none)
+        self.assertIsNone(level_only)   # the match choice alone leaves the map's areas as they were
+        self.assertEqual(site, [["a", "c"], [0, 1, 3, 4, 6]])   # with the area whose timing note names the site
+        self.assertEqual(site_place, [["a", "c"], [0, 4, 6]])
+        self.assertEqual(launch, [["a"], [0, 1, 3]])
+        self.assertEqual(other, [["b"], [5]])
+        self.assertEqual(self.o["recentFocus"], [True, False, False])
+
+    def test_site_launch_and_match_in_the_address(self):
+        self.assertEqual(self.o["siteQ"], ["Hainan commercial (Wenchang)", "place",
+                                           "site=Hainan+commercial+%28Wenchang%29&match=place", "all"])
+        self.assertEqual(self.o["settle"], [["", ""], ["Taiyuan", "a"]])   # a flown or unknown name is dropped
+        self.assertEqual(self.o["matchShown"], [[True, False], [True, True], [True, True]])
 
     def test_summary_line(self):
         self.assertEqual(self.o["sum"], ["Showing 1 of 1 area and 1 of 1 scheduled launch on the map.",
@@ -149,6 +185,8 @@ class LayersJsTest(unittest.TestCase):
             "Nov 2026 (month only)", "Week of 30 Nov 2026 UTC", "2026 (Quarter (Q1))", "T(2026-11-30T00:00:00Z)",
             "T(2026-11-30T00:00:00Z)"])
         self.assertEqual(self.o["netBad"], "")
+        self.assertEqual(self.o["seen"], ["Seen T(a): from T(b) to T(c)",
+                                          "Seen T(a): from T(b) to T(c) (Data by RocketLaunch.Live)", ""])
 
     def test_a_coarse_net_shows_only_with_any_time(self):
         self.assertEqual(self.o["coarse"], [False, True, True, True])

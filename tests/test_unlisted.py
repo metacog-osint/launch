@@ -69,6 +69,21 @@ class Closures(unittest.TestCase):
         named = [{"area": "A1/26", "level": "time", "named": "NG-25"}]
         self.assertEqual(self.run_it([area()], matches=named), [])
 
+    def test_separate_notice_for_a_reserve_day_is_out(self):
+        """A warning placed on a listed launch lists the launch day and reserve days; a separate notice for each
+        reserve day, its window ending at the same minute, is that launch's, not a closure with no listing."""
+        warn = area("NAV-1/26", start="2026-11-29T21:10:00Z", end="2026-11-29T21:36:00Z")
+        warn["windows"] += [{"start": "2026-11-30T20:50:00Z", "end": "2026-11-30T21:16:00Z"},
+                            {"start": "2026-12-01T20:30:00Z", "end": "2026-12-01T20:56:00Z"}]
+        day2 = area("A2/26", start="2026-11-30T20:44:00Z", end="2026-11-30T21:16:00Z")
+        day3 = area("A3/26", start="2026-12-01T20:24:00Z", end="2026-12-01T20:56:00Z")
+        placed = [{"area": "NAV-1/26", "level": "time and place"}]
+        self.assertEqual(self.run_it([warn, day2, day3], matches=placed), [])
+        # Without the placed warning (it is then a row itself), or on another day's hours, they stay rows.
+        self.assertEqual(len(self.run_it([warn, day2, day3])), 3)
+        other = area("A4/26", start="2026-11-30T09:00:00Z", end="2026-11-30T09:30:00Z")
+        self.assertEqual([r["id"] for r in self.run_it([warn, other], matches=placed)], ["unlisted:A4/26"])
+
     def test_areas_opening_together_are_one_row(self):
         rows = self.run_it([area("A1/26"), area("A2/26", start="2026-11-29T21:20:00Z", end="2026-11-29T21:50:00Z"),
                             area("A3/26", start="2026-11-30T09:00:00Z", end="2026-11-30T09:30:00Z")])
@@ -156,6 +171,41 @@ class ClosureRecords(unittest.TestCase):
         rep = unlisted.apply(store, rows, SITES, "2026-11-22T20:00:00Z")
         self.assertEqual(rep["joined"], [])
         self.assertEqual(len(store["records"]), 3)
+
+
+class FlownLaunch(unittest.TestCase):
+    """A notice with reserve-day windows: once its launch flew and the schedule dropped it, the notice is that
+    launch's, not a closure with no listing."""
+    WINDOWS = [{"start": "2026-11-20T21:06:00Z", "end": "2026-11-20T21:36:00Z"},
+               {"start": "2026-11-22T21:06:00Z", "end": "2026-11-22T21:36:00Z"}]
+
+    def flown(self, lat=41.0, lon=100.3, net="2026-11-20T21:15:00Z", precision="Minute"):
+        return [{"name": "LM-2D", "net": net, "net_precision": precision, "lat": lat, "lon": lon, "status": "Success"}]
+
+    def test_reserve_day_after_the_launch_flew_is_no_row(self):
+        a = area(windows=self.WINDOWS)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW)), 1)
+        self.assertEqual(unlisted.closures([a], [], SITES, NOW, flown=self.flown()), [])
+
+    def test_a_launch_elsewhere_or_outside_the_windows_keeps_the_row(self):
+        a = area(windows=self.WINDOWS)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(lat=28.5, lon=-80.6))), 1)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(net="2026-11-19T10:00:00Z"))), 1)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(precision="Day"))), 1)
+
+    def test_recent_flown_from_the_ll2_ledger(self):
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location("launch_cli_unlisted",
+                                                      Path(__file__).resolve().parents[1] / "tools" / "launch.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        led = {"launches": [{"id": "a", "net": "2026-11-20T21:15:00Z", "status": "Success"},
+                            {"id": "b", "net": "2026-11-20T22:00:00Z", "status": "Go"},
+                            {"id": "c", "net": "2026-10-01T00:00:00Z", "status": "Success"},
+                            {"id": "d", "net": "2026-11-23T00:00:00Z", "status": "Success"}]}
+        self.assertEqual([r["id"] for r in cli.recent_flown(led, NOW)], ["a"])
+        self.assertEqual(cli.recent_flown(None, NOW), [])
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import * as SV from "./saved.js";
 import * as LP from "./livepaths.js";
 import * as LY from "./layers.js";
 import * as BD from "./board.js";
+import * as SM from "./same.js";
 
 const T = window.TicTime;
 const $ = (id) => document.getElementById(id);
@@ -77,7 +78,7 @@ const upcomingRecs = () => ix.records.filter((r) => r.status === "upcoming");
 // Scheduled launches Launch Library 2 lists, from Launch's own schedule (snap.schedule.records), in the shape Orbit's
 // `upcoming` lane had: `id` is the LL2 uuid. The same rows tools/launch.py ll2_upcoming() matches against the areas.
 // (Orbit no longer publishes `upcoming`, so snap.orbit.upcoming is now always empty.)
-const upcomingRows = () => ((snap.schedule || {}).records || []).filter((r) => (r.refs || {}).ll2).map((r) => ({ ...r, id: r.refs.ll2, ll2_url: (r.links || {}).ll2 }));
+const upcomingRows = () => ((snap.schedule || {}).records || []).filter((r) => (r.refs || {}).ll2 && (r.listed_by || ["ll2"]).includes("ll2")).map((r) => ({ ...r, id: r.refs.ll2, ll2_url: (r.links || {}).ll2 }));
 const scheduled = (r) => upcomingRows().find((u) => u.id === r.ll2) || null;
 
 function tiles() {
@@ -114,26 +115,27 @@ function liveModel() {
   const now = nowIso(), fc = () => ({ type: "FeatureCollection", features: [] });
   const live = fc(), paths = fc(), pads = fc(), recent = fc(), marks = [];
   const tied = LP.tiedAreas(upcomingRecs());
+  const only = LY.focus(lay, upcomingRecs(), snap.matches, snap.areas), picked = (id) => !only || only.launches.has(id);
   let areasAll = 0;
   (snap.areas || []).forEach((a, i) => {
     const key = "live:" + (a.key || a.id) + ":" + i;
     const on = tied.get(i) || [];
     byKey.set(key, { kind: "live", a, launches: on });
     if (!a.off_live || showOff()) areasAll += 1;
-    if (!LY.areaShown(a, on, lay, now)) return;
+    if (!LY.areaShown(a, on, lay, now) || (only && !only.areas.has(i))) return;
     live.features.push(poly(a.ring, { key, tied: on.length ? 1 : 0, group: on.length ? group(on[0].actor) : a.source === "faa-tfr" ? "us" : "other" }));
   });
   LP.livePathRecords(upcomingRecs()).forEach((r) => {
     const key = "path:" + r.id;
     byKey.set(key, { kind: "launch", r });
-    if (!lay.show.includes("paths") || !LY.launchShown(r.actor, r.time, lay, now, r.net_precision)) return;
+    if (!lay.show.includes("paths") || !picked(r.ll2) || !LY.launchShown(r.actor, r.time, lay, now, r.net_precision)) return;
     paths.features.push({ type: "Feature", properties: { key, group: group(r.actor) }, geometry: { type: "LineString", coordinates: N.estimatedLine(r.pad, r.path) } });
   });
   const ups = upcomingRows();
   let launchesShown = 0;
   ups.forEach((u) => {
     const r = upcomingRecs().find((x) => x.ll2 === u.id) || null, cc = (r && r.actor) || (u.provider_countries || [])[0];
-    const shown = LY.launchShown(cc, u.net, lay, now, u.net_precision);
+    const shown = picked(u.id) && LY.launchShown(cc, u.net, lay, now, u.net_precision);
     if (shown) launchesShown += 1;
     if (u.lat === null || u.lat === undefined) return;
     const key = "pad:" + u.id;
@@ -172,7 +174,9 @@ const expectText = (x) => x ? `if a launch from ${x.site}, around ${fmt(x.at, { 
 let showFar = false;
 const range = (lo, hi, f = (x) => x) => (lo === hi ? f(lo) : `${f(lo)}-${f(hi)}`);
 function liveTables() {
-  const all = LP.groupMatches(snap.matches || [], snap.areas || []);
+  const matches = snap.matches || [];
+  const all = LP.groupMatches(matches.filter((m) => LY.matchShown(m, lay)), snap.areas || []);
+  const timeOnly = LP.groupMatches(matches, snap.areas || []).length - all.length;
   const farN = all.filter((m) => m.far).length, ms = all.filter((m) => showFar || !m.far);
   const recOf = new Map(upcomingRecs().map((r) => [r.ll2, r]));
   const onPath = (m) => ((recOf.get(m.launch) || {}).live || { closures: [] }).closures.some((c) => m.area_is.includes(c.i) && c.role === "path");
@@ -199,7 +203,9 @@ function liveTables() {
       }
       const k = row.m.area_i !== undefined ? `live:${row.m.area}:${row.m.area_i}` : [...byKey.keys()].find((x) => x.startsWith("live:" + row.m.area + ":"));
       if (k) pickLive(k);
-    }) : muted("No scheduled launch coincides with a live closure area."));
+    }) : muted(timeOnly ? "No scheduled launch coincides with a live closure area in time and place or grouped."
+    : "No scheduled launch coincides with a live closure area."));
+  if (timeOnly) $("match-table").append(muted(`${timeOnly} time-only coincidence${timeOnly === 1 ? " is" : "s are"} left out by "Hide time-only coincidences" under the map's layers and filters.`));
   if (farN) {
     const b = el("button", "linkish small", showFar ? `Fold away the ${farN} far time-only coincidence${farN === 1 ? "" : "s"}`
       : `Show ${farN} far time-only coincidence${farN === 1 ? "" : "s"}: over 1,500 NM from the pad, naming nothing and on no ground track`);
@@ -304,6 +310,13 @@ function pickLive(key) {
     b.addEventListener("click", () => launchCard(r));
     box.append(el("br"), document.createTextNode("On the estimated path of "), b);
   });
+  // Same closures (same.js): History's past launches with a notice area centred within SIG_NM of this one's centre.
+  if (a.ring && a.ring.length >= 3) {
+    const h = el("a", "", "Past launches with notices here");
+    h.href = "#history?" + new URLSearchParams({ st: "launched", near: SM.write([SM.centroid(a.ring)]) }).toString();
+    h.title = `Launches in History with a notice area whose centre lies within ${SM.SIG_NM} NM of this area's centre`;
+    box.append(el("br"), h);
+  }
   map.fit({ type: "FeatureCollection", features: [poly(a.ring, {})] });
 }
 
@@ -347,24 +360,37 @@ function launchCard(r, fit = true) {
   }
 }
 
-/* The upcoming-launch board (board.js): the map's country and how-far-ahead choices apply. */
+/* The upcoming-launch board (board.js): the map's country, how-far-ahead, site and launch choices apply. */
 function board() {
-  const now = nowIso(), all = BD.boardRows(ix.records, sched), rows = all.filter((x) => LY.launchShown(x.actor, x.net, lay, now, x.precision));
+  const now = nowIso(), only = LY.focus(lay, upcomingRecs(), snap.matches, snap.areas), all = BD.boardRows(ix.records, sched);
+  const rows = all.filter((x) => (!only || only.launches.has(x.r.ll2)) && LY.launchShown(x.actor, x.net, lay, now, x.precision));
   const moved = (x) => {
     const s = el("span", "", BD.moveText(x));
-    if (x.lastMove) s.append(el("br"), el("span", "muted small", `Seen ${fmt(x.lastMove.at)}: from ${fmt(x.lastMove.from)} to ${fmt(x.lastMove.to)}`));
+    if (x.lastMove) s.append(el("br"), el("span", "muted small", BD.seenText(x.lastMove, fmt)));
     return s;
   };
   put($("board-table"), rows.length ? table(["NET", "Launch", "Country", "Site", "Status", "NET moved", "Live closures"],
     rows.map((x) => ({ x, cells: [netText(x.net, x.precision), x.r.label, mark(x.actor), x.site, x.status, moved(x), BD.closureText(x)] })),
     (row) => { launchCard(row.x.r); const c = $("map-card"); if (c.scrollIntoView) c.scrollIntoView({ block: "start" }); })
-    : muted(all.length ? "No scheduled launch matches the map's country and how-far-ahead choices." : "No launch is scheduled in the next 14 days."));
-  if (rows.length && rows.length < all.length) $("board-table").append(muted(`${all.length - rows.length} more hidden by the map's country and how-far-ahead choices.`));
+    : muted(all.length ? "No scheduled launch matches the map's filters." : "No launch is scheduled in the next 14 days."));
+  if (rows.length && rows.length < all.length) $("board-table").append(muted(`${all.length - rows.length} more hidden by the map's filters.`));
 }
 
 /* Layers and filters (layers.js): the controls show `lay`; a change redraws the map and the board and rewrites the
    Live tab's address. A bare #live (the tab link) keeps the current choice. */
+const siteNames = () => [...new Set([...upcomingRecs().map((r) => r.site), ...LP.pastWeek(ix.records, snap.generated_at).map((r) => r.site),
+  ...(snap.areas || []).map((a) => (a.expect || {}).site)].filter(Boolean))].sort((a, b) => a.localeCompare(b));
+// The site and launch lists come from this run's data, and the launch times follow the viewer's time zone.
+function pickOptions() {
+  const fill = (id, first, opts, value) => { $(id).replaceChildren(new Option(first, ""), ...opts.map(([v, t]) => new Option(t, v))); $(id).value = value; };
+  fill("layers-site", "every site", siteNames().map((n) => [n, n]), lay.site);
+  fill("layers-launch", "every launch", upcomingRecs().filter((r) => r.ll2).sort((a, b) => ((a.time || "") < (b.time || "") ? -1 : 1))
+    .map((r) => [r.ll2, `${netText(r.time, r.net_precision)}: ${r.label}`]), lay.launch);
+}
 function layersUi() {
+  lay = LY.settle(lay, siteNames(), upcomingRecs().map((r) => r.ll2));
+  pickOptions();
+  $("layers-place").checked = lay.match === "place";
   const box = $("layers");
   box.querySelectorAll("[data-layer]").forEach((i) => { i.checked = lay.show.includes(i.dataset.layer); });
   box.querySelectorAll("[data-src]").forEach((i) => { i.checked = lay.src.includes(i.dataset.src); });
@@ -374,7 +400,8 @@ function layersUi() {
 }
 function layersRead() {
   const box = $("layers"), on = (attr) => [...box.querySelectorAll(`[data-${attr}]`)].filter((i) => i.checked).map((i) => i.dataset[attr]);
-  return { show: on("layer"), src: on("src"), cc: on("cc"), within: Number($("layers-within").value) || 0 };
+  return { show: on("layer"), src: on("src"), cc: on("cc"), within: Number($("layers-within").value) || 0,
+    site: $("layers-site").value, launch: $("layers-launch").value, match: $("layers-place").checked ? "place" : "all" };
 }
 function writeAddress() {
   if (document.body.dataset.tab !== "live") return;
@@ -633,7 +660,8 @@ async function showTab() {
   if (map && liveM) map.set("paths", tab === "live" ? liveM.paths : null); // the launch paths belong to the Live tab
   if (tab === "history") {
     if (!H) H = await (Hstart = Hstart || initHistory(ix, hist));
-    else { H.resize(); H.refresh(); }
+    // A History address with filters (a link from Live, a bookmark) takes that view; the bare tab link keeps the last one.
+    else { H.resize(); if (location.hash.includes("?")) H.fromHash(); else H.refresh(); }
   }
 }
 
@@ -663,10 +691,18 @@ async function main() {
   if (document.body.dataset.tab !== "live") map.set("paths", null);
   patterns(); paste(); trajSetup(); savedSetup();
   layersUi(); redraw();
-  $("layers").addEventListener("change", () => { lay = layersRead(); redraw(); writeAddress(); });
+  $("layers").addEventListener("change", (e) => {
+    // A site and a launch replace each other, so the two never cancel out; the map moves to what was chosen.
+    const id = (e.target || {}).id, moved = id === "layers-site" || id === "layers-launch";
+    if (id === "layers-site") $("layers-launch").value = "";
+    if (id === "layers-launch") $("layers-site").value = "";
+    lay = layersRead(); redraw(); writeAddress();
+    const found = [...liveM.live.features, ...liveM.paths.features, ...liveM.pads.features];
+    if (moved && (lay.site || lay.launch) && found.length) map.fit({ type: "FeatureCollection", features: found });
+  });
   $("layers-reset").addEventListener("click", () => { lay = LY.parse(""); layersUi(); redraw(); writeAddress(); });
   map.resize();
   await shown;
-  if (T && T.onChange) T.onChange(() => { tiles(); liveTables(); board(); sourcesBox(); if (openCard) launchCard(openCard, false); });
+  if (T && T.onChange) T.onChange(() => { tiles(); pickOptions(); liveTables(); board(); sourcesBox(); if (openCard) launchCard(openCard, false); });
 }
 main().catch((err) => { document.querySelector("main").prepend(el("p", "notice", "Launch could not load its data: " + err.message)); });

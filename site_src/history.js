@@ -8,6 +8,8 @@
 import { createHistoryMap } from "./hmap.js";
 import * as X from "./export.js";
 import * as SV from "./saved.js";
+import * as FX from "./facets.js";
+import * as SM from "./same.js";
 import * as CH from "./chart.js";
 import * as CMP from "./sidebyside.js";
 
@@ -55,9 +57,13 @@ const FACETS = [
   { k: "site", label: "Launch site", get: (r) => r.site || NK, search: true },
   { k: "prog", label: "Programme", get: (r) => (r.programmes && r.programmes.length ? r.programmes : ["None found"]), search: true },
   { k: "mt", label: "Mission type", get: (r) => r.mtype },
+  { k: "own", label: "Payload owner", get: (r) => cached(r, "own", () => FX.owners(r)), name: (v) => (IX.owners || {})[v] || v, search: true },
   { k: "orb", label: "Orbit", get: (r) => r.orbit || NK },
   { k: "out", label: "Outcome", get: (r) => (r.status === "upcoming" ? "Scheduled" : r.outcome === "success" ? "Success" : r.outcome ? "Failure or partial" : NK) },
   { k: "src", label: "Source", get: (r) => r.sources, name: (v) => SOURCES[v] || v },
+  // facets.js: the FIRs of the record's notices, and how they were tied to the launch.
+  { k: "fir", label: "FIR (flight information region)", get: (r) => cached(r, "fir", () => FX.firs(r, chartedOf(r))), search: true },
+  { k: "jn", label: "Notices joined by", get: (r) => cached(r, "jn", () => FX.joinedBy(r)), note: (v) => FX.JOIN_NOTES[v] },
   { k: "path", label: "Flight path", get: (r) => (r.path ? "Estimated from an azimuth" : "None"), },
   // overfly.py: the countries the path's ground track crosses (land only).
   { k: "ovf", label: "Path crosses", get: (r) => { const cc = r.over ? [...new Set(r.over.flat().map((o) => o.cc))] : []; return !r.over ? ["nopath"] : cc.length ? cc : ["water"]; },
@@ -79,7 +85,7 @@ const DEFAULT = { st: ["launched"] };
 const PAGE = 100;
 
 let IX, HIST, map, byId = new Map(), chartById = new Map(), FIRST_YEAR = 2012;
-let state = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true, cmp: [], chart: null };
+let state = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true, cmp: [], chart: null, near: [] };
 let lastFiltered = [];
 
 /* ---------- time keys in the viewer's zone ---------- */
@@ -107,7 +113,7 @@ const legacy = (k, v) => (LEGACY[k] || {})[strHash(v)] || (k === "path" && OLD_P
 function readHash() {
   const h = location.hash.replace(/^#/, "");
   const [tab, qs] = h.split("?");
-  const s = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true, cmp: [], chart: null };
+  const s = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true, cmp: [], chart: null, near: [] };
   if (tab !== "history" || !qs) { s.f = JSON.parse(JSON.stringify(DEFAULT)); return s; }
   const p = new URLSearchParams(qs);
   FACETS.forEach((f) => { if (p.has(f.k)) s.f[f.k] = p.get(f.k).split("|").filter((x) => x !== "").map((x) => legacy(f.k, x)); });
@@ -119,6 +125,7 @@ function readHash() {
   });
   s.q = p.get("q") || ""; s.from = p.get("from") || ""; s.to = p.get("to") || ""; s.sel = p.get("sel") || ""; if (byId.get(s.sel)) s.sel = byId.get(s.sel).id;
   if (p.get("areas") === "0") s.areas = false;
+  s.near = SM.read(p.get("near"));
   s.cmp = [...new Set(CMP.parseIds(p.get("cmp")).filter((id) => byId.has(id)).map((id) => byId.get(id).id))];
   s.chart = CH.parseChart(p.get("chart"), CHART_BY.map((b) => b.k), CHART_SPLIT.map((b) => b.k));
   if (p.get("sort")) { s.sort = p.get("sort"); s.dir = p.get("dir") === "1" ? 1 : -1; }
@@ -134,6 +141,7 @@ function writeHash() {
   if (state.to) p.set("to", state.to);
   if (state.sel) p.set("sel", state.sel);
   if (!state.areas) p.set("areas", "0");
+  if (state.near.length) p.set("near", SM.write(state.near));
   if (state.cmp.length) p.set("cmp", state.cmp.join("|"));
   if (state.chart) p.set("chart", CH.chartParam(state.chart));
   if (state.sort !== "time" || state.dir !== -1) { p.set("sort", state.sort); p.set("dir", String(state.dir)); }
@@ -143,6 +151,9 @@ function writeHash() {
 
 /* ---------- filtering ---------- */
 const vals = (f, r) => [].concat(f.get(r));
+const chartedOf = (r) => (r.chart || []).flatMap((id) => chartById.get(id) || []);
+// Facet values read from a record's notices, kept on the record until its notices change (applySaved clears _fx).
+function cached(r, k, make) { r._fx = r._fx || {}; if (!(k in r._fx)) r._fx[k] = make(); return r._fx[k]; }
 function hay(r) {
   if (r._hay) return r._hay;
   const charted = (r.chart || []).flatMap((id) => chartById.get(id) || []);
@@ -176,12 +187,15 @@ function passes(r, skip) {
     if (state.from && (!r._day || r._day < state.from)) return false;
     if (state.to && (!r._day || r._day > state.to)) return false;
   }
+  if (state.near.length && skip !== "near" && !SM.near(centresOf(r), state.near)) return false;
   if (state.q) {
     const h = hay(r);
     if (!state.q.toUpperCase().split(/\s+/).filter(Boolean).every((w) => h.includes(w))) return false;
   }
   return true;
 }
+/* same.js: a record's notice-area centres, worked out once (applySaved clears them with the other caches). */
+const centresOf = (r) => r._cent || (r._cent = SM.centres(r, (r.chart || []).flatMap((id) => chartById.get(id) || [])));
 const filtered = (skip) => IX.records.filter((r) => passes(r, skip));
 
 /* ---------- the filter panel ---------- */
@@ -341,9 +355,11 @@ function chips() {
   RANGES.forEach((g) => { if (state.r[g.k]) add(`${g.label}: ${rangeText(g, state.r[g.k])}`, () => setRange(g.k, null, null)); });
   if (state.from || state.to) add(`Dates: ${state.from || "start"} to ${state.to || "now"}`, () => setDates("", ""));
   if (state.q) add(`Search: ${state.q}`, () => { state.q = ""; $("h-q").value = ""; update(true); });
+  if (state.near.length) add(`Same closures: a notice area within ${SM.SIG_NM} NM of ${state.near.length === 1 ? "one point" : `one of ${state.near.length} points`}`,
+    () => { state.near = []; update(true); });
   if (box.childNodes.length) {
     const c = el("button", "linkish small", "Clear all filters"); c.type = "button";
-    c.addEventListener("click", () => { state.f = JSON.parse(JSON.stringify(DEFAULT)); state.r = {}; state.q = ""; $("h-q").value = ""; setDates("", ""); });
+    c.addEventListener("click", () => { state.f = JSON.parse(JSON.stringify(DEFAULT)); state.r = {}; state.q = ""; state.near = []; $("h-q").value = ""; setDates("", ""); });
     box.appendChild(c);
   }
 }
@@ -582,6 +598,7 @@ function detail(r) {
   (r.programmes || []).forEach((p) => q.appendChild(quick(p, "prog", p)));
   if (r.actor) q.appendChild(quick(countryName(r.actor), "cc", r.actor));
   box.appendChild(q);
+  sameSection(box, r);
   [...new Map((r.closures || []).map((c) => [`${c.area}|${(c.window || []).join()}`, c])).values()].forEach((c) => box.appendChild(el("p", "small", `Closure area ${c.area} coincided in ${c.level}` + (c.window ? ` (${span(c.window[0], c.window[1])})` : "") + ". Coincidence, not proof the area was for this launch.")));
   const evs = (r.chart || []).flatMap((id) => chartById.get(id) || []);
   const nfcN = r.nfc_notices || [];
@@ -630,6 +647,31 @@ function detail(r) {
   if ((r.saved_notices || []).length) savedSection(box, r);
 }
 
+/* Same closures (same.js): the past launches from the same site with a notice area whose centre lies within
+   SIG_NM of one of this record's area centres (beyond NEAR_PAD_NM of its pad when it has any). The button shows
+   them: launched records, this site, near= the points; other filters cleared. */
+function sameSection(box, r) {
+  const t = SM.targets(r, (r.chart || []).flatMap((id) => chartById.get(id) || []));
+  if (!t.points.length) return;
+  const hits = IX.records.filter((x) => x !== r && x.status === "launched" && (!r.site || x.site === r.site) && SM.near(centresOf(x), t.points));
+  const p = el("p", "small");
+  const from = r.site ? ` from ${r.site}` : "";
+  const which = t.points.length === 1 ? "this launch's area" : `one of this launch's ${t.points.length} areas`;
+  p.appendChild(document.createTextNode(`Same closures: ${hits.length.toLocaleString("en-US")} past launch${hits.length === 1 ? "" : "es"}${from} had a notice area within ${SM.SIG_NM} NM of ${which}`
+    + (t.atPad ? ` (every area here is within ${SM.NEAR_PAD_NM} NM of the pad, so this counts launches with pad closures)` : r.pad ? ` (areas within ${SM.NEAR_PAD_NM} NM of the pad left out)` : "")
+    + ". Same place, not proof of the same mission or orbit. "));
+  if (hits.length) {
+    const b = el("button", "linkish", "Show them"); b.type = "button";
+    b.addEventListener("click", () => {
+      state.f = { st: ["launched"] }; if (r.site) state.f.site = [r.site];
+      state.r = {}; state.q = ""; $("h-q").value = ""; state.from = ""; state.to = ""; $("h-from").value = ""; $("h-to").value = "";
+      state.near = t.points; state.shown = PAGE; update(true);
+    });
+    p.appendChild(b);
+  }
+  box.appendChild(p);
+}
+
 /* Notices pasted on the Paste tab and saved in this browser (saved.js). Only this browser has them. */
 function savedSection(box, r) {
   const all = r.saved_notices;
@@ -659,11 +701,11 @@ const recNumbers = (r) => [
 function applySaved() {
   const touched = savedOwn.map((r) => r.id).concat(savedOn.map((r) => r.id));
   if (savedOwn.length) { const gone = new Set(savedOwn.map((r) => r.id)); IX.records = IX.records.filter((r) => !gone.has(r.id)); gone.forEach((id) => byId.delete(id)); }
-  savedOn.forEach((r) => { delete r.saved_notices; r.sources = r.sources.filter((s) => s !== "saved"); r._hay = null; });
+  savedOn.forEach((r) => { delete r.saved_notices; r.sources = r.sources.filter((s) => s !== "saved"); r._hay = null; r._fx = null; r._cent = null; });
   const notices = SV.load().map(SV.read).filter(Boolean);
   const { byRecord, own } = SV.join(notices, IX.records, recNumbers);
   savedOn = [];
-  byRecord.forEach((xs, id) => { const r = byId.get(id); if (!r) return; r.saved_notices = xs; if (!r.sources.includes("saved")) r.sources.push("saved"); r._hay = null; savedOn.push(r); });
+  byRecord.forEach((xs, id) => { const r = byId.get(id); if (!r) return; r.saved_notices = xs; if (!r.sources.includes("saved")) r.sources.push("saved"); r._hay = null; r._fx = null; r._cent = null; savedOn.push(r); });
   savedOwn = own;
   own.forEach((r) => { r._day = zoneDay(r.time); r._month = r._day.slice(0, 7); IX.records.push(r); byId.set(r.id, r); });
   if (map) map.forget(touched.concat(savedOn.map((r) => r.id), own.map((r) => r.id)));

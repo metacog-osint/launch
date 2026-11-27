@@ -53,6 +53,14 @@ export function moveText(row) {
   return `${times}; last ${days ? `${days} day${days === 1 ? "" : "s"}${hh ? ` ${hh} h` : ""}` : `${hh} h`} ${dir}`;
 }
 
+/* The latest move in words: "Seen <when>: from <a> to <b>", crediting RocketLaunch.Live when the move is its reading
+   (the board's header names Launch Library 2). `fmt` is the page's time formatter. */
+export function seenText(m, fmt) {
+  if (!m) return "";
+  const s = `Seen ${fmt(m.at)}: from ${fmt(m.from)} to ${fmt(m.to)}`;
+  return m.source === "rll" ? `${s} (Data by RocketLaunch.Live)` : s;
+}
+
 /* "2 on the path, 1 at the pad" (or "None"). */
 export function closureText(row) {
   const parts = [];

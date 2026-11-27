@@ -119,6 +119,14 @@ class Join(unittest.TestCase):
                            launch(3, "2026-11-29T04:40Z", vehicle="Minotaur IV"))
         self.assertEqual(rll.pairs(store), [])
 
+    def test_a_record_ll2_stopped_listing_is_no_candidate(self):
+        store = schedule.empty()
+        schedule.ingest(store, "ll2", [ll2(1, "2026-11-25T04:39:00Z"), ll2(2, "2026-11-29T15:47:00Z")],
+                        "2026-11-24T20:00:00Z")
+        schedule.ingest(store, "ll2", [ll2(2, "2026-11-29T15:47:00Z")], "2026-11-26T20:00:00Z")  # ll2-1 flew
+        schedule.ingest(store, "rll", rll.parse(reply(launch(9, "2026-11-25T05:30Z"))), READ)
+        self.assertEqual(rll.pairs(store), [])
+
     def test_two_equal_candidates_join_neither(self):
         store = schedule.empty()
         schedule.ingest(store, "ll2", [ll2(1, "2026-11-29T04:00:00Z"), ll2(2, "2026-11-29T05:00:00Z")],
