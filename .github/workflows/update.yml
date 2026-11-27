@@ -26,10 +26,10 @@ name: update
 # an entry's version on it, so a changed list finds no earlier state (19 Nov 2026, run 44461432466).
 #
 # Ascent move (19 Nov 2026): the schedule lane makes one Launch Library 2 upcoming request a run, the LL2 ledger one
-# pull and at most one by-id lookup, and the news lane one Spaceflight News request. Hourly, that is at most 3 LL2
-# requests an hour; with Orbit's own LL2 lanes while they still run (its hourly ledger, 1-2, and its update run's
-# upcoming request 4 times a day) the two make at most 6 in an hour, under LL2's 15 an hour without a key. A 429
-# fails only that lane, which keeps its last good copy until the next hour. Their stores
+# pull and at most one by-id lookup, and the news lane one Spaceflight News request. That is at most 3 LL2 requests a
+# run (Orbit's own LL2 lanes are retired). An hourly run plus the runs that pushes and manual starts add stay under
+# LL2's 15 requests an hour without a key unless five runs fall in one hour; a 429 fails only that lane, which keeps
+# its last good copy until the next run. Their stores
 # (the multi-source schedule, the LL2 ledger and the side-by-side check with Orbit) are kept for good on this
 # repository's public release `ledger`, uploaded after collect; collect reads them back from there (a 404 is a
 # first run; anything else with no local copy stops the run). That is why this job may write contents.
