@@ -50,7 +50,7 @@ history, and says which scheduled launches coincide with them. Observations only
    **Scheduled launches** (19 Nov 2026, from Orbit): one record per expected launch from one or more sources (Launch
    Library 2 first), with Launch's own id; each kind of evidence is named ("listed" so far), none is a forecast.
    Headlines are links only. The LL2 ledger is verified and extended each run; its launches GCAT has not listed are
-   provisional until a GCAT launch joins them.
+   provisional until a GCAT launch joins them. Orbit's frozen ledger is read only to begin Launch's when none is held.
    **RocketLaunch.Live** (`launch/rll.py`, 26 Nov 2026): the free tier's next five launches, one request a run, a
    second listing source (`rll`, id `upcoming:rll:<its id>`). A RocketLaunch.Live record and a Launch Library 2 record
    are one launch, and are joined (the one seen first keeps its id), when they share a place word, their NETs are
@@ -58,6 +58,10 @@ history, and says which scheduled launches coincide with them. Observations only
    near candidates neither joins. Launch Library 2's fields are shown when both hold a record. The free tier gives no
    coordinates or status: a record takes the coordinates of a Launch Library 2 launch at the same place, else none,
    and only Launch Library 2's records go to matching. Every copy says "Data by RocketLaunch.Live".
+   **What a launch put in orbit** is Orbit's: Past 7 days and each orbital record in History link to Orbit by GCAT's
+   tag (the launch's row on Orbit's launches page, and Orbit's object search, which lists the first 20 pieces with a
+   count). Only launches of the kind Orbital get the payloads cell and the links; a missile test or suborbital flight
+   puts nothing in orbit.
 6. **Not for navigation.**
 
 ## Feed contract revision 2.1 (23 Nov 2026)

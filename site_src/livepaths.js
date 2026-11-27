@@ -27,6 +27,10 @@ export function tiedAreas(records) {
   return out;
 }
 
+/* A launch whose objects Orbit lists: an orbital launch (Launch's kind "Orbital", launch/programs.py KINDS[0]) with a
+   GCAT tag. A missile test or suborbital flight puts nothing in orbit, so it gets no payload cell and no Orbit link. */
+export const inOrbit = (r) => !!(r && r.gcat && r.kind === "Orbital");
+
 /* Launches flown in the `days` before `now`, newest first. */
 export function pastWeek(records, now, days = 7) {
   const end = Date.parse(now);

@@ -10,6 +10,7 @@ import * as X from "./export.js";
 import * as SV from "./saved.js";
 import * as FX from "./facets.js";
 import * as SM from "./same.js";
+import * as LP from "./livepaths.js";
 import * as CH from "./chart.js";
 import * as CMP from "./sidebyside.js";
 
@@ -569,6 +570,13 @@ function detail(r) {
   if (r.apogee_km != null || r.range_km != null) fact(dl, "Apogee and range", [r.apogee_km != null ? `apogee about ${r.apogee_km.toLocaleString("en-US")} km` : "", r.range_km != null ? `range about ${r.range_km.toLocaleString("en-US")} km` : ""].filter(Boolean).join(", ") + " (GCAT)");
   fact(dl, r.notice_set ? "Charted payload" : "Payload", r.payload);
   if (r.payloads && r.payloads.count) fact(dl, "Payloads (GCAT)", `${r.payloads.count}: ${r.payloads.names.join(", ")}${r.payloads.more ? ` and ${r.payloads.more} more` : ""}`);
+  // What an orbital launch put in orbit is Orbit's: its object search finds the pieces of the launch by GCAT's tag
+  // (the COSPAR launch id), each with its own page.
+  if (LP.inOrbit(r)) {
+    const a = el("a", "", `Search Orbit for ${r.gcat}`);
+    a.href = "https://orbit.theintelligence.company/?q=" + encodeURIComponent(r.gcat) + "#obj-search"; a.rel = "noopener";
+    fact(dl, "In orbit", a);
+  }
   const notes = (r.programmes || []).map((p) => IX.programme_notes[p] ? `${p} (${IX.programme_notes[p]})` : p);
   fact(dl, "Type", r.mtype + (notes.length ? ` · ${notes.join(", ")}` : ""));
   fact(dl, "Orbit", r.orbit + (r.inc ? ` · payload inclination ${r.inc}° (GCAT)` : ""));
