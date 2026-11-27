@@ -329,3 +329,11 @@ tr.up td { border-bottom-style: dashed; }
 .skip { position: absolute; left: -9999px; top: 8px; z-index: 100; background: var(--panel); color: var(--link); padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; }
 .skip:focus { left: 8px; }
 .noscript { margin: 16px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+
+/* Live map: layers and filters (layers.js) */
+details.layers { border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; margin: 6px 0 0; }
+details.layers summary { cursor: pointer; }
+details.layers label { display: inline-flex; align-items: center; min-height: 24px; }
+details.layers fieldset { border: 0; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+details.layers legend { float: left; font-weight: 600; margin-right: 10px; padding: 0; }
+details.layers p { margin: 6px 0 0; }

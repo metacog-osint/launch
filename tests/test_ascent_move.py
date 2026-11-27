@@ -154,6 +154,18 @@ class Schedule(unittest.TestCase):
         self.assertIn("ll2", act[0]["links"])
         self.assertNotIn("by_source", act[0])
 
+    def test_public_record_keeps_the_latest_net_moves(self):
+        """25 Nov 2026: the Live tab's board says how often a NET moved and the latest move."""
+        moves = [{"at": f"2026-11-1{i}T00:00:00Z", "source": "ll2",
+                  "fields": {"net": [f"2026-11-2{i}T00:00:00Z", f"2026-11-2{i + 1}T00:00:00Z"]}} for i in range(5)]
+        other = {"at": "2026-11-19T00:00:00Z", "source": "ll2", "fields": {"status": ["TBD", "Go"]}}
+        out = schedule._public({"id": "x", "changes": [moves[4], other, *moves[:4]]})
+        self.assertEqual(out["net_changes"], 5)
+        self.assertEqual([m["at"] for m in out["net_moves"]], [m["at"] for m in moves[2:]])   # oldest first, last 3
+        self.assertEqual(out["net_moves"][-1], {"at": "2026-11-14T00:00:00Z", "from": "2026-11-24T00:00:00Z",
+                                                "to": "2026-11-25T00:00:00Z"})
+        self.assertEqual(schedule._public({"id": "y"})["net_moves"], [])
+
 
 class News(unittest.TestCase):
     def test_links_only_and_by_record(self):

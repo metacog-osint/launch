@@ -37,6 +37,7 @@ LL2_API = "https://ll.thespacedevs.com/2.3.0/launches/upcoming/"
 HORIZON_DAYS = 14
 ATTRIBUTION = "Launch data: Launch Library 2, The Space Devs (thespacedevs.com)"
 PRECEDENCE = ("ll2", "rll")  # whose fields a record shows, first first (rll: RocketLaunch.Live, launch/rll.py)
+NET_MOVES_SHOWN = 3   # NET moves kept on each public record (the count is net_changes)
 FIELDS = ("name", "net", "net_precision", "window_start", "window_end", "status", "status_name", "provider",
           "provider_type", "provider_countries", "vehicle", "mission", "mission_type", "orbit", "orbit_name", "pad",
           "location", "pad_country", "lat", "lon")
@@ -297,7 +298,12 @@ def _public(r: dict) -> dict:
     """A record as the site and readers get it: shown fields, sources and links, no per-source copies."""
     out = {k: r.get(k) for k in ("id", "sources", "refs", "evidence", "first_seen", "updated", *FIELDS)}
     out["links"] = {s: b.get("link") for s, b in (r.get("by_source") or {}).items() if b.get("link")}
-    out["net_changes"] = sum(1 for c in r.get("changes") or [] if "net" in c.get("fields", {}))
+    moves = sorted((c for c in r.get("changes") or [] if len((c.get("fields") or {}).get("net") or []) == 2),
+                   key=lambda c: c.get("at") or "")
+    out["net_changes"] = len(moves)
+    # The latest NET moves, for the Live tab's board ("moved 2 times; last 1 day later").
+    out["net_moves"] = [{"at": c.get("at"), "from": c["fields"]["net"][0], "to": c["fields"]["net"][1]}
+                        for c in moves[-NET_MOVES_SHOWN:]]
     if r.get("aliases"):
         out["aliases"] = r["aliases"]
     cl = (r.get("by_source") or {}).get("closure")

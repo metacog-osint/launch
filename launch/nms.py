@@ -336,7 +336,8 @@ def areas(state: dict, tfr_ids: set[str] | None = None, sites: dict | None = Non
                         "label": (n.get("text") or "").split("\n")[0][:120], "ring": ring, "kept": n["kept"],
                         "windows": [{"start": n["start"], "end": n["end"]}], "ring_basis": n.get("ring_basis"),
                         "expect": timing.expect(ring, n["start"], n["end"], sites or {}), "text": n.get("text") or ""}
-                       | ({"off_live": off} if off else {}))
+                       | ({"off_live": off} if off else {})
+                       | ({"state": n["issuing_state"]} if n.get("issuing_state") else {}))
     return out
 
 
