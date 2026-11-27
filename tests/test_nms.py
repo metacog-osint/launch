@@ -179,6 +179,16 @@ class FromCordon(unittest.TestCase):
         self.assertEqual(nms.areas(st, {"6/7113"}), [])
         self.assertEqual(len(nms.areas(st, set())), 1)
 
+    def test_areas_carry_the_issuing_state(self):
+        """25 Nov 2026: the Live map's country filter puts an area on no launch's path under the state that issued it."""
+        ring = [[[0, 0], [1, 0], [1, 1], [0, 0]]]
+        st = {"notices": [{"number": "A1/26", "fir": "ZWUQ", "issuing_state": "CN", "start": "2026-11-18T00:00:00Z",
+                           "end": "2026-11-18T02:00:00Z", "rings": ring, "kept": "cn-area"},
+                          {"number": "A2/26", "fir": None, "start": "2026-11-18T00:00:00Z",
+                           "end": "2026-11-18T02:00:00Z", "rings": ring, "kept": "words"}]}
+        self.assertEqual([a.get("state") for a in nms.areas(st)], ["CN", None])
+        self.assertNotIn("state", nms.areas(st)[1])
+
 
 class Ledger(unittest.TestCase):
     """Every closure notice ever kept stays (data/nms-closures.json), each version once."""
