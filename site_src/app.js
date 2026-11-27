@@ -9,6 +9,7 @@ import * as SV from "./saved.js";
 import * as LP from "./livepaths.js";
 import * as LY from "./layers.js";
 import * as BD from "./board.js";
+import * as SM from "./same.js";
 
 const T = window.TicTime;
 const $ = (id) => document.getElementById(id);
@@ -309,6 +310,13 @@ function pickLive(key) {
     b.addEventListener("click", () => launchCard(r));
     box.append(el("br"), document.createTextNode("On the estimated path of "), b);
   });
+  // Same closures (same.js): History's past launches with a notice area centred within SIG_NM of this one's centre.
+  if (a.ring && a.ring.length >= 3) {
+    const h = el("a", "", "Past launches with notices here");
+    h.href = "#history?" + new URLSearchParams({ st: "launched", near: SM.write([SM.centroid(a.ring)]) }).toString();
+    h.title = `Launches in History with a notice area whose centre lies within ${SM.SIG_NM} NM of this area's centre`;
+    box.append(el("br"), h);
+  }
   map.fit({ type: "FeatureCollection", features: [poly(a.ring, {})] });
 }
 
@@ -652,7 +660,8 @@ async function showTab() {
   if (map && liveM) map.set("paths", tab === "live" ? liveM.paths : null); // the launch paths belong to the Live tab
   if (tab === "history") {
     if (!H) H = await (Hstart = Hstart || initHistory(ix, hist));
-    else { H.resize(); H.refresh(); }
+    // A History address with filters (a link from Live, a bookmark) takes that view; the bare tab link keeps the last one.
+    else { H.resize(); if (location.hash.includes("?")) H.fromHash(); else H.refresh(); }
   }
 }
 
