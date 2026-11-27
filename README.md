@@ -23,7 +23,7 @@ python -m unittest discover -s tests   # offline tests
 python tools/serve.py                  # site/ on http://127.0.0.1:8771 with the headers in _headers
 ```
 
-`.github/workflows/update.yml` runs the tests, collect, build and check every 6 hours and on every push to `main`,
+`.github/workflows/update.yml` runs the tests, collect, build and check every hour and on every push to `main`,
 then deploys `site/` to Cloudflare Pages.
 
 ## Licence
