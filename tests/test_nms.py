@@ -211,6 +211,19 @@ class Ledger(unittest.TestCase):
         self.assertEqual(three["n"], 2)
         self.assertIn("Not FAA data", three["source_note"])
 
+    def test_the_newer_copy_wins_whatever_the_order(self):
+        # collect passes [published, release, cache]; a cached or archived copy older than the release copy must not
+        # revert what a later run derived on a notice version both hold.
+        old = nms.ledger([], [{**self.N, "kept": "words", "off_live": None}], "2026-11-17T12:00:00Z")
+        new = nms.ledger([old], [{**self.N, "kept": "cn-area", "off_live": "not a launch"}], "2026-11-18T12:00:00Z")
+        got = nms.ledger([None, new, old], [], "2026-11-19T00:00:00Z")
+        (e,) = got["notices"]
+        self.assertEqual((e["kept"], e["off_live"]), ("cn-area", "not a launch"))
+        self.assertEqual((e["first_seen"], e["last_seen"]), ("2026-11-17T12:00:00Z", "2026-11-18T12:00:00Z"))
+        # equal times keep the order given (the last copy wins), as before
+        same = {**old, "notices": [{**old["notices"][0], "kept": "same-time"}]}
+        self.assertEqual(nms.ledger([old, same], [], "2026-11-19T00:00:00Z")["notices"][0]["kept"], "same-time")
+
     def lane(self, getter, cached=None, lane=None):
         import runpy
         import tempfile
