@@ -159,12 +159,34 @@ class Schedule(unittest.TestCase):
         moves = [{"at": f"2026-11-1{i}T00:00:00Z", "source": "ll2",
                   "fields": {"net": [f"2026-11-2{i}T00:00:00Z", f"2026-11-2{i + 1}T00:00:00Z"]}} for i in range(5)]
         other = {"at": "2026-11-19T00:00:00Z", "source": "ll2", "fields": {"status": ["TBD", "Go"]}}
-        out = schedule._public({"id": "x", "changes": [moves[4], other, *moves[:4]]})
+        out = schedule._public({"id": "x", "sources": ["ll2"], "changes": [moves[4], other, *moves[:4]],
+                                "by_source": {"ll2": {"listed": True, "fields": {"net": "2026-11-25T00:00:00Z"}}}})
         self.assertEqual(out["net_changes"], 5)
         self.assertEqual([m["at"] for m in out["net_moves"]], [m["at"] for m in moves[2:]])   # oldest first, last 3
         self.assertEqual(out["net_moves"][-1], {"at": "2026-11-14T00:00:00Z", "from": "2026-11-24T00:00:00Z",
-                                                "to": "2026-11-25T00:00:00Z"})
+                                                "to": "2026-11-25T00:00:00Z", "source": "ll2"})
         self.assertEqual(schedule._public({"id": "y"})["net_moves"], [])
+
+    def test_joined_record_counts_one_slip_once(self):
+        """A launch LL2 and RocketLaunch.Live both list, joined, slips once: both reads log the change, the board
+        counts one move, from the source the record shows (LL2 while it lists it, else RocketLaunch.Live)."""
+        st = schedule.empty()
+        schedule.ingest(st, "ll2", [{"id": "L1", "net": "2026-12-01T10:00:00Z"}], "2026-11-27T00:00:00Z")
+        schedule.ingest(st, "rll", [{"id": "R1", "net": "2026-12-01T10:00:00Z"}], "2026-11-27T00:05:00Z")
+        ids = [r["id"] for r in st["records"]]
+        schedule.join(st, ids[0], ids[1], "2026-11-27T00:06:00Z", "test")
+        schedule.ingest(st, "ll2", [{"id": "L1", "net": "2026-12-02T10:00:00Z"}], "2026-11-27T06:00:00Z")
+        schedule.ingest(st, "rll", [{"id": "R1", "net": "2026-12-02T10:00:00Z"}], "2026-11-27T06:05:00Z")
+        rec = st["records"][0]
+        self.assertEqual(len([c for c in rec["changes"] if "net" in c["fields"]]), 2)   # one per source
+        out = schedule._public(rec)
+        self.assertEqual(out["net_changes"], 1)
+        self.assertEqual(out["net_moves"][0]["source"], "ll2")
+        # LL2 no longer lists it: RocketLaunch.Live's reading is shown, so its move is the one counted and quoted.
+        schedule.ingest(st, "ll2", [], "2026-11-27T12:00:00Z")
+        out = schedule._public(st["records"][0])
+        self.assertEqual(out["net_changes"], 1)
+        self.assertEqual(out["net_moves"][0]["source"], "rll")
 
 
 class News(unittest.TestCase):

@@ -43,6 +43,7 @@ STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "
 # a site that answers 404 or an emptied cache restores from it, not from empty. data/ledger.json is uploaded as
 # launch-ledger.json beside ll2-ledger.json; dated copies go to release `ledger-YYYY-qN` (kept for good).
 RELEASE_COPY = {"ledger": "launch-ledger.json", "closures": "nms-closures.json"}
+DATED_DAYS = 7   # how far back update_ledger looks for the newest dated copy (one is uploaded a day)
 SITE_DATA = "https://launch.theintelligence.company/data/"
 # Payload reference rates and their scoring ledger: git-ignored, never published, never pruned (payloads.py).
 PAYLOADS_DIR = ROOT / "history" / "payloads_source"
@@ -142,11 +143,13 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
                   ll2_led: dict | None = None) -> dict:
     """Baseline (committed) + last run's ledger (Actions cache) + the published copy + this run's launches. The LL2
     ledger's launches since GCAT's newest launch go in as provisional records (catalog.flown_from_ll2), which a GCAT
-    launch joins once GCAT lists it. When the release copy is unreadable (anything but a 404, which is no copy yet) and
-    the published copy is unreadable too, the run stops before writing, as the NMS closure ledger and the Ascent stores
-    do: the local copy may be older than the release (a restored or stale cache), and the workflow uploads what is
-    written here over the release's copy and that day's dated copy. The published copy is deployed with the same
-    ledger the release holds, so with it read nothing the release holds is lost."""
+    launch joins once GCAT lists it. The newest dated copy of the last DATED_DAYS days (release `ledger-YYYY-qN`) is
+    read too: a failed `gh release upload --clobber` leaves the release copy missing (a 404), and the dated copy still
+    holds what it held. The workflow uploads what is written here over the release's copy and that day's dated copy,
+    so when the release copy is unreadable (anything but a 404, which is no copy yet) and no dated copy can be read,
+    the run stops before writing, as the NMS closure ledger and the Ascent stores do: the local copy may be older than
+    the release (a restored or stale cache), and so may the published copy (a run can upload the release copy and then
+    fail to deploy). The run also stops if the merged ledger lacks a launch id any copy it read holds."""
     def read(p: Path):
         try:
             return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
@@ -161,10 +164,12 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
     except Exception as exc:  # the published copy is a safety net; the cache and the baseline still hold
         status = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:200], "failed_at": snap["generated_at"]}
     released, rel_exc = release_copy(RELEASE_COPY["ledger"], data_dir, getter)   # the durable copy
-    if released is None and published is None and rel_exc is not None and getattr(rel_exc, "code", None) != 404:
+    dated, dated_day, dated_exc = dated_copy("launch-ledger", snap["generated_at"], data_dir, getter)
+    if released is None and dated is None and rel_exc is not None and getattr(rel_exc, "code", None) != 404:
+        why = f"; the dated copies: {_err(dated_exc)}" if dated_exc else ""
         raise RuntimeError(f"launch ledger: the release copy is unreadable ({type(rel_exc).__name__}: {rel_exc}) and "
-                           "so is the published copy; not writing a ledger that could be smaller than the release's"
-                           ) from rel_exc
+                           f"no dated copy of the last {DATED_DAYS} days can be read{why}; not writing a ledger that "
+                           "could be smaller than the release's") from rel_exc
     orb = snap.get("orbit") or {}
     now = snap["generated_at"]
     gcat_now = catalog.from_orbit(orb.get("launches") or [], now)
@@ -175,13 +180,18 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
              + catalog.flown_from_ll2(since_gcat, now),
              "closures": catalog.closures_from_matches(snap.get("matches") or [], areas, now),
              "sites": _sites_from_orbit(orb.get("launches") or [])}
-    before = len({r["id"] for lg in (base, prev, published, released) if lg for r in lg.get("launches") or []})
-    led = catalog.merge(base, published, released, prev, fresh)
+    read_ids = {r["id"] for lg in (base, prev, published, released, dated) if lg for r in lg.get("launches") or []}
+    before = len(read_ids)
+    led = catalog.merge(base, published, released, dated, prev, fresh)
     led["generated_at"] = now
+    lost = read_ids - {r["id"] for r in led["launches"]}
+    if lost:
+        raise RuntimeError(f"launch ledger: the merged ledger lacks {len(lost)} launch id(s) a copy it read holds "
+                           f"(first: {sorted(lost)[0]}); not writing it")
     (data_dir / "ledger.json").write_text(dump(led, compact=True), encoding="utf-8", newline="\n")
     status.update({"records": len(led["launches"]), "added": len(led["launches"]) - before,
                    "base": len((base or {}).get("launches") or []), "cache": prev is not None,
-                   "published": published is not None, "release": released is not None,
+                   "published": published is not None, "release": released is not None, "dated": dated_day,
                    "gcat_last": gcat_last or None,
                    "ll2_since_gcat": len(since_gcat)})
     return status
@@ -219,6 +229,27 @@ def release_copy(name: str, data_dir: Path, getter=None) -> tuple[dict | None, E
         return doc, None
     except Exception as exc:  # noqa: BLE001
         return None, exc
+
+
+def dated_copy(stem: str, now_iso: str, data_dir: Path, getter=None):
+    """(the newest readable dated copy `<stem>-YYYY-MM-DD.json` of the last DATED_DAYS days in release
+    `ledger-YYYY-qN`, or None; its day; the first error that was not a 404, or None)."""
+    try:
+        day0 = datetime.fromisoformat(str(now_iso).replace("Z", "+00:00")).date()
+    except ValueError:
+        day0 = datetime.now(timezone.utc).date()
+    base = ll2ledger.RELEASE.rstrip("/").rsplit("/", 1)[0] + "/"   # .../releases/download/
+    err = None
+    for i in range(DATED_DAYS):
+        d = day0 - timedelta(days=i)
+        url = f"{base}ledger-{d.year}-q{(d.month - 1) // 3 + 1}/{stem}-{d.isoformat()}.json"
+        try:
+            body, _ = fetch.fetch("launch-release-dated", url, data_dir / "raw", "json", getter=getter, gz=True)
+            return gnss.published_json(body), d.isoformat(), None
+        except Exception as exc:  # noqa: BLE001
+            if err is None and getattr(exc, "code", None) != 404:
+                err = exc
+    return None, None, err
 
 
 def _write(p: Path, doc) -> None:

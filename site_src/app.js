@@ -366,7 +366,7 @@ function board() {
   const rows = all.filter((x) => (!only || only.launches.has(x.r.ll2)) && LY.launchShown(x.actor, x.net, lay, now, x.precision));
   const moved = (x) => {
     const s = el("span", "", BD.moveText(x));
-    if (x.lastMove) s.append(el("br"), el("span", "muted small", `Seen ${fmt(x.lastMove.at)}: from ${fmt(x.lastMove.from)} to ${fmt(x.lastMove.to)}`));
+    if (x.lastMove) s.append(el("br"), el("span", "muted small", BD.seenText(x.lastMove, fmt)));
     return s;
   };
   put($("board-table"), rows.length ? table(["NET", "Launch", "Country", "Site", "Status", "NET moved", "Live closures"],
