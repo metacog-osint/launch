@@ -9,6 +9,7 @@ runs the workflow's own tic_archive.py commands, read from update.yml, against a
 GitHub: GhStore is replaced by the DirStore and any subprocess call during an archive command fails the test."""
 from __future__ import annotations
 
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -32,7 +33,7 @@ sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.append(str(ROOT / "tools"))   # after ROOT: tools/launch.py must not shadow the package
 import tic_archive as ta  # noqa: E402
-from launch import gnss, ll2ledger, news, schedule  # noqa: E402
+from launch import fetch, gnss, ll2ledger, news, schedule  # noqa: E402
 from test_ascent_move import page, rec  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("launch_cli_archive", ROOT / "tools" / "launch.py")
@@ -86,6 +87,48 @@ def fill_script() -> str:
     text = step("Fill gaps in the state from the private archive")
     (body,) = re.findall(r"<<'PY'[^\n]*\n(.*?)\n\s*PY\n", text, re.S)
     return textwrap.dedent(body) + "\n"
+
+
+def run_block(text: str) -> str:
+    """A step's `run: |` script as Actions hands it to bash: the block's lines with their indentation removed."""
+    lines = text.split("\n")
+    (i,) = [n for n, line in enumerate(lines) if line.strip() == "run: |"]
+    body = []
+    for line in lines[i + 1:]:
+        if line.strip() and not line.startswith(" " * 10):
+            break                                   # the comments above the next step
+        body.append(line)
+    return textwrap.dedent("\n".join(body)).strip("\n") + "\n"
+
+
+def find_bash() -> str | None:
+    """bash as Actions runs it. On Windows only Git's bash (System32's bash is WSL, which does not see this tree)."""
+    if os.name == "nt":
+        p = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe"
+        return str(p) if p.exists() else None
+    return shutil.which("bash")
+
+
+BASH = find_bash()
+
+
+def stub(bin_dir: Path, name: str, body: str) -> None:
+    """A stand-in command on PATH (a shell script; Git's bash runs one without an extension too)."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    f = bin_dir / name
+    f.write_text("#!/bin/sh\n" + body, encoding="utf-8", newline="\n")
+    f.chmod(0o755)
+
+
+def run_step_shell(text: str, cwd: Path, env: dict[str, str], bin_dir: Path) -> subprocess.CompletedProcess:
+    """A step's own script under bash as Actions runs it (-e, pipefail), with stand-ins first on PATH and `python`
+    the interpreter running the tests."""
+    stub(bin_dir, "python", f'exec "{Path(sys.executable).as_posix()}" "$@"\n')
+    script = cwd.parent / f"{cwd.name}-step.sh"
+    script.write_text(run_block(text), encoding="utf-8", newline="\n")
+    full = {**os.environ, **env, "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")}
+    return subprocess.run([BASH, "--noprofile", "--norc", "-eo", "pipefail", script.as_posix()], cwd=cwd, env=full,
+                          capture_output=True, text=True, timeout=120)
 
 
 def tree(root: Path) -> dict[str, str]:
@@ -241,7 +284,7 @@ class TestWorkflowLanes(unittest.TestCase):
     def test_each_lane_only_after_the_step_that_writes_it(self):
         text = step("Private archive (raw")
         self.assertIn("COLLECTED: ${{ steps.collect.outcome }}", text)
-        self.assertIn("DEPLOYED: ${{ steps.deploy.outcome }}", text)
+        self.assertIn("DEPLOYED: ${{ steps.deploy.outputs.deployed }}", text)   # not the outcome: a skip succeeds
         self.assertIn("id: collect", step("Live collection"))
         self.assertIn("id: deploy", STEPS["Deploy site/ to Cloudflare Pages"])
         flat = text.replace("\\\n", " ")
@@ -249,7 +292,7 @@ class TestWorkflowLanes(unittest.TestCase):
                                r'--program launch --lane raw ')
         self.assertRegex(flat, r'if \[ "\$COLLECTED" = "success" \]; then\s+python tools/tic_archive\.py put '
                                r'--program launch --lane state ')
-        self.assertRegex(flat, r'if \[ "\$DEPLOYED" = "success" \]; then\s+python tools/tic_archive\.py put '
+        self.assertRegex(flat, r'if \[ "\$DEPLOYED" = "true" \]; then\s+python tools/tic_archive\.py put '
                                r'--program launch --lane site ')
         self.assertRegex(flat, r'(?m)^\s+python tools/tic_archive\.py put --program launch --lane history ')
 
@@ -409,10 +452,23 @@ class TestStateFromTheArchive(unittest.TestCase):
         self.assertEqual(arg(call, "--dest"), ["$RUNNER_TEMP/archive-state"])        # not data/ itself
         self.assertNotIn("exit 1", text)
         self.assertNotIn("::error::", text)
-        # The release assets it looks for are the stores collect reads back from release `ledger`.
-        (names,) = re.findall(r"for f in ([^;]+); do", text)
-        self.assertEqual(set(names.split()), {cli.STORE["upcoming"], cli.STORE["ll2"], cli.RELEASE_COPY["ledger"],
-                                              cli.RELEASE_COPY["closures"]})
+        # What it may fill: the Actions cache's own paths, and the stores collect reads back from release `ledger`
+        # (data/ledger.json, filed there as launch-ledger.json, is a cache path).
+        cached, released = re.findall(r"for f in ([^;]+); do", text)
+        cache_paths = re.findall(r"(?m)^\s{12}data/(\S+)\s*$", STEPS["Keep this run's state for the next run"])
+        self.assertEqual(cached.split(), cache_paths)
+        self.assertEqual(set(released.split()), {cli.STORE["upcoming"], cli.STORE["ll2"], cli.STORE["compare"],
+                                                 cli.RELEASE_COPY["closures"]})
+        self.assertNotIn("2>/dev/null || true", text)          # a failed listing is not read as "the release is empty"
+
+    def test_bounded_in_time_and_never_fails_the_job(self):
+        fill = step("Fill gaps in the state from the private archive")
+        self.assertRegex(fill, r"(?m)^        timeout-minutes: 5$")
+        self.assertRegex(fill, r"(?m)^        continue-on-error: true$")
+        last = step("Private archive (raw")
+        (minutes,) = re.findall(r"(?m)^        timeout-minutes: (\d+)$", last)
+        (job,) = re.findall(r"(?m)^    timeout-minutes: (\d+)$", WF)
+        self.assertLess(int(minutes), int(job))              # a hung put ends as a failed step, not a cancelled job
 
     def test_fills_only_what_data_lacks(self):
         run_root = RunTree.make()
@@ -427,8 +483,9 @@ class TestStateFromTheArchive(unittest.TestCase):
             runner_temp = td / "runner-temp"
             argv = [t.replace("$RUNNER_TEMP", str(runner_temp)) for t in call]
             self.assertEqual(run_archive(argv, fresh, td / "store"), 0)
-            r = subprocess.run([sys.executable, "-", str(runner_temp / "archive-state"), "data"], input=fill_script(),
-                               cwd=fresh, capture_output=True, text=True)
+            names = sorted({rel.split("/")[0] for rel in tree(run_root / "data")} - {"raw", "release-copy"})
+            r = subprocess.run([sys.executable, "-", str(runner_temp / "archive-state"), "data", *names],
+                               input=fill_script(), cwd=fresh, capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stderr)
             got = tree(fresh / "data")
             want = {rel: sha for rel, sha in tree(run_root / "data").items()
@@ -438,6 +495,267 @@ class TestStateFromTheArchive(unittest.TestCase):
             for p in ("ledger.json", "nms-closures.json", "upcoming-store.json", "ll2-ledger.json", "gnss/store.json"):
                 self.assertIn(p, got)
             self.assertIn(f"{len(got)} files from the private archive", r.stdout)
+
+
+# ---------- the fill step's own script, with stand-ins for gh and the archive ----------
+
+# A stand-in for tools/tic_archive.py in the run folder: logs each call and the token it got, and restores a prepared
+# folder as the newest `state` snapshot.
+ARCHIVE_STUB = '''import os, shutil, sys
+argv = sys.argv[1:]
+with open(os.environ["FAKE_ARCHIVE_LOG"], "a", encoding="utf-8") as fh:
+    fh.write(" ".join(argv) + " token=" + os.environ.get("GH_TOKEN", "") + "\\n")
+if os.environ.get("FAKE_ARCHIVE_FAIL"):
+    sys.exit(1)
+shutil.copytree(os.environ["FAKE_ARCHIVE_SNAPSHOT"], argv[argv.index("--dest") + 1], dirs_exist_ok=True)
+'''
+RELEASE_ALL = ("ascent-compare.json", "launch-ledger.json", "ll2-ledger.json", "nms-closures.json",
+               "upcoming-store.json")
+CACHE_FILES = ["gnss/days/2026-11-20.json", "gnss/store.json", "ledger.json", "snapshot.json"]
+
+
+def fill_run(run_dir: Path, work: Path, archived: Path, release: list[str] | None, token: str = "archive-token",
+             archive_fails: bool = False) -> tuple[subprocess.CompletedProcess, str, str]:
+    """The fill step's script in run_dir. release: the assets `gh release view ledger` lists, None when the listing
+    fails (a GitHub 5xx). Returns (bash's result, the archive calls, the gh calls)."""
+    (run_dir / "tools").mkdir(parents=True, exist_ok=True)
+    (run_dir / "data").mkdir(exist_ok=True)
+    (run_dir / "tools" / "tic_archive.py").write_text(ARCHIVE_STUB, encoding="utf-8")
+    bin_dir, log, gh_log = work / f"{run_dir.name}-bin", work / f"{run_dir.name}-archive.log", \
+        work / f"{run_dir.name}-gh.log"
+    head = f'echo "$*" >> "{gh_log.as_posix()}"\n'
+    if release is None:
+        stub(bin_dir, "gh", head + 'echo "HTTP 502: Bad Gateway" >&2\nexit 1\n')
+    else:
+        stub(bin_dir, "gh", head + "".join(f"echo {n}\n" for n in release))
+    temp = work / f"{run_dir.name}-runner-temp"
+    temp.mkdir(exist_ok=True)
+    env = {"GH_TOKEN": "run-token", "ARCHIVE_TOKEN": token, "CACHED": "", "RUNNER_TEMP": temp.as_posix(),
+           "FAKE_ARCHIVE_LOG": str(log), "FAKE_ARCHIVE_SNAPSHOT": str(archived),
+           "FAKE_ARCHIVE_FAIL": "1" if archive_fails else ""}
+    r = run_step_shell(step("Fill gaps in the state from the private archive"), run_dir, env, bin_dir)
+    read = log.read_text(encoding="utf-8") if log.exists() else ""
+    return r, read, gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+
+
+@unittest.skipIf(BASH is None, "needs bash (Git's bash on Windows)")
+class TestFillStepShell(unittest.TestCase):
+    """Which archived files the step may copy into data/, case by case. The archive's newest `state` can be older
+    than release `ledger`, so a store the release holds is filled only when the release was listed and lacks it."""
+
+    ARCHIVED = (*CACHE_FILES, "upcoming-store.json", "ll2-ledger.json", "nms-closures.json", "ascent-compare.json",
+                "launches.json")
+
+    def setUp(self):
+        self.td = Path(tempfile.mkdtemp(prefix="launch-fill-"))
+        self.addCleanup(shutil.rmtree, self.td, True)
+        self.archived = self.td / "archived"
+        for rel in self.ARCHIVED:
+            (self.archived / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.archived / rel).write_text('{"from": "the archive"}\n', encoding="utf-8")
+        self.run_dir = self.td / "run"
+
+    def cache_hit(self):
+        for rel in ("snapshot.json", "ledger.json", "gnss/store.json"):
+            p = self.run_dir / "data" / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('{"from": "the Actions cache"}\n', encoding="utf-8")
+
+    def fill(self, release, **kw):
+        r, read, gh = fill_run(self.run_dir, self.td, self.archived, release, **kw)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        data = self.run_dir / "data"
+        filled = sorted(rel for rel in tree(data) if "the archive" in (data / rel).read_text(encoding="utf-8"))
+        return filled, read, gh, r.stdout
+
+    def test_cache_and_release_hold_it_all_so_the_archive_is_not_read(self):
+        self.cache_hit()
+        filled, read, gh, out = self.fill(list(RELEASE_ALL))
+        self.assertEqual((filled, read), ([], ""))
+        self.assertIn("the archive is not read", out)
+        self.assertEqual(gh.split(), ["release", "view", "ledger", "--json", "assets", "--jq", ".assets[].name"])
+
+    def test_cache_miss_fills_only_the_cache_paths_while_the_release_holds_its_stores(self):
+        filled, read, _, _ = self.fill(list(RELEASE_ALL))
+        self.assertEqual(filled, CACHE_FILES)            # not the Ascent stores, the NMS ledger or anything else
+        self.assertIn("restore --program launch --lane state", read)
+        self.assertIn("token=archive-token", read)
+
+    def test_release_unreadable_fills_none_of_its_stores(self):
+        # A failed listing is not "the release lacks them": collect's guard must still see no local copy.
+        self.cache_hit()
+        filled, read, _, out = self.fill(None)
+        self.assertEqual((filled, read), ([], ""))
+        self.assertIn("::warning::release ledger could not be listed", out)
+
+    def test_release_unreadable_and_cache_miss_fills_only_the_cache_paths(self):
+        filled, _, _, _ = self.fill(None)
+        self.assertEqual(filled, CACHE_FILES)
+
+    def test_a_store_the_release_lacks_is_filled(self):
+        self.cache_hit()
+        filled, _, _, _ = self.fill([n for n in RELEASE_ALL if n != "upcoming-store.json"])
+        self.assertEqual(filled, ["upcoming-store.json"])
+
+    def test_what_data_holds_stays(self):
+        (self.run_dir / "data").mkdir(parents=True)
+        (self.run_dir / "data" / "snapshot.json").write_text('{"from": "the Actions cache"}\n', encoding="utf-8")
+        filled, _, _, _ = self.fill(list(RELEASE_ALL))
+        self.assertEqual(filled, [p for p in CACHE_FILES if p != "snapshot.json"])
+        self.assertIn("the Actions cache", (self.run_dir / "data" / "snapshot.json").read_text(encoding="utf-8"))
+
+    def test_no_token_or_a_failed_restore_never_fails_the_step(self):
+        filled, read, _, out = self.fill(list(RELEASE_ALL), token="")
+        self.assertEqual((filled, read), ([], ""))
+        self.assertIn("TIC_ARCHIVE_TOKEN is not set", out)
+        filled, read, _, out = self.fill(list(RELEASE_ALL), archive_fails=True)
+        self.assertEqual(filled, [])
+        self.assertIn("could not be read", out)
+
+
+@unittest.skipIf(BASH is None, "needs bash (Git's bash on Windows)")
+class TestArchiveOlderThanRelease(unittest.TestCase):
+    """The archive's newest `state` is older than release `ledger` (the run that uploaded the release had its
+    archive step fail). The fill and collect together never put the older copy over a newer release record: with
+    the release unreadable the run stops before it writes a store, and with it readable the newer record wins."""
+
+    MARK = {"at": "2026-11-27T05:00:00Z", "source": "ll2", "fields": {"name": ["older", "newer than the archive"]}}
+    LL2_MARK = {"at": "2026-11-27T05:00:00Z", "id": "release-only", "fields": {"net": ["older", "newer"]}}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = RunTree.make()
+        cls.td = Path(tempfile.mkdtemp(prefix="launch-older-"))
+        cls.archived = cls.td / "archived"          # the state as an earlier run left it
+        shutil.copytree(cls.base / "data", cls.archived, ignore=shutil.ignore_patterns("raw", "release-copy"))
+        # The archived store holds one scheduled launch; the release holds a later change to it and one launch more.
+        old = json.loads((cls.base / "data" / "upcoming-store.json").read_text(encoding="utf-8"))
+        schedule.ingest(old, "ll2", [schedule.ll2_row(rec(7, "2026-12-01T00:00:00Z"))], "2026-11-27T01:00:00Z",
+                        link_key="ll2_url")
+        (cls.archived / "upcoming-store.json").write_text(json.dumps(old), encoding="utf-8")
+        up = json.loads(json.dumps(old))
+        schedule.ingest(up, "ll2", [schedule.ll2_row(rec(8, "2026-12-02T00:00:00Z"))], "2026-11-27T04:00:00Z",
+                        link_key="ll2_url")
+        up["records"][0]["changes"].append(cls.MARK)
+        ll2 = json.loads((cls.base / "data" / "ll2-ledger.json").read_text(encoding="utf-8"))
+        ll2["changes"].append(cls.LL2_MARK)
+        d = cls.base / "data"
+        cls.release = {"upcoming-store.json": json.dumps(up).encode(), "ll2-ledger.json": json.dumps(ll2).encode(),
+                       "launch-ledger.json": (d / "ledger.json").read_bytes(),
+                       "nms-closures.json": (d / "nms-closures.json").read_bytes()}
+        if (d / "ascent-compare.json").exists():     # written only when the run read Orbit's upcoming lane
+            cls.release["ascent-compare.json"] = (d / "ascent-compare.json").read_bytes()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.td, ignore_errors=True)
+
+    def run_case(self, name: str, listed, release_up: bool, lost: tuple[str, ...] = ()):
+        """A new run (no Actions cache) after the fill step. listed: what the release listing gives (None: it
+        fails). release_up: collect's reads of release `ledger` answer, or fail with a 502. lost: assets gone."""
+        root = self.td / name
+        for top in ("doctrine", "site_src", "history"):
+            shutil.copytree(self.base / top, root / top)
+        r, _, _ = fill_run(root, self.td, self.archived, listed)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+        def net(url: str, timeout: int = 0) -> bytes:
+            if url.startswith(ll2ledger.RELEASE):
+                if not release_up:
+                    raise urllib.error.HTTPError(url, 502, "Bad Gateway", {}, None)
+                asset = url[len(ll2ledger.RELEASE):]
+                if asset in self.release and asset not in lost:
+                    return self.release[asset]
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            return network(url, timeout)
+        return root, net
+
+    def assert_stops_without_writing_a_store(self, root, net):
+        for f in ("upcoming-store.json", "ll2-ledger.json", "nms-closures.json"):
+            self.assertFalse((root / "data" / f).exists(), f"{f} filled from the older archive")
+        with self.assertRaisesRegex(RuntimeError, "not writing a smaller store"):
+            cli.collect(root, getter=net)
+        for f in ("upcoming-store.json", "ll2-ledger.json"):
+            self.assertFalse((root / "data" / f).exists(), f"{f} written: the next step would upload it over the release")
+
+    def test_release_listed_then_unreadable_stops_the_run(self):
+        self.assert_stops_without_writing_a_store(*self.run_case("listed-then-502", list(RELEASE_ALL), False))
+
+    def test_release_listing_fails_stops_the_run(self):
+        self.assert_stops_without_writing_a_store(*self.run_case("listing-502", None, False))
+
+    def test_release_readable_keeps_every_newer_record_over_an_older_local_copy(self):
+        root, net = self.run_case("readable", list(RELEASE_ALL), True)
+        for f in ("upcoming-store.json", "ll2-ledger.json"):           # an older local copy as well
+            shutil.copyfile(self.archived / f, root / "data" / f)
+        cli.collect(root, getter=net)
+        got = {r["id"]: r for r in json.loads((root / "data" / "upcoming-store.json").read_text(encoding="utf-8"))
+               ["records"]}
+        rel = json.loads(self.release["upcoming-store.json"])
+        for r in rel["records"]:
+            self.assertIn(r["id"], got)
+            for c in r["changes"]:
+                self.assertIn(c, got[r["id"]]["changes"])
+        self.assertIn(self.MARK, got[rel["records"][0]["id"]]["changes"])
+        led = json.loads((root / "data" / "ll2-ledger.json").read_text(encoding="utf-8"))
+        self.assertIn(self.LL2_MARK, led["changes"])
+        self.assertLessEqual({r["id"] for r in json.loads(self.release["ll2-ledger.json"])["launches"]},
+                             {r["id"] for r in led["launches"]})
+
+    def test_a_store_the_release_lost_comes_back_from_the_archive(self):
+        root, net = self.run_case("lost", [n for n in RELEASE_ALL if n != "upcoming-store.json"], True,
+                                  lost=("upcoming-store.json",))
+        self.assertEqual((root / "data" / "upcoming-store.json").read_bytes(),
+                         (self.archived / "upcoming-store.json").read_bytes())
+        self.assertFalse((root / "data" / "ll2-ledger.json").exists())   # the release still holds that one
+        cli.collect(root, getter=net)
+        got = {r["id"] for r in json.loads((root / "data" / "upcoming-store.json").read_text(encoding="utf-8"))
+               ["records"]}
+        archived = json.loads((self.archived / "upcoming-store.json").read_text(encoding="utf-8"))
+        self.assertLessEqual({r["id"] for r in archived["records"]}, got)
+
+
+# ---------- the deploy step's output gates the site lane ----------
+
+@unittest.skipIf(BASH is None, "needs bash (Git's bash on Windows)")
+class TestDeployedOutput(unittest.TestCase):
+    def deploy(self, token: str, wrangler_ok: bool) -> tuple[int, str]:
+        td = Path(tempfile.mkdtemp(prefix="launch-deploy-"))
+        self.addCleanup(shutil.rmtree, td, True)
+        (td / "run").mkdir()
+        stub(td / "bin", "npx", "exit 0\n" if wrangler_ok else "exit 1\n")
+        stub(td / "bin", "sleep", "exit 0\n")
+        out = td / "github-output"
+        out.write_text("", encoding="utf-8")
+        env = {"CLOUDFLARE_API_TOKEN": token, "CLOUDFLARE_ACCOUNT_ID": "account" if token else "",
+               "GITHUB_OUTPUT": out.as_posix(), "GITHUB_SHA": "0" * 40}
+        r = run_step_shell(STEPS["Deploy site/ to Cloudflare Pages"], td / "run", env, td / "bin")
+        return r.returncode, out.read_text(encoding="utf-8")
+
+    def test_deployed_only_after_wrangler_succeeded(self):
+        self.assertEqual(self.deploy("", True), (0, ""))                # no secrets: skipped, and the step succeeds
+        self.assertEqual(self.deploy("token", True), (0, "deployed=true\n"))
+        self.assertEqual(self.deploy("token", False), (1, ""))
+
+
+# ---------- the raw lane ----------
+
+class TestRawRepliesKeepNoFetchTime(unittest.TestCase):
+    """A gzipped reply holds no fetch time, so a reply that has not changed is the same file in every run and the
+    raw lane's put (deduped by sha256) uploads it once."""
+
+    def test_the_same_reply_is_the_same_bytes_in_every_run(self):
+        body = json.dumps({"launches": list(range(500))}).encode()
+        got = []
+        with tempfile.TemporaryDirectory() as td:
+            for run, t in (("run1", 1_795_000_000.0), ("run2", 1_795_086_400.0)):
+                with mock.patch("time.time", return_value=t):
+                    fetch.fetch("orbit-ledger", "https://example.invalid/ledger.json", Path(td) / run, "json",
+                                getter=lambda url, timeout=0: body, gz=True)
+                (f,) = (Path(td) / run / "orbit-ledger").iterdir()
+                got.append(f.read_bytes())
+        self.assertEqual(got[0], got[1])
+        self.assertEqual(gzip.decompress(got[0]), body)
 
 
 if __name__ == "__main__":
