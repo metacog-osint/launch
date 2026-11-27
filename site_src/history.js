@@ -8,6 +8,7 @@
 import { createHistoryMap } from "./hmap.js";
 import * as X from "./export.js";
 import * as SV from "./saved.js";
+import * as FX from "./facets.js";
 import * as CH from "./chart.js";
 import * as CMP from "./sidebyside.js";
 
@@ -58,6 +59,9 @@ const FACETS = [
   { k: "orb", label: "Orbit", get: (r) => r.orbit || NK },
   { k: "out", label: "Outcome", get: (r) => (r.status === "upcoming" ? "Scheduled" : r.outcome === "success" ? "Success" : r.outcome ? "Failure or partial" : NK) },
   { k: "src", label: "Source", get: (r) => r.sources, name: (v) => SOURCES[v] || v },
+  // facets.js: the FIRs of the record's notices, and how they were tied to the launch.
+  { k: "fir", label: "FIR (flight information region)", get: (r) => cached(r, "fir", () => FX.firs(r, chartedOf(r))), search: true },
+  { k: "jn", label: "Notices joined by", get: (r) => cached(r, "jn", () => FX.joinedBy(r)), note: (v) => FX.JOIN_NOTES[v] },
   { k: "path", label: "Flight path", get: (r) => (r.path ? "Estimated from an azimuth" : "None"), },
   // overfly.py: the countries the path's ground track crosses (land only).
   { k: "ovf", label: "Path crosses", get: (r) => { const cc = r.over ? [...new Set(r.over.flat().map((o) => o.cc))] : []; return !r.over ? ["nopath"] : cc.length ? cc : ["water"]; },
@@ -143,6 +147,9 @@ function writeHash() {
 
 /* ---------- filtering ---------- */
 const vals = (f, r) => [].concat(f.get(r));
+const chartedOf = (r) => (r.chart || []).flatMap((id) => chartById.get(id) || []);
+// Facet values read from a record's notices, kept on the record until its notices change (applySaved clears _fx).
+function cached(r, k, make) { r._fx = r._fx || {}; if (!(k in r._fx)) r._fx[k] = make(); return r._fx[k]; }
 function hay(r) {
   if (r._hay) return r._hay;
   const charted = (r.chart || []).flatMap((id) => chartById.get(id) || []);
@@ -659,11 +666,11 @@ const recNumbers = (r) => [
 function applySaved() {
   const touched = savedOwn.map((r) => r.id).concat(savedOn.map((r) => r.id));
   if (savedOwn.length) { const gone = new Set(savedOwn.map((r) => r.id)); IX.records = IX.records.filter((r) => !gone.has(r.id)); gone.forEach((id) => byId.delete(id)); }
-  savedOn.forEach((r) => { delete r.saved_notices; r.sources = r.sources.filter((s) => s !== "saved"); r._hay = null; });
+  savedOn.forEach((r) => { delete r.saved_notices; r.sources = r.sources.filter((s) => s !== "saved"); r._hay = null; r._fx = null; });
   const notices = SV.load().map(SV.read).filter(Boolean);
   const { byRecord, own } = SV.join(notices, IX.records, recNumbers);
   savedOn = [];
-  byRecord.forEach((xs, id) => { const r = byId.get(id); if (!r) return; r.saved_notices = xs; if (!r.sources.includes("saved")) r.sources.push("saved"); r._hay = null; savedOn.push(r); });
+  byRecord.forEach((xs, id) => { const r = byId.get(id); if (!r) return; r.saved_notices = xs; if (!r.sources.includes("saved")) r.sources.push("saved"); r._hay = null; r._fx = null; savedOn.push(r); });
   savedOwn = own;
   own.forEach((r) => { r._day = zoneDay(r.time); r._month = r._day.slice(0, 7); IX.records.push(r); byId.set(r.id, r); });
   if (map) map.forget(touched.concat(savedOn.map((r) => r.id), own.map((r) => r.id)));
