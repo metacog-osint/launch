@@ -78,6 +78,7 @@ const f = (iso) => "T(" + iso + ")";
 const N = "2026-11-30T00:00:00Z";
 out.net = ["Minute", "Hour", "Day", "Month", "Week", "Quarter (Q1)", null, "closure window"].map((p) => B.netWords(N, p, f));
 out.netBad = B.netWords("", "Hour", f);
+out.seen = [{ at: "a", from: "b", to: "c", source: "ll2" }, { at: "a", from: "b", to: "c", source: "rll" }, null].map((m) => B.seenText(m, f));
 out.coarse = [
   L.launchShown("US", "2026-11-26T00:00:00Z", s({ within: 3 }), now, "Month"),
   L.launchShown("US", "2026-11-26T00:00:00Z", D, now, "Month"),
@@ -184,6 +185,8 @@ class LayersJsTest(unittest.TestCase):
             "Nov 2026 (month only)", "Week of 30 Nov 2026 UTC", "2026 (Quarter (Q1))", "T(2026-11-30T00:00:00Z)",
             "T(2026-11-30T00:00:00Z)"])
         self.assertEqual(self.o["netBad"], "")
+        self.assertEqual(self.o["seen"], ["Seen T(a): from T(b) to T(c)",
+                                          "Seen T(a): from T(b) to T(c) (Data by RocketLaunch.Live)", ""])
 
     def test_a_coarse_net_shows_only_with_any_time(self):
         self.assertEqual(self.o["coarse"], [False, True, True, True])

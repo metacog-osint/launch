@@ -148,13 +148,19 @@ def listed_by(r: dict) -> list[str]:
 def _fields_from(r: dict) -> None:
     """Set a record's shown fields from the first source in PRECEDENCE that still lists it, else (no source lists
     it) from the first that holds a reading."""
-    order = list(PRECEDENCE) + [s for s in r["sources"] if s not in PRECEDENCE]
+    pick = shown_source(r)
+    if pick:
+        reading = r["by_source"][pick]["fields"]
+        r.update({k: reading.get(k) for k in FIELDS})
+
+
+def shown_source(r: dict) -> str | None:
+    """The source whose reading a record shows: the first in PRECEDENCE that still lists it, else the first that
+    holds a reading."""
+    order = list(PRECEDENCE) + [s for s in r.get("sources") or [] if s not in PRECEDENCE]
     bs = r.get("by_source") or {}
     held = [s for s in order if (bs.get(s) or {}).get("fields")]
-    pick = next((s for s in held if bs[s].get("listed")), held[0] if held else None)
-    if pick:
-        reading = bs[pick]["fields"]
-        r.update({k: reading.get(k) for k in FIELDS})
+    return next((s for s in held if bs[s].get("listed")), held[0] if held else None)
 
 
 def _new(source: str, ref: str, read_at: str, evidence: str) -> dict:
@@ -311,12 +317,16 @@ def _public(r: dict) -> dict:
     out = {k: r.get(k) for k in ("id", "sources", "refs", "evidence", "first_seen", "updated", *FIELDS)}
     out["listed_by"] = listed_by(r)
     out["links"] = {s: b.get("link") for s, b in (r.get("by_source") or {}).items() if b.get("link")}
-    moves = sorted((c for c in r.get("changes") or [] if len((c.get("fields") or {}).get("net") or []) == 2),
+    # NET moves count from the shown source only: joined sources each log the same slip, so counting every source's
+    # change would count one slip once per source, and quote a reading the record does not show.
+    shown = shown_source(r)
+    moves = sorted((c for c in r.get("changes") or []
+                    if c.get("source") == shown and len((c.get("fields") or {}).get("net") or []) == 2),
                    key=lambda c: c.get("at") or "")
     out["net_changes"] = len(moves)
-    # The latest NET moves, for the Live tab's board ("moved 2 times; last 1 day later").
-    out["net_moves"] = [{"at": c.get("at"), "from": c["fields"]["net"][0], "to": c["fields"]["net"][1]}
-                        for c in moves[-NET_MOVES_SHOWN:]]
+    # The latest NET moves, for the Live tab's board ("moved 2 times; last 1 day later"), each with its source.
+    out["net_moves"] = [{"at": c.get("at"), "from": c["fields"]["net"][0], "to": c["fields"]["net"][1],
+                         "source": c.get("source")} for c in moves[-NET_MOVES_SHOWN:]]
     if r.get("aliases"):
         out["aliases"] = r["aliases"]
     cl = (r.get("by_source") or {}).get("closure")
