@@ -2,9 +2,9 @@
 
   tfr     FAA temporary flight restrictions (tfr.faa.gov, no key): the list, the shapes from the FAA's own map
           service, and each SPACE OPERATIONS TFR's XML for its altitudes. Only space operations are kept.
-  orbit   Orbit's published snapshot (orbit.theintelligence.company/data/snapshot.json, one request): its
-          scheduled launches, its launch-hazard navigational warnings (NGA, NAVAREA XI) and GCAT's launches of
-          the last 30 days. Launch reads them rather than fetching those sources a second time.
+  orbit   Orbit's published snapshot (orbit.theintelligence.company/data/snapshot.json, one request): GCAT's
+          launches of the last 30 days, which Launch reads rather than fetching GCAT a second time. Scheduled
+          launches come from Launch's own schedule lane (launch/schedule.py); Orbit no longer publishes them.
   cordon  Cordon's published feed (cordon.theintelligence.company/data/feed.geojson, one request): NGA's
           navigational warnings in its `launch` category, with the windows, hazard and cancels Cordon parses
           (method cordon-feed-1.1). Cordon is the suite's one NGA reader (decided 17 Nov 2026); Launch takes the
@@ -182,17 +182,6 @@ def orbit_read(body: bytes) -> dict:
                                  "provider", "provider_countries", "vehicle", "mission", "mission_type", "orbit", "pad",
                                  "location", "lat", "lon", "pad_country", "ll2_url", "last_updated")}
           for u in s.get("upcoming") or []]
-    areas = []
-    for w in (s.get("navwarn") or {}).get("areas") or []:
-        for a in w.get("areas") or []:
-            ring = [list(c) for c in a.get("coords") or []]
-            if len(ring) >= 3:
-                if ring[0] != ring[-1]:
-                    ring.append(list(ring[0]))
-                areas.append({"source": "orbit-navwarn", "key": w.get("key"), "label": a.get("label"),
-                              "hazard": w.get("hazard"), "regions": w.get("regions"),
-                              "ring": notam.unwrap(ring), "windows": w.get("windows") or [],
-                              "broadcasts": w.get("broadcasts") or w.get("ids")})
     # GCAT launches (Orbit keeps 30 days): enough of each for matching and for the history ledger.
     launches = [{k: l.get(k) for k in ("launch_tag", "date", "time", "time_uncertain", "vehicle", "variant", "site_code",
                                        "site", "pad", "flight", "mission", "agency", "launchers", "category", "kind",
@@ -202,8 +191,7 @@ def orbit_read(body: bytes) -> dict:
                 for l in s.get("launches") or []]
     # When Orbit read LL2 (its upcoming lane), for the side-by-side check with Launch's own read (launch/compare.py).
     read = ((s.get("lanes") or {}).get("upcoming") or {}).get("fetched_at")
-    return {"generated_at": s.get("generated_at"), "upcoming": up, "upcoming_read_at": read, "areas": areas,
-            "launches": launches}
+    return {"generated_at": s.get("generated_at"), "upcoming": up, "upcoming_read_at": read, "launches": launches}
 
 
 # ---------- Cordon ----------

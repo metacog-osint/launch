@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from launch import unlisted
+from launch import schedule, unlisted
 
 NOW = datetime(2026, 11, 21, 20, 0, tzinfo=timezone.utc)
 SITES = {"Jiuquan": {"pad": [100.3, 41.0], "launches": 40, "median_min": 9.0, "q1_min": 8.0, "q3_min": 10.0}}
@@ -69,12 +69,143 @@ class Closures(unittest.TestCase):
         named = [{"area": "A1/26", "level": "time", "named": "NG-25"}]
         self.assertEqual(self.run_it([area()], matches=named), [])
 
+    def test_separate_notice_for_a_reserve_day_is_out(self):
+        """A warning placed on a listed launch lists the launch day and reserve days; a separate notice for each
+        reserve day, its window ending at the same minute, is that launch's, not a closure with no listing."""
+        warn = area("NAV-1/26", start="2026-11-29T21:10:00Z", end="2026-11-29T21:36:00Z")
+        warn["windows"] += [{"start": "2026-11-30T20:50:00Z", "end": "2026-11-30T21:16:00Z"},
+                            {"start": "2026-12-01T20:30:00Z", "end": "2026-12-01T20:56:00Z"}]
+        day2 = area("A2/26", start="2026-11-30T20:44:00Z", end="2026-11-30T21:16:00Z")
+        day3 = area("A3/26", start="2026-12-01T20:24:00Z", end="2026-12-01T20:56:00Z")
+        placed = [{"area": "NAV-1/26", "level": "time and place"}]
+        self.assertEqual(self.run_it([warn, day2, day3], matches=placed), [])
+        # Without the placed warning (it is then a row itself), or on another day's hours, they stay rows.
+        self.assertEqual(len(self.run_it([warn, day2, day3])), 3)
+        other = area("A4/26", start="2026-11-30T09:00:00Z", end="2026-11-30T09:30:00Z")
+        self.assertEqual([r["id"] for r in self.run_it([warn, other], matches=placed)], ["unlisted:A4/26"])
+
     def test_areas_opening_together_are_one_row(self):
         rows = self.run_it([area("A1/26"), area("A2/26", start="2026-11-29T21:20:00Z", end="2026-11-29T21:50:00Z"),
                             area("A3/26", start="2026-11-30T09:00:00Z", end="2026-11-30T09:30:00Z")])
         self.assertEqual(len(rows), 2)
         self.assertEqual([n["key"] for n in rows[0]["notices"]], ["A1/26", "A2/26"])
         self.assertEqual(rows[0]["end"], "2026-11-29T21:50:00Z")
+
+
+
+def ll2(uid="u1", net="2026-11-29T21:15:00Z", precision="Minute", lat=41.0, lon=100.3, name="LM-2D"):
+    return {"id": uid, "name": name, "net": net, "net_precision": precision, "lat": lat, "lon": lon}
+
+
+class ClosureRecords(unittest.TestCase):
+    """Ascent step 1b: closure rows as records in the multi-source upcoming store."""
+
+    def rows(self, areas, records=()):
+        return unlisted.closures(list(areas), list(records), SITES, NOW)
+
+    def test_row_becomes_a_closure_record(self):
+        store = schedule.empty()
+        rep = unlisted.apply(store, self.rows([area()]), SITES, "2026-11-21T20:00:00Z")
+        self.assertEqual(rep["new"], ["upcoming:closure:A1/26"])
+        r = store["records"][0]
+        self.assertEqual((r["sources"], r["evidence"]), (["closure"], ["closure with no listing"]))
+        self.assertEqual((r["net"], r["net_precision"], r["location"]), ("2026-11-29T21:06:00Z", "closure window", "Jiuquan"))
+        self.assertEqual((r["lat"], r["lon"]), (41.0, 100.3))
+        pub = schedule.active(store, NOW)[0]
+        self.assertEqual(pub["closure"]["notices"], ["A1/26"])
+        self.assertTrue(pub["closure"]["listed"])
+
+    def test_closure_records_are_not_listings(self):
+        store = schedule.empty()
+        unlisted.apply(store, self.rows([area()]), SITES, "2026-11-21T20:00:00Z")
+        again = self.rows([area()], schedule.active(store, NOW))
+        self.assertEqual(len(again), 1)
+        self.assertEqual(again[0]["maybe_listed"], [])
+
+    def test_regrouped_row_keeps_its_record(self):
+        store = schedule.empty()
+        unlisted.apply(store, self.rows([area("A2/26")]), SITES, "2026-11-21T20:00:00Z")
+        # An earlier notice joins the same group: the row's first key is now A1/26, the record stays A2/26's.
+        rows = self.rows([area("A1/26", start="2026-11-29T21:00:00Z"), area("A2/26")])
+        rep = unlisted.apply(store, rows, SITES, "2026-11-21T21:00:00Z")
+        self.assertEqual(rep["new"], [])
+        self.assertEqual(len(store["records"]), 1)
+        self.assertEqual(store["records"][0]["by_source"]["closure"]["notices"], ["A1/26", "A2/26"])
+
+    def test_gone_row_is_kept_and_marked(self):
+        store = schedule.empty()
+        unlisted.apply(store, self.rows([area()]), SITES, "2026-11-21T20:00:00Z")
+        rep = unlisted.apply(store, [], SITES, "2026-11-21T21:00:00Z")
+        self.assertEqual(rep["unlisted"], ["upcoming:closure:A1/26"])
+        self.assertEqual(len(store["records"]), 1)
+        self.assertEqual(schedule.active(store, NOW), [])
+
+    def test_later_listing_joins_and_first_id_is_kept(self):
+        store = schedule.empty()
+        unlisted.apply(store, self.rows([area()]), SITES, "2026-11-21T20:00:00Z")
+        schedule.ingest(store, "ll2", [ll2()], "2026-11-22T20:00:00Z")
+        listed = schedule.active(store, NOW)
+        rows = self.rows([area()], listed)
+        self.assertEqual(rows, [])  # the listed launch now explains the closure
+        rep = unlisted.apply(store, rows, SITES, "2026-11-22T20:00:00Z")
+        self.assertEqual(rep["joined"], [{"kept": "upcoming:closure:A1/26", "closure": "upcoming:closure:A1/26",
+                                          "listed": "upcoming:ll2:u1"}])
+        self.assertEqual(len(store["records"]), 1)
+        r = store["records"][0]
+        self.assertEqual(r["id"], "upcoming:closure:A1/26")
+        self.assertEqual(r["refs"], {"closure": "A1/26", "ll2": "u1"})
+        self.assertEqual(r["name"], "LM-2D")  # LL2's fields show once it lists the launch
+        self.assertEqual(schedule.resolve(store, "upcoming:ll2:u1")["id"], "upcoming:closure:A1/26")
+        # The next LL2 read finds the joined record by its own id, and nothing is made twice.
+        rep2 = schedule.ingest(store, "ll2", [ll2(net="2026-11-29T21:20:00Z")], "2026-11-22T21:00:00Z")
+        self.assertEqual((rep2["new"], len(store["records"])), ([], 1))
+        self.assertEqual(len(schedule.active(store, NOW)), 1)
+
+    def test_day_only_or_far_listing_does_not_join(self):
+        store = schedule.empty()
+        unlisted.apply(store, self.rows([area()]), SITES, "2026-11-21T20:00:00Z")
+        schedule.ingest(store, "ll2", [ll2("u1", net="2026-11-29T00:00:00Z", precision="Day"),
+                                       ll2("u2", lat=19.6, lon=110.9)], "2026-11-22T20:00:00Z")
+        rows = self.rows([area()], schedule.active(store, NOW))
+        self.assertEqual(rows[0]["maybe_listed"], ["LM-2D"])
+        rep = unlisted.apply(store, rows, SITES, "2026-11-22T20:00:00Z")
+        self.assertEqual(rep["joined"], [])
+        self.assertEqual(len(store["records"]), 3)
+
+
+class FlownLaunch(unittest.TestCase):
+    """A notice with reserve-day windows: once its launch flew and the schedule dropped it, the notice is that
+    launch's, not a closure with no listing."""
+    WINDOWS = [{"start": "2026-11-20T21:06:00Z", "end": "2026-11-20T21:36:00Z"},
+               {"start": "2026-11-22T21:06:00Z", "end": "2026-11-22T21:36:00Z"}]
+
+    def flown(self, lat=41.0, lon=100.3, net="2026-11-20T21:15:00Z", precision="Minute"):
+        return [{"name": "LM-2D", "net": net, "net_precision": precision, "lat": lat, "lon": lon, "status": "Success"}]
+
+    def test_reserve_day_after_the_launch_flew_is_no_row(self):
+        a = area(windows=self.WINDOWS)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW)), 1)
+        self.assertEqual(unlisted.closures([a], [], SITES, NOW, flown=self.flown()), [])
+
+    def test_a_launch_elsewhere_or_outside_the_windows_keeps_the_row(self):
+        a = area(windows=self.WINDOWS)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(lat=28.5, lon=-80.6))), 1)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(net="2026-11-19T10:00:00Z"))), 1)
+        self.assertEqual(len(unlisted.closures([a], [], SITES, NOW, flown=self.flown(precision="Day"))), 1)
+
+    def test_recent_flown_from_the_ll2_ledger(self):
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location("launch_cli_unlisted",
+                                                      Path(__file__).resolve().parents[1] / "tools" / "launch.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        led = {"launches": [{"id": "a", "net": "2026-11-20T21:15:00Z", "status": "Success"},
+                            {"id": "b", "net": "2026-11-20T22:00:00Z", "status": "Go"},
+                            {"id": "c", "net": "2026-10-01T00:00:00Z", "status": "Success"},
+                            {"id": "d", "net": "2026-11-23T00:00:00Z", "status": "Success"}]}
+        self.assertEqual([r["id"] for r in cli.recent_flown(led, NOW)], ["a"])
+        self.assertEqual(cli.recent_flown(None, NOW), [])
 
 
 if __name__ == "__main__":

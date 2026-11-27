@@ -31,3 +31,7 @@ then deploys `site/` to Cloudflare Pages.
 Copyright © 2026 The Intelligence Company. Launch's code is licensed under the GNU Affero General
 Public License v3.0 (`LICENSE`). Third-party and shared files keep their own licences, and data keeps its sources'
 terms; both are listed in `NOTICE`.
+
+## AI assistance
+
+This repository is built with AI coding assistance (Anthropic's Claude Code). The Intelligence Company is responsible for everything published here.

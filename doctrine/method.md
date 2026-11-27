@@ -13,7 +13,8 @@ history, and says which scheduled launches coincide with them. Observations only
 3. **Patterns** (`launch/patterns.py`): per pad, closure azimuths in 5-degree bands with the inclination each
    implies (cos i = cos(lat) sin(az), LA-ASM-1); drop zones used by three or more events within 25 NM; window
    lengths; notices per FIR per year; launch hour by actor. Counted, not predicted.
-4. **Matching** (`launch/live.py`), three named levels: time (Orbit's rule, widened from 4 h on 22 Nov 2026: NET in
+4. **Matching** (`launch/live.py`; since 25 Nov 2026 the scheduled launches are Launch's own records that Launch
+   Library 2 lists, item 5, not Orbit's copy), three named levels: time (Orbit's rule, widened from 4 h on 22 Nov 2026: NET in
    a window of 6 h or less, or up to 1 h before it opens; Ariane 6 VA271's own areas ran 4.9 to 5.7 h); time and place (also within 30 NM of the pad, or inside an azimuth band the pad's
    charted history has; where that history rests on under 10 events, as at most US pads, also on the launch azimuth,
    +-5 degrees, of an inclination GCAT shows flown five or more times from the site, within 1,500 NM, added 24 Nov
@@ -35,17 +36,28 @@ history, and says which scheduled launches coincide with them. Observations only
    450 NM of a site with launch-timing history, with no exactly dated listed launch within 100 NM of that site in any
    of the notice's windows, and no time-and-place match to a listed launch elsewhere. A listing dated only to a day or
    month is named beside it. It says the schedule shows nothing for a closure, not that a launch is coming.
+   Each such row is also a record in the upcoming store (25 Nov 2026, Ascent step 1b): source `closure`, id
+   `upcoming:closure:<notice key>` (kept while any of its notices stays in a row), NET the window's opening with
+   precision "closure window". When a source lists an exactly dated launch within 100 NM of the site inside the
+   window, the two records are joined and the one seen first keeps its id. A closure record is never a listing.
    **Live paths** (`catalog.live_paths()`, 21 Nov 2026): a scheduled launch's estimated path runs through the matched
    areas within 2,500 NM of its pad, by the same rule as History's paths. A time-only match counts only within 15
    degrees of the launch's expected bearing, and a NET known only to the day ties nothing. A launch with no area on
    its ascent has no line on the Live map.
-5. **Live lanes:** FAA space-operations TFRs; Orbit's published snapshot; NGA warnings and FAA NMS NOTAMs through
+5. **Live lanes:** FAA space-operations TFRs; Orbit's published snapshot (GCAT launches only); NGA warnings and FAA NMS NOTAMs through
    Cordon. The
    NASASpaceflight forum is linked, not collected.
    **Scheduled launches** (19 Nov 2026, from Orbit): one record per expected launch from one or more sources (Launch
    Library 2 first), with Launch's own id; each kind of evidence is named ("listed" so far), none is a forecast.
    Headlines are links only. The LL2 ledger is verified and extended each run; its launches GCAT has not listed are
    provisional until a GCAT launch joins them.
+   **RocketLaunch.Live** (`launch/rll.py`, 26 Nov 2026): the free tier's next five launches, one request a run, a
+   second listing source (`rll`, id `upcoming:rll:<its id>`). A RocketLaunch.Live record and a Launch Library 2 record
+   are one launch, and are joined (the one seen first keeps its id), when they share a place word, their NETs are
+   within 3 h (36 h when either is dated only to a day or coarser) and their vehicles do not differ; with two equally
+   near candidates neither joins. Launch Library 2's fields are shown when both hold a record. The free tier gives no
+   coordinates or status: a record takes the coordinates of a Launch Library 2 launch at the same place, else none,
+   and only Launch Library 2's records go to matching. Every copy says "Data by RocketLaunch.Live".
 6. **Not for navigation.**
 
 ## Feed contract revision 2.1 (23 Nov 2026)
@@ -56,3 +68,11 @@ A TFR's event time runs from its first window's start to its last window's end, 
 window. Its `last_change` is `new` at the FAA's issue time. A TFR issued within 72 hours is tier anomaly, and its
 `signal` is the hours since issue. A coincidence carries the closure area's window, and its `last_change` is `none`,
 because a coincidence has no source date and Launch keeps no log of its feed items.
+
+**Upcoming launches** (Ascent step 3, 25 Nov 2026): each record in the schedule's live view is a feed item
+(LA-PIR-3), id and `subject_id` both `launch:upcoming:<record id>` with spaces as hyphens, so
+`launch:upcoming:ll2:<LL2 id>`, `launch:upcoming:rll:<RocketLaunch.Live id>` or
+`launch:upcoming:closure:<notice key>`. Each listed item cites the sources that list it. A record keeps its id when another source
+joins it, and so does its item. `measures.evidence` says what the record rests on ("listed", "closure with no
+listing"). A listed launch's time is LL2's, floored to its stated precision; a closure record's times are the
+window's, not a launch time. `last_change` is `new` at the time Launch first read the record.

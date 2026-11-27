@@ -49,7 +49,7 @@ def fetch(source_id: str, url: str, raw_dir: Path | None, ext: str, timeout: int
         dest.mkdir(parents=True, exist_ok=True)
         f = dest / (f"{sha[:12]}.{ext}" + (".gz" if gz else ""))
         if not f.exists():
-            f.write_bytes(gzip.compress(body, 6) if gz else body)
+            f.write_bytes(gzip.compress(body, 6, mtime=0) if gz else body)   # same body, same bytes, every run
         with (Path(raw_dir) / "index.jsonl").open("a", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps(rec) + "\n")
     return body, rec

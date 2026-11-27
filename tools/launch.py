@@ -6,6 +6,7 @@
                                            # schedule, LL2 ledger, comparison -> data/*.json for the release
     python tools/launch.py build           # site/ from history/ and data/snapshot.json
     python tools/launch.py check           # registers + feed lint + public gate + privacy check
+    python tools/launch.py payloads        # reference rates for unknown payloads -> history/payloads_source/ (private)
 
 collect never makes data up. A failed lane keeps its last good copy (from_previous) or stays empty, and the
 snapshot's "lanes" block says which.
@@ -15,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,17 +24,17 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
 
 from launch import (catalog, compare, feed, fetch, gcat, gnss, history, incbias, joey, live, ll2ledger, news, nfc, nms,  # noqa: E402
-                    nsf, overfly, patterns, privacy, public, schedule, timing, unlisted, wayback)
+                    nsf, overfly, patterns, payloads, privacy, public, rll, schedule, timing, unlisted, wayback)
 from tic_doctrine import contract, registers  # noqa: E402
 
 DEFAULT_KML = ROOT / "history" / "source" / "launch-map-2026-11-13.kml"
 # Not imported: the exercise layer holds scenario text, not public notices.
 EXCLUDED_LAYERS = {"Previous Exercise NOTAMs"}
 LANE_FIELDS = {"tfr": ["tfr"], "orbit": ["orbit"], "cordon": ["cordon"], "nms": ["nms"], "schedule": ["schedule"],
-               "news": ["news"]}
+               "news": ["news"], "rll": ["rll"]}
 # The published ledger, read back on each run so a lost Actions cache loses no launch (merge is a union).
 LIVE_LEDGER = "https://launch.theintelligence.company/data/ledger.json"
-EMPTY = {"tfr": [], "orbit": {}, "cordon": {}, "nms": {}, "schedule": {}, "news": {}}
+EMPTY = {"tfr": [], "orbit": {}, "cordon": {}, "nms": {}, "schedule": {}, "news": {}, "rll": {}}
 # The Ascent move's stores (19 Nov 2026), kept for good on this repository's public release `ledger`: the workflow
 # uploads them after each collect, and collect reads them back from there (a local copy, when there is one, too).
 STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "ascent-compare.json"}
@@ -42,6 +43,10 @@ STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "
 # a site that answers 404 or an emptied cache restores from it, not from empty. data/ledger.json is uploaded as
 # launch-ledger.json beside ll2-ledger.json; dated copies go to release `ledger-YYYY-qN` (kept for good).
 RELEASE_COPY = {"ledger": "launch-ledger.json", "closures": "nms-closures.json"}
+DATED_DAYS = 7   # how far back update_ledger looks for the newest dated copy (one is uploaded a day)
+SITE_DATA = "https://launch.theintelligence.company/data/"
+# Payload reference rates and their scoring ledger: git-ignored, never published, never pruned (payloads.py).
+PAYLOADS_DIR = ROOT / "history" / "payloads_source"
 
 
 def dump(obj, compact: bool = False) -> str:
@@ -112,6 +117,14 @@ def build_backfill(gdir: Path, root: Path = ROOT) -> dict:
            "gcat_updated": stamp, "citation": gcat.CITATION, "generated_at": now, "launches": launches, "closures": [],
            "sites": catalog.site_table(sites, used)}
     (root / "history" / "ledger.json").write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
+    # The payload owners' names, for the History tab's owner filter (the ledger carries GCAT's codes).
+    names = gcat.owner_names(orgs, (o for g in launches for o in (g.get("payloads") or {}).get("owners") or []))
+    # A name the privacy check would refuse (a school or body named for a person on its list) stays a bare code.
+    terms = privacy.private_terms()
+    names = {c: n for c, n in names.items() if not privacy.hits(n, terms)}
+    (root / "history" / "owners.json").write_text(
+        dump({"version": 1, "citation": gcat.CITATION, "gcat_updated": stamp.get("orgs"), "owners": names}, compact=True),
+        encoding="utf-8", newline="\n")
     return {"launches": len(launches), "sites": len(doc["sites"]), "gcat_updated": stamp.get("launch")}
 
 
@@ -130,7 +143,13 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
                   ll2_led: dict | None = None) -> dict:
     """Baseline (committed) + last run's ledger (Actions cache) + the published copy + this run's launches. The LL2
     ledger's launches since GCAT's newest launch go in as provisional records (catalog.flown_from_ll2), which a GCAT
-    launch joins once GCAT lists it."""
+    launch joins once GCAT lists it. The newest dated copy of the last DATED_DAYS days (release `ledger-YYYY-qN`) is
+    read too: a failed `gh release upload --clobber` leaves the release copy missing (a 404), and the dated copy still
+    holds what it held. The workflow uploads what is written here over the release's copy and that day's dated copy,
+    so when the release copy is unreadable (anything but a 404, which is no copy yet) and no dated copy can be read,
+    the run stops before writing, as the NMS closure ledger and the Ascent stores do: the local copy may be older than
+    the release (a restored or stale cache), and so may the published copy (a run can upload the release copy and then
+    fail to deploy). The run also stops if the merged ledger lacks a launch id any copy it read holds."""
     def read(p: Path):
         try:
             return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
@@ -144,24 +163,35 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
         published = json.loads(body)
     except Exception as exc:  # the published copy is a safety net; the cache and the baseline still hold
         status = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:200], "failed_at": snap["generated_at"]}
-    released, _ = release_copy(RELEASE_COPY["ledger"], data_dir, getter)   # the durable copy (ideas#222)
+    released, rel_exc = release_copy(RELEASE_COPY["ledger"], data_dir, getter)   # the durable copy
+    dated, dated_day, dated_exc = dated_copy("launch-ledger", snap["generated_at"], data_dir, getter)
+    if released is None and dated is None and rel_exc is not None and getattr(rel_exc, "code", None) != 404:
+        why = f"; the dated copies: {_err(dated_exc)}" if dated_exc else ""
+        raise RuntimeError(f"launch ledger: the release copy is unreadable ({type(rel_exc).__name__}: {rel_exc}) and "
+                           f"no dated copy of the last {DATED_DAYS} days can be read{why}; not writing a ledger that "
+                           "could be smaller than the release's") from rel_exc
     orb = snap.get("orbit") or {}
     now = snap["generated_at"]
     gcat_now = catalog.from_orbit(orb.get("launches") or [], now)
     gcat_last = max((r.get("date") or "" for lg in (base, prev, published, {"launches": gcat_now}) if lg
                      for r in lg.get("launches") or [] if r.get("source") == "gcat"), default="")
     since_gcat = ll2ledger.after(ll2_led, gcat_last) if ll2_led and gcat_last else []
-    fresh = {"launches": gcat_now + catalog.flown_from_ll2(orb.get("upcoming") or [], now)
+    fresh = {"launches": gcat_now + catalog.flown_from_ll2(ll2_upcoming(snap), now)
              + catalog.flown_from_ll2(since_gcat, now),
              "closures": catalog.closures_from_matches(snap.get("matches") or [], areas, now),
              "sites": _sites_from_orbit(orb.get("launches") or [])}
-    before = len({r["id"] for lg in (base, prev, published, released) if lg for r in lg.get("launches") or []})
-    led = catalog.merge(base, published, released, prev, fresh)
+    read_ids = {r["id"] for lg in (base, prev, published, released, dated) if lg for r in lg.get("launches") or []}
+    before = len(read_ids)
+    led = catalog.merge(base, published, released, dated, prev, fresh)
     led["generated_at"] = now
+    lost = read_ids - {r["id"] for r in led["launches"]}
+    if lost:
+        raise RuntimeError(f"launch ledger: the merged ledger lacks {len(lost)} launch id(s) a copy it read holds "
+                           f"(first: {sorted(lost)[0]}); not writing it")
     (data_dir / "ledger.json").write_text(dump(led, compact=True), encoding="utf-8", newline="\n")
     status.update({"records": len(led["launches"]), "added": len(led["launches"]) - before,
                    "base": len((base or {}).get("launches") or []), "cache": prev is not None,
-                   "published": published is not None, "release": released is not None,
+                   "published": published is not None, "release": released is not None, "dated": dated_day,
                    "gcat_last": gcat_last or None,
                    "ll2_since_gcat": len(since_gcat)})
     return status
@@ -201,6 +231,27 @@ def release_copy(name: str, data_dir: Path, getter=None) -> tuple[dict | None, E
         return None, exc
 
 
+def dated_copy(stem: str, now_iso: str, data_dir: Path, getter=None):
+    """(the newest readable dated copy `<stem>-YYYY-MM-DD.json` of the last DATED_DAYS days in release
+    `ledger-YYYY-qN`, or None; its day; the first error that was not a 404, or None)."""
+    try:
+        day0 = datetime.fromisoformat(str(now_iso).replace("Z", "+00:00")).date()
+    except ValueError:
+        day0 = datetime.now(timezone.utc).date()
+    base = ll2ledger.RELEASE.rstrip("/").rsplit("/", 1)[0] + "/"   # .../releases/download/
+    err = None
+    for i in range(DATED_DAYS):
+        d = day0 - timedelta(days=i)
+        url = f"{base}ledger-{d.year}-q{(d.month - 1) // 3 + 1}/{stem}-{d.isoformat()}.json"
+        try:
+            body, _ = fetch.fetch("launch-release-dated", url, data_dir / "raw", "json", getter=getter, gz=True)
+            return gnss.published_json(body), d.isoformat(), None
+        except Exception as exc:  # noqa: BLE001
+            if err is None and getattr(exc, "code", None) != 404:
+                err = exc
+    return None, None, err
+
+
 def _write(p: Path, doc) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
@@ -208,6 +259,30 @@ def _write(p: Path, doc) -> None:
 
 def _err(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"[:300]
+
+
+def ll2_upcoming(snap: dict) -> list[dict]:
+    """Launch's own scheduled launches that Launch Library 2 lists, in the shape Orbit's `upcoming` lane had, for
+    live.match, the ledger and the site index. `id` is the LL2 uuid, as it was in Orbit's
+    copy, so match ids and ledger ids do not change. A record held only by a closure notice has no LL2 ref and is
+    left out: it came from the areas, so matching it against them would be circular. So is a record LL2 has stopped
+    listing (`listed_by`), whose LL2 fields are no longer shown."""
+    out = []
+    for r in (snap.get("schedule") or {}).get("records") or []:
+        ref = (r.get("refs") or {}).get("ll2")
+        if ref and "ll2" in r.get("listed_by", ["ll2"]):
+            out.append({**{k: r.get(k) for k in schedule.FIELDS}, "id": ref,
+                        "ll2_url": (r.get("links") or {}).get("ll2"), "last_updated": r.get("updated")})
+    return out
+
+
+def recent_flown(ll2_led: dict | None, now: datetime, days: int = unlisted.HORIZON_DAYS + 2) -> list[dict]:
+    """The LL2 ledger's flown launches of the last `days` days, for unlisted.closures: a notice with a window one of
+    them flew in is that launch's, not a closure with no listing."""
+    since = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    until = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [r for r in (ll2_led or {}).get("launches") or []
+            if r.get("status") in catalog.LL2_FLOWN and since <= (r.get("net") or "") <= until]
 
 
 def update_schedule(snap: dict, data_dir: Path, now: datetime, getter=None) -> dict:
@@ -219,14 +294,55 @@ def update_schedule(snap: dict, data_dir: Path, now: datetime, getter=None) -> d
     if lane.get("status") == "ok" and isinstance(sch.get("rows"), list):
         rep = schedule.ingest(store, "ll2", sch["rows"], sch["read_at"], link_key="ll2_url")
         lane["ingest"] = {k: len(v) if isinstance(v, (list, dict)) else v for k, v in rep.items()}
+    update_rll(snap, store)
     _write(data_dir / STORE["upcoming"], store)
+    _schedule_view(snap, store, now)
+    return store
+
+
+def update_rll(snap: dict, store: dict) -> None:
+    """RocketLaunch.Live's next five (launch/rll.py) into the upcoming store, when its lane read them this run, then
+    each RocketLaunch.Live record joined to the Launch Library 2 record that is the same launch. Never fails the run."""
+    got, lane = snap.get("rll") or {}, snap["lanes"].get("rll") or {}
+    if lane.get("status") != "ok" or not isinstance(got.get("rows"), list):
+        return
+    try:
+        rows = [dict(x) for x in got["rows"]]
+        rll.place(rows, store)
+        rep = schedule.ingest(store, rll.SOURCE, rows, got["read_at"], link_key="rll_url")
+        joined = [schedule.join(store, b, a, got["read_at"], "RocketLaunch.Live and Launch Library 2: same place, "
+                                f"NETs within {rll.JOIN_HOURS:g} h, vehicles do not differ")["id"]
+                  for a, b in rll.pairs(store)]
+    except Exception as exc:  # noqa: BLE001
+        lane["ingest"] = {"status": "failed", "error": _err(exc)}
+        return
+    lane["ingest"] = {**{k: len(v) if isinstance(v, (list, dict)) else v for k, v in rep.items()},
+                      "joined": len(joined)}
+
+
+def _schedule_view(snap: dict, store: dict, now: datetime) -> None:
     records = schedule.active(store, now)
     heads = news.for_records(snap.get("news") or {}, records)
     for r in records:
         r["news"] = heads.get(r["id"], [])
     snap["schedule"] = {"read_at": (store.get("reads") or {}).get("ll2"), "attribution": schedule.ATTRIBUTION,
+                        "reads": dict(store.get("reads") or {}),
+                        "credits": {"ll2": schedule.ATTRIBUTION, rll.SOURCE: rll.CREDIT},
                         "held": len(store["records"]), "records": records}
-    return store
+
+
+def update_closure_records(snap: dict, store: dict, sites: dict, data_dir: Path, now: datetime) -> None:
+    """Ascent step 1b: this run's closures with no listing as `closure` records in the upcoming store, joined to a
+    listed launch once one is listed in the window (launch/unlisted.py apply()). Never fails the run."""
+    lane = snap["lanes"].setdefault("schedule", {})
+    try:
+        rep = unlisted.apply(store, snap.get("unlisted") or [], sites, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    except Exception as exc:  # noqa: BLE001
+        lane["closure_records"] = {"status": "failed", "error": _err(exc)}
+        return
+    lane["closure_records"] = {k: len(v) if isinstance(v, (list, dict)) else v for k, v in rep.items()}
+    _write(data_dir / STORE["upcoming"], store)
+    _schedule_view(snap, store, now)
 
 
 def update_ll2_ledger(data_dir: Path, getter=None) -> tuple[dict | None, dict | None, dict]:
@@ -277,9 +393,13 @@ def update_ll2_ledger(data_dir: Path, getter=None) -> tuple[dict | None, dict | 
 def update_compare(snap: dict, store: dict, led: dict | None, orbit_doc: dict | None, data_dir: Path,
                    getter=None) -> dict:
     """One row of the side-by-side check with Orbit (launch/compare.py), kept with the earlier rows."""
+    orb = snap.get("orbit") or {}
+    if not orb.get("upcoming_read_at"):
+        # Orbit retired its schedule lanes (Ascent step 4); the check passed on 21 Nov 2026 and was accepted on 24 Nov.
+        # The stored runs stay in the release as they are.
+        return {"status": "ended", "note": "Orbit no longer publishes a schedule; the side-by-side check has ended"}
     local, rel = load_store(STORE["compare"], data_dir, getter, must=False)
     doc = compare.union(rel, local)
-    orb = snap.get("orbit") or {}
     mine = [{**(r["by_source"]["ll2"].get("fields") or {}), "id": r["refs"]["ll2"],
              "last_updated": r["by_source"]["ll2"].get("last_updated")}
             for r in store.get("records") or [] if (r.get("refs") or {}).get("ll2")
@@ -418,8 +538,17 @@ def _lane_news(raw_dir: Path, prev: dict, getter, snap=None):
     return {"news": {"read_at": rec["fetched_at"], "source": news.SITE, **news.parse(body, ids)}}, [rec]
 
 
+def _lane_rll(raw_dir: Path, prev: dict, getter, snap=None):
+    """RocketLaunch.Live's next five launches (launch/rll.py), free tier: one request. Applied to the upcoming
+    store after the lanes (update_rll)."""
+    now = datetime.now(timezone.utc)
+    body, rec = fetch.fetch("rll-next5", rll.API, raw_dir, "json", getter=getter)
+    rows = schedule.within(rll.parse(body), now)
+    return {"rll": {"read_at": rec["fetched_at"], "credit": rll.CREDIT, "rows": rows}}, [rec]
+
+
 LANES = {"tfr": _lane_tfr, "orbit": _lane_orbit, "cordon": _lane_cordon, "nms": _lane_nms,
-         "schedule": _lane_schedule, "news": _lane_news}
+         "schedule": _lane_schedule, "news": _lane_news, "rll": _lane_rll}
 
 
 def collect(root: Path = ROOT, getter=None, only=None) -> dict:
@@ -453,12 +582,11 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
     pat_path = root / "history" / "patterns.json"
     corridors = json.loads(pat_path.read_text(encoding="utf-8"))["corridors"] if pat_path.exists() else []
     orb = snap.get("orbit") or {}
-    # NGA warnings come from Cordon (decided 17 Nov 2026). Orbit's copy is used only until Cordon's lane has
-    # succeeded once, so a first run with Cordon down still has warnings.
-    nav = (snap.get("cordon") or {}).get("areas")
+    # NGA warnings come from Cordon (decided 17 Nov 2026); Orbit's copy retired with the Ascent move (ideas#69).
+    nav = (snap.get("cordon") or {}).get("areas") or []
     tim_path = root / "history" / "timing.json"
     tim = json.loads(tim_path.read_text(encoding="utf-8"))["sites"] if tim_path.exists() else {}
-    areas = (list(nav if nav is not None else orb.get("areas") or []) + live.tfr_areas(snap.get("tfr") or [], {})
+    areas = (list(nav) + live.tfr_areas(snap.get("tfr") or [], {})
              + nms.areas(snap.get("nms") or {}, {t["id"] for t in snap.get("tfr") or []}, tim))
     # An area's text is read for live.match (named_in) and left out of the snapshot: each notice links its source.
     snap["areas"] = [{k: v for k, v in a.items() if k not in ("detail", "text")} for a in areas]
@@ -468,10 +596,9 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
              if x.get("kind") == "orbital" and x.get("inc") is not None and (x.get("site") or {}).get("lat") is not None]
     bias_path = root / "history" / "inc_bias.json"
     bias = json.loads(bias_path.read_text(encoding="utf-8"))["samples"] if bias_path.exists() else None
-    snap["matches"] = live.match(orb.get("upcoming") or [], areas, corridors, orb.get("launches") or [], flown, bias)
     data_dir.mkdir(parents=True, exist_ok=True)
     # The Ascent move (19 Nov 2026): Launch's own schedule, LL2 ledger and the side-by-side check with Orbit's.
-    ll2_led = None
+    ll2_led, store = None, None
     if not only or "schedule" in only:
         store = update_schedule(snap, data_dir, datetime.now(timezone.utc), getter)
         ll2_led, orbit_doc, snap["lanes"]["ll2_ledger"] = update_ll2_ledger(data_dir, getter)
@@ -479,12 +606,16 @@ def collect(root: Path = ROOT, getter=None, only=None) -> dict:
             snap["lanes"]["compare"] = update_compare(snap, store, ll2_led, orbit_doc, data_dir, getter)
         except Exception as exc:  # noqa: BLE001  the check never fails the run
             snap["lanes"]["compare"] = {"status": "failed", "error": _err(exc)}
+    # Scheduled launches against closure areas: Launch's own schedule (Ascent step 4), read after the store is updated.
+    snap["matches"] = live.match(ll2_upcoming(snap), areas, corridors, orb.get("launches") or [], flown, bias)
     # Closure with no listing (Ascent step 1b): only against a schedule read in this run or carried from a good one.
     sched_lane = snap["lanes"].get("schedule") or {}
+    sched_ok = bool((snap.get("schedule") or {}).get("read_at")) and sched_lane.get("status") != "failed"
     snap["unlisted"] = unlisted.closures(areas, (snap.get("schedule") or {}).get("records") or [], tim,
-                                         datetime.now(timezone.utc),
-                                         schedule_ok=bool((snap.get("schedule") or {}).get("read_at"))
-                                         and sched_lane.get("status") != "failed", matches=snap["matches"])
+                                         datetime.now(timezone.utc), schedule_ok=sched_ok, matches=snap["matches"],
+                                         flown=recent_flown(ll2_led, datetime.now(timezone.utc)))
+    if store is not None and sched_ok and tim:
+        update_closure_records(snap, store, tim, data_dir, datetime.now(timezone.utc))
     snap["lanes"]["ledger"] = update_ledger(snap, areas, data_dir, root, getter, ll2_led)
     if not only or "nms" in only:
         snap["lanes"]["nms_ledger"] = update_nms_ledger(snap, data_dir, getter)
@@ -575,9 +706,12 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     # Closure areas no other source carries, each checked against a published copy (history/published_notices.json).
     pub_path = root / "history" / "published_notices.json"
     published = json.loads(pub_path.read_text(encoding="utf-8"))["notices"] if pub_path.exists() else None
-    index = catalog.build_index(hist, ledger, (snap.get("orbit") or {}).get("upcoming") or [], pat["corridors"],
+    # Payload owners' names by GCAT code (history/owners.json, written by `backfill`).
+    own_path = root / "history" / "owners.json"
+    owners = json.loads(own_path.read_text(encoding="utf-8"))["owners"] if own_path.exists() else None
+    index = catalog.build_index(hist, ledger, ll2_upcoming(snap), pat["corridors"],
                                 snap["generated_at"], nfc_doc, joey_doc, wb_doc, world=overfly.World(countries),
-                                nsf_doc=nsf_doc, site_fixes=fixes, published=published,
+                                nsf_doc=nsf_doc, site_fixes=fixes, published=published, owner_names=owners,
                                 live={"matches": snap.get("matches") or [], "areas": snap.get("areas") or []})
     for tag in (index.get("site_fixes") or {}).get("stale") or []:
         print(f"site_fixes.json: {tag} no longer has the site its fix names in GCAT; review and drop the fix")
@@ -600,7 +734,8 @@ def build_site(root: Path = ROOT) -> dict[str, str]:
     sch = snap.get("schedule") or {}
     files["data/upcoming.json"] = dump({
         "schema": schedule.SCHEMA, "generated_at": snap["generated_at"], "read_at": sch.get("read_at"),
-        "attribution": [schedule.ATTRIBUTION, "Headlines: Spaceflight News API (spaceflightnewsapi.net), links only"],
+        "attribution": [schedule.ATTRIBUTION, rll.CREDIT + " (rocketlaunch.live), source rll",
+                        "Headlines: Spaceflight News API (spaceflightnewsapi.net), links only"],
         "store": ll2ledger.RELEASE + STORE["upcoming"], "ledger": ll2ledger.PUBLIC_URL,
         "records": sch.get("records") or []})
     cmp_path = root / "data" / STORE["compare"]
@@ -681,6 +816,32 @@ def check_all(root: Path = ROOT) -> list[str]:
     return errs + perrs + serrs
 
 
+def run_payloads(data: Path | None = None, out: Path = PAYLOADS_DIR, now: datetime | None = None,
+                 getter=None) -> dict:
+    """Reference rates for every upcoming unknown-payload launch, from the published launches.json and snapshot.json
+    (or the copies in `data`) and history/history.json; writes out/rates.json and appends to out/ledger.jsonl."""
+    def read(name):
+        if data is not None:
+            return json.loads((data / name).read_text(encoding="utf-8"))
+        return json.loads((getter or fetch.get)(SITE_DATA + name))
+    recs, snap = read("launches.json")["records"], read("snapshot.json")
+    hist = ROOT / "history" / "history.json"
+    charted = payloads.charted_index(json.loads(hist.read_text(encoding="utf-8")) if hist.exists() else None)
+    at = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    results = payloads.build(recs, snap, charted)
+    out.mkdir(parents=True, exist_ok=True)
+    led_p = out / "ledger.jsonl"
+    ledger = [json.loads(x) for x in led_p.read_text(encoding="utf-8").splitlines() if x.strip()] if led_p.exists() else []
+    new = payloads.score(ledger, results, recs, at)
+    with led_p.open("a", encoding="utf-8", newline="\n") as f:
+        for e in new:
+            f.write(json.dumps(e, ensure_ascii=False, separators=(",", ":")) + "\n")
+    doc = {"generated_at": at, "method": payloads.METHOD, "rule": " ".join(payloads.__doc__.split()),
+           "snapshot_at": snap.get("generated_at"), "launches": results, "score": payloads.summary(ledger + new)}
+    (out / "rates.json").write_text(dump(doc), encoding="utf-8", newline="\n")
+    return {"launches": len(results), "new_ledger_lines": len(new), "score": doc["score"], "results": results}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Launch: launch and reentry closure areas, history and matching.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -692,6 +853,9 @@ def main(argv=None) -> int:
     c.add_argument("--only", nargs="*", choices=sorted(LANES))
     sub.add_parser("build")
     sub.add_parser("check")
+    pl = sub.add_parser("payloads", help="reference rates for upcoming launches with an unknown payload, from the "
+                                         "published data -> history/payloads_source/ (git-ignored, private)")
+    pl.add_argument("--data", help="read launches.json and snapshot.json from this folder instead of the site")
     sub.add_parser("timing", help="closure opening to launch, by site, from the built site/data/launches.json "
                                   "-> history/timing.json")
     sub.add_parser("incbias", help="implied-inclination calibration samples, from the built site/data/launches.json "
@@ -705,6 +869,15 @@ def main(argv=None) -> int:
     w.add_argument("step", choices=["fetch", "build"])
     w.add_argument("--since", help="fetch TFR detail pages listed from this date (YYYY-MM-DD) only; newest first")
     a = ap.parse_args(argv)
+    if a.cmd == "payloads":
+        res = run_payloads(Path(a.data) if a.data else None)
+        for r in res["results"]:
+            print(f"{(r['net'] or '')[:16]}  {r['vehicle']} from {r['site']}  ({r['label']})")
+            for s in r["steps"]:
+                top = "; ".join(f"{x['class']} {x['k']}/{s['n']} ({x['lo']:.0%}-{x['hi']:.0%})" for x in s["series"][:4])
+                print(f"    {s['step']}: n={s['n']}{'' if s['used'] else ' (too few, not used)'}  {top}")
+        print("Payloads:", {k: v for k, v in res.items() if k != "results"}, "->", PAYLOADS_DIR)
+        return 0
     if a.cmd == "wayback":
         src = ROOT / "history" / "wayback_source"
         if a.step == "fetch":

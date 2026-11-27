@@ -33,6 +33,7 @@ import hashlib
 import json
 import math
 import re
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from . import ascent as A
@@ -81,6 +82,14 @@ def _dash(v: str | None) -> str:
 
 
 # ---------- the ledger ----------
+
+def _owner_labels(names: dict, recs: list[dict]) -> dict[str, str]:
+    """The names of the owner codes the records carry; codes that share a name show their code after it."""
+    used = {c for r in recs for o in (r.get("payloads") or {}).get("owners") or [] for c in gcat.owner_codes(o)}
+    out = {c: names[c] for c in sorted(used) if c in names}
+    shared = Counter(out.values())
+    return {c: f"{n} ({c})" if shared[n] > 1 else n for c, n in out.items()}
+
 
 def _inc_of(payloads: list[dict]) -> float | None:
     """Median inclination of the payloads that have one (GCAT writes 0.00 before an object has elements)."""
@@ -1382,7 +1391,7 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
                 nfc_doc: dict | None = None, joey_doc: dict | None = None, wayback_doc: dict | None = None,
                 world: "overfly.World | None" = None, nsf_doc: dict | None = None,
                 site_fixes: list[dict] | None = None, published: list[dict] | None = None,
-                live: dict | None = None) -> dict:
+                live: dict | None = None, owner_names: dict | None = None) -> dict:
     """The History tab's list (data/launches.json). `world` (overfly.World): when given, each record with a flight
     path gets `over`, the countries its ground track crosses (overfly.py). `site_fixes`: history/site_fixes.json's
     list (apply_site_fixes()). `published`: history/published_notices.json's list, closure areas no other source
@@ -2038,6 +2047,8 @@ def build_index(hist: dict, ledger: dict, upcoming: list[dict], corridors: list[
            "mtypes": P.MTYPES, "orbits": P.ORBITS, "kinds": P.KINDS, "kind_notes": P.KIND_NOTES,
            "programme_notes": P.NOTES, "default_path_nm": DEFAULT_PATH_NM,
            "records": recs}
+    if owner_names:
+        out["owners"] = _owner_labels(owner_names, recs)
     if site_fixes:
         out["site_fixes"] = fixed
     if nfc_doc:

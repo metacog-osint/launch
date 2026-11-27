@@ -179,6 +179,16 @@ class FromCordon(unittest.TestCase):
         self.assertEqual(nms.areas(st, {"6/7113"}), [])
         self.assertEqual(len(nms.areas(st, set())), 1)
 
+    def test_areas_carry_the_issuing_state(self):
+        """25 Nov 2026: the Live map's country filter puts an area on no launch's path under the state that issued it."""
+        ring = [[[0, 0], [1, 0], [1, 1], [0, 0]]]
+        st = {"notices": [{"number": "A1/26", "fir": "ZWUQ", "issuing_state": "CN", "start": "2026-11-18T00:00:00Z",
+                           "end": "2026-11-18T02:00:00Z", "rings": ring, "kept": "cn-area"},
+                          {"number": "A2/26", "fir": None, "start": "2026-11-18T00:00:00Z",
+                           "end": "2026-11-18T02:00:00Z", "rings": ring, "kept": "words"}]}
+        self.assertEqual([a.get("state") for a in nms.areas(st)], ["CN", None])
+        self.assertNotIn("state", nms.areas(st)[1])
+
 
 class Ledger(unittest.TestCase):
     """Every closure notice ever kept stays (data/nms-closures.json), each version once."""
@@ -200,6 +210,19 @@ class Ledger(unittest.TestCase):
         three = nms.ledger([two, None], [], "2026-12-30T00:00:00Z")
         self.assertEqual(three["n"], 2)
         self.assertIn("Not FAA data", three["source_note"])
+
+    def test_the_newer_copy_wins_whatever_the_order(self):
+        # collect passes [published, release, cache]; a cached or archived copy older than the release copy must not
+        # revert what a later run derived on a notice version both hold.
+        old = nms.ledger([], [{**self.N, "kept": "words", "off_live": None}], "2026-11-17T12:00:00Z")
+        new = nms.ledger([old], [{**self.N, "kept": "cn-area", "off_live": "not a launch"}], "2026-11-18T12:00:00Z")
+        got = nms.ledger([None, new, old], [], "2026-11-19T00:00:00Z")
+        (e,) = got["notices"]
+        self.assertEqual((e["kept"], e["off_live"]), ("cn-area", "not a launch"))
+        self.assertEqual((e["first_seen"], e["last_seen"]), ("2026-11-17T12:00:00Z", "2026-11-18T12:00:00Z"))
+        # equal times keep the order given (the last copy wins), as before
+        same = {**old, "notices": [{**old["notices"][0], "kept": "same-time"}]}
+        self.assertEqual(nms.ledger([old, same], [], "2026-11-19T00:00:00Z")["notices"][0]["kept"], "same-time")
 
     def lane(self, getter, cached=None, lane=None):
         import runpy

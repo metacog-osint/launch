@@ -336,7 +336,8 @@ def areas(state: dict, tfr_ids: set[str] | None = None, sites: dict | None = Non
                         "label": (n.get("text") or "").split("\n")[0][:120], "ring": ring, "kept": n["kept"],
                         "windows": [{"start": n["start"], "end": n["end"]}], "ring_basis": n.get("ring_basis"),
                         "expect": timing.expect(ring, n["start"], n["end"], sites or {}), "text": n.get("text") or ""}
-                       | ({"off_live": off} if off else {}))
+                       | ({"off_live": off} if off else {})
+                       | ({"state": n["issuing_state"]} if n.get("issuing_state") else {}))
     return out
 
 
@@ -349,8 +350,13 @@ def ledger_key(n: dict) -> str:
 
 
 def ledger(docs: list, fresh: list[dict], at: str) -> dict:
-    """The union of earlier ledgers (the cache's, the published copy) and this run's kept notices."""
+    """The union of earlier ledgers (the cache's, the published copy, the release copy) and this run's kept notices.
+    Where two copies hold one notice version, the newer copy's fields win: the ledgers are taken oldest first by
+    `generated_at` (a copy without one counts as oldest; equal times keep the order given), then this run's. So an older copy (an archived or
+    cached one older than the release) never reverts what a later run derived; `first_seen` and `last_seen` are the
+    earliest and latest of all copies."""
     out: dict[str, dict] = {}
+    docs = sorted((d for d in docs if d), key=lambda d: str(d.get("generated_at") or ""))
 
     def add(e: dict) -> None:
         k = e.get("ledger_key") or ledger_key(e)

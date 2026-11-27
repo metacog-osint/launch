@@ -8,6 +8,10 @@
 import { createHistoryMap } from "./hmap.js";
 import * as X from "./export.js";
 import * as SV from "./saved.js";
+import * as FX from "./facets.js";
+import * as SM from "./same.js";
+import * as CH from "./chart.js";
+import * as CMP from "./sidebyside.js";
 
 const T = window.TicTime;
 const BIG = { US: "us", CN: "cn", RU: "ru" };
@@ -53,9 +57,13 @@ const FACETS = [
   { k: "site", label: "Launch site", get: (r) => r.site || NK, search: true },
   { k: "prog", label: "Programme", get: (r) => (r.programmes && r.programmes.length ? r.programmes : ["None found"]), search: true },
   { k: "mt", label: "Mission type", get: (r) => r.mtype },
+  { k: "own", label: "Payload owner", get: (r) => cached(r, "own", () => FX.owners(r)), name: (v) => (IX.owners || {})[v] || v, search: true },
   { k: "orb", label: "Orbit", get: (r) => r.orbit || NK },
   { k: "out", label: "Outcome", get: (r) => (r.status === "upcoming" ? "Scheduled" : r.outcome === "success" ? "Success" : r.outcome ? "Failure or partial" : NK) },
   { k: "src", label: "Source", get: (r) => r.sources, name: (v) => SOURCES[v] || v },
+  // facets.js: the FIRs of the record's notices, and how they were tied to the launch.
+  { k: "fir", label: "FIR (flight information region)", get: (r) => cached(r, "fir", () => FX.firs(r, chartedOf(r))), search: true },
+  { k: "jn", label: "Notices joined by", get: (r) => cached(r, "jn", () => FX.joinedBy(r)), note: (v) => FX.JOIN_NOTES[v] },
   { k: "path", label: "Flight path", get: (r) => (r.path ? "Estimated from an azimuth" : "None"), },
   // overfly.py: the countries the path's ground track crosses (land only).
   { k: "ovf", label: "Path crosses", get: (r) => { const cc = r.over ? [...new Set(r.over.flat().map((o) => o.cc))] : []; return !r.over ? ["nopath"] : cc.length ? cc : ["water"]; },
@@ -77,7 +85,7 @@ const DEFAULT = { st: ["launched"] };
 const PAGE = 100;
 
 let IX, HIST, map, byId = new Map(), chartById = new Map(), FIRST_YEAR = 2012;
-let state = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
+let state = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true, cmp: [], chart: null, near: [] };
 let lastFiltered = [];
 
 /* ---------- time keys in the viewer's zone ---------- */
@@ -105,7 +113,7 @@ const legacy = (k, v) => (LEGACY[k] || {})[strHash(v)] || (k === "path" && OLD_P
 function readHash() {
   const h = location.hash.replace(/^#/, "");
   const [tab, qs] = h.split("?");
-  const s = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true };
+  const s = { f: {}, r: {}, q: "", from: "", to: "", sel: "", sort: "time", dir: -1, shown: PAGE, areas: true, cmp: [], chart: null, near: [] };
   if (tab !== "history" || !qs) { s.f = JSON.parse(JSON.stringify(DEFAULT)); return s; }
   const p = new URLSearchParams(qs);
   FACETS.forEach((f) => { if (p.has(f.k)) s.f[f.k] = p.get(f.k).split("|").filter((x) => x !== "").map((x) => legacy(f.k, x)); });
@@ -117,6 +125,9 @@ function readHash() {
   });
   s.q = p.get("q") || ""; s.from = p.get("from") || ""; s.to = p.get("to") || ""; s.sel = p.get("sel") || ""; if (byId.get(s.sel)) s.sel = byId.get(s.sel).id;
   if (p.get("areas") === "0") s.areas = false;
+  s.near = SM.read(p.get("near"));
+  s.cmp = [...new Set(CMP.parseIds(p.get("cmp")).filter((id) => byId.has(id)).map((id) => byId.get(id).id))];
+  s.chart = CH.parseChart(p.get("chart"), CHART_BY.map((b) => b.k), CHART_SPLIT.map((b) => b.k));
   if (p.get("sort")) { s.sort = p.get("sort"); s.dir = p.get("dir") === "1" ? 1 : -1; }
   return s;
 }
@@ -130,6 +141,9 @@ function writeHash() {
   if (state.to) p.set("to", state.to);
   if (state.sel) p.set("sel", state.sel);
   if (!state.areas) p.set("areas", "0");
+  if (state.near.length) p.set("near", SM.write(state.near));
+  if (state.cmp.length) p.set("cmp", state.cmp.join("|"));
+  if (state.chart) p.set("chart", CH.chartParam(state.chart));
   if (state.sort !== "time" || state.dir !== -1) { p.set("sort", state.sort); p.set("dir", String(state.dir)); }
   const url = "#history" + (p.toString() ? "?" + p.toString() : "");
   if (location.hash !== url) history.replaceState(null, "", url);
@@ -137,6 +151,9 @@ function writeHash() {
 
 /* ---------- filtering ---------- */
 const vals = (f, r) => [].concat(f.get(r));
+const chartedOf = (r) => (r.chart || []).flatMap((id) => chartById.get(id) || []);
+// Facet values read from a record's notices, kept on the record until its notices change (applySaved clears _fx).
+function cached(r, k, make) { r._fx = r._fx || {}; if (!(k in r._fx)) r._fx[k] = make(); return r._fx[k]; }
 function hay(r) {
   if (r._hay) return r._hay;
   const charted = (r.chart || []).flatMap((id) => chartById.get(id) || []);
@@ -170,12 +187,15 @@ function passes(r, skip) {
     if (state.from && (!r._day || r._day < state.from)) return false;
     if (state.to && (!r._day || r._day > state.to)) return false;
   }
+  if (state.near.length && skip !== "near" && !SM.near(centresOf(r), state.near)) return false;
   if (state.q) {
     const h = hay(r);
     if (!state.q.toUpperCase().split(/\s+/).filter(Boolean).every((w) => h.includes(w))) return false;
   }
   return true;
 }
+/* same.js: a record's notice-area centres, worked out once (applySaved clears them with the other caches). */
+const centresOf = (r) => r._cent || (r._cent = SM.centres(r, (r.chart || []).flatMap((id) => chartById.get(id) || [])));
 const filtered = (skip) => IX.records.filter((r) => passes(r, skip));
 
 /* ---------- the filter panel ---------- */
@@ -335,9 +355,11 @@ function chips() {
   RANGES.forEach((g) => { if (state.r[g.k]) add(`${g.label}: ${rangeText(g, state.r[g.k])}`, () => setRange(g.k, null, null)); });
   if (state.from || state.to) add(`Dates: ${state.from || "start"} to ${state.to || "now"}`, () => setDates("", ""));
   if (state.q) add(`Search: ${state.q}`, () => { state.q = ""; $("h-q").value = ""; update(true); });
+  if (state.near.length) add(`Same closures: a notice area within ${SM.SIG_NM} NM of ${state.near.length === 1 ? "one point" : `one of ${state.near.length} points`}`,
+    () => { state.near = []; update(true); });
   if (box.childNodes.length) {
     const c = el("button", "linkish small", "Clear all filters"); c.type = "button";
-    c.addEventListener("click", () => { state.f = JSON.parse(JSON.stringify(DEFAULT)); state.r = {}; state.q = ""; $("h-q").value = ""; setDates("", ""); });
+    c.addEventListener("click", () => { state.f = JSON.parse(JSON.stringify(DEFAULT)); state.r = {}; state.q = ""; state.near = []; $("h-q").value = ""; setDates("", ""); });
     box.appendChild(c);
   }
 }
@@ -479,6 +501,7 @@ function list(rows) {
     h.setAttribute("aria-sort", state.sort === c.k ? (state.dir < 0 ? "descending" : "ascending") : "none");
     h.appendChild(b); tr.appendChild(h);
   });
+  const ch = el("th", "h-cmp-col"); ch.appendChild(el("span", "th-plain", "Compare")); tr.appendChild(ch);
   th.appendChild(tr); t.appendChild(th);
   const tb = el("tbody");
   rows.slice(0, state.shown).forEach((r) => {
@@ -495,6 +518,7 @@ function list(rows) {
     if ((r.programmes || []).length) pay.title = "Programme: " + r.programmes.join(", ");
     const kd = el("td"); kd.appendChild(el("span", "kind-tag k-" + kindSlug(r.kind), r.kind || NK));
     row.append(w, kd, c, el("td", "", r.vehicle || ""), pay, el("td", "", r.mtype), el("td", "", r.site || ""), el("td", "", r.orbit || ""));
+    const cc = el("td", "h-cmp-col"); cc.appendChild(cmpButton(r, true)); row.appendChild(cc);
     row.addEventListener("click", () => select(r.id, true));
     row.addEventListener("keydown", (e) => { if (e.key === "Enter") select(r.id, true); });
     tb.appendChild(row);
@@ -527,7 +551,8 @@ function detail(r) {
   const head = el("div", "d-head");
   head.appendChild(el("h3", "", r.payload && r.vehicle && r.vehicle !== NK ? `${r.vehicle} · ${r.payload}` : r.label || r.payload || "Launch"));
   const x = el("button", "linkish d-close", "Close"); x.type = "button"; x.addEventListener("click", () => select("", false));
-  head.appendChild(x); box.appendChild(head);
+  const acts = el("span", "d-acts"); acts.append(cmpButton(r, false), x);
+  head.appendChild(acts); box.appendChild(head);
   const meta = el("p", "small who"); meta.appendChild(mark(r.actor));
   meta.appendChild(document.createTextNode(`${countryName(r.actor)} · ${STATUS[r.status] || r.status}` + (r.provisional ? " · provisional: Launch Library 2 reports it flown; GCAT has not listed it yet" : "")));
   box.appendChild(meta);
@@ -573,6 +598,7 @@ function detail(r) {
   (r.programmes || []).forEach((p) => q.appendChild(quick(p, "prog", p)));
   if (r.actor) q.appendChild(quick(countryName(r.actor), "cc", r.actor));
   box.appendChild(q);
+  sameSection(box, r);
   [...new Map((r.closures || []).map((c) => [`${c.area}|${(c.window || []).join()}`, c])).values()].forEach((c) => box.appendChild(el("p", "small", `Closure area ${c.area} coincided in ${c.level}` + (c.window ? ` (${span(c.window[0], c.window[1])})` : "") + ". Coincidence, not proof the area was for this launch.")));
   const evs = (r.chart || []).flatMap((id) => chartById.get(id) || []);
   const nfcN = r.nfc_notices || [];
@@ -621,6 +647,31 @@ function detail(r) {
   if ((r.saved_notices || []).length) savedSection(box, r);
 }
 
+/* Same closures (same.js): the past launches from the same site with a notice area whose centre lies within
+   SIG_NM of one of this record's area centres (beyond NEAR_PAD_NM of its pad when it has any). The button shows
+   them: launched records, this site, near= the points; other filters cleared. */
+function sameSection(box, r) {
+  const t = SM.targets(r, (r.chart || []).flatMap((id) => chartById.get(id) || []));
+  if (!t.points.length) return;
+  const hits = IX.records.filter((x) => x !== r && x.status === "launched" && (!r.site || x.site === r.site) && SM.near(centresOf(x), t.points));
+  const p = el("p", "small");
+  const from = r.site ? ` from ${r.site}` : "";
+  const which = t.points.length === 1 ? "this launch's area" : `one of this launch's ${t.points.length} areas`;
+  p.appendChild(document.createTextNode(`Same closures: ${hits.length.toLocaleString("en-US")} past launch${hits.length === 1 ? "" : "es"}${from} had a notice area within ${SM.SIG_NM} NM of ${which}`
+    + (t.atPad ? ` (every area here is within ${SM.NEAR_PAD_NM} NM of the pad, so this counts launches with pad closures)` : r.pad ? ` (areas within ${SM.NEAR_PAD_NM} NM of the pad left out)` : "")
+    + ". Same place, not proof of the same mission or orbit. "));
+  if (hits.length) {
+    const b = el("button", "linkish", "Show them"); b.type = "button";
+    b.addEventListener("click", () => {
+      state.f = { st: ["launched"] }; if (r.site) state.f.site = [r.site];
+      state.r = {}; state.q = ""; $("h-q").value = ""; state.from = ""; state.to = ""; $("h-from").value = ""; $("h-to").value = "";
+      state.near = t.points; state.shown = PAGE; update(true);
+    });
+    p.appendChild(b);
+  }
+  box.appendChild(p);
+}
+
 /* Notices pasted on the Paste tab and saved in this browser (saved.js). Only this browser has them. */
 function savedSection(box, r) {
   const all = r.saved_notices;
@@ -650,11 +701,11 @@ const recNumbers = (r) => [
 function applySaved() {
   const touched = savedOwn.map((r) => r.id).concat(savedOn.map((r) => r.id));
   if (savedOwn.length) { const gone = new Set(savedOwn.map((r) => r.id)); IX.records = IX.records.filter((r) => !gone.has(r.id)); gone.forEach((id) => byId.delete(id)); }
-  savedOn.forEach((r) => { delete r.saved_notices; r.sources = r.sources.filter((s) => s !== "saved"); r._hay = null; });
+  savedOn.forEach((r) => { delete r.saved_notices; r.sources = r.sources.filter((s) => s !== "saved"); r._hay = null; r._fx = null; r._cent = null; });
   const notices = SV.load().map(SV.read).filter(Boolean);
   const { byRecord, own } = SV.join(notices, IX.records, recNumbers);
   savedOn = [];
-  byRecord.forEach((xs, id) => { const r = byId.get(id); if (!r) return; r.saved_notices = xs; if (!r.sources.includes("saved")) r.sources.push("saved"); r._hay = null; savedOn.push(r); });
+  byRecord.forEach((xs, id) => { const r = byId.get(id); if (!r) return; r.saved_notices = xs; if (!r.sources.includes("saved")) r.sources.push("saved"); r._hay = null; r._fx = null; r._cent = null; savedOn.push(r); });
   savedOwn = own;
   own.forEach((r) => { r._day = zoneDay(r.time); r._month = r._day.slice(0, 7); IX.records.push(r); byId.set(r.id, r); });
   if (map) map.forget(touched.concat(savedOn.map((r) => r.id), own.map((r) => r.id)));
@@ -782,6 +833,250 @@ function select(id, fly) {
   if (r && window.matchMedia("(max-width: 1099px)").matches) $("h-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+/* ---------- compare (sidebyside.js): up to four launches side by side ---------- */
+const kmNum = (v) => (v === null || v === undefined ? "" : v.toLocaleString("en-US"));
+const CMP_FIELDS = [
+  { label: "When", get: (r) => when(r) },
+  { label: "Kind", get: (r) => r.kind || NK },
+  { label: "Country", get: (r) => countryName(r.actor) },
+  { label: "Vehicle", get: (r) => r.vehicle },
+  { label: "Payload or mission", get: (r) => r.payload || r.label },
+  { label: "Payloads (GCAT)", get: (r) => (r.payloads && r.payloads.count ? r.payloads.count : "") },
+  { label: "Mission type", get: (r) => r.mtype },
+  { label: "Programme", get: (r) => (r.programmes || []).join(", ") },
+  { label: "Site", get: (r) => [r.site, r.pad_name].filter(Boolean).join(" · ") },
+  { label: "Orbit", get: (r) => r.orbit },
+  { label: "Inclination (GCAT)", get: (r) => (r.inc !== null && r.inc !== undefined ? `${r.inc}°` : "") },
+  { label: "Apogee (GCAT)", get: (r) => (r.apogee_km !== null && r.apogee_km !== undefined ? `about ${kmNum(r.apogee_km)} km` : "") },
+  { label: "Outcome", get: (r) => (r.status === "upcoming" ? "Scheduled" : r.outcome ? r.outcome.replace(/^./, (c) => c.toUpperCase()) : NK) },
+  { label: "Charted closure areas", get: (r) => r.areas || 0 },
+  { label: "Farthest closure area", get: (r) => (r.far_nm !== undefined ? `${kmNum(r.far_nm)} NM` : "") },
+  { label: "Flight path", get: (r) => (r.path ? `estimated, azimuth ${r.path.az}°` + (r.path.borrowed ? " (from an earlier launch)" : "") : "None") },
+  { label: "Path crosses", get: (r) => (!r.over ? "" : [...new Set(r.over.flat().map((o) => o.cc))].map(countryName).join(", ") || "No land") },
+  { label: "Sources", get: (r) => (r.sources || []).map((x) => SOURCES[x] || x).join(", ") },
+];
+let cmpNote = "";
+function cmpToggle(id) {
+  const t = CMP.toggle(state.cmp, id);
+  state.cmp = t.ids;
+  cmpNote = t.full ? `The tray holds ${CMP.MAX}: take one out to add another.` : "";
+  cmpTray();
+  document.querySelectorAll("[data-cmp]").forEach((b) => cmpLabel(b));
+  writeHash();
+}
+function cmpLabel(b) {
+  const on = state.cmp.includes(b.dataset.cmp);
+  b.textContent = b.dataset.short ? (on ? "✓" : "+") : on ? "Remove from compare" : "Add to compare";
+  b.setAttribute("aria-pressed", on ? "true" : "false");
+  b.setAttribute("aria-label", (on ? "Remove " : "Add ") + b.dataset.name + (on ? " from compare" : " to compare"));
+  b.title = on ? "In the compare tray: click to take it out" : "Add to the compare tray (up to four)";
+}
+function cmpButton(r, short) {
+  const b = el("button", short ? "chip-btn cmp-btn" : "linkish"); b.type = "button";
+  b.dataset.cmp = r.id; if (short) b.dataset.short = "1";
+  b.dataset.name = r.label || r.payload || r.id;
+  cmpLabel(b);
+  b.addEventListener("click", (ev) => { ev.stopPropagation(); cmpToggle(r.id); });
+  b.addEventListener("keydown", (ev) => ev.stopPropagation());
+  return b;
+}
+let cmpKey = null;
+function cmpTray() {
+  const recs = state.cmp.map((id) => byId.get(id)).filter(Boolean);
+  const key = recs.map((r) => r.id).join(",") + "|" + cmpNote;
+  if (key === cmpKey) return;
+  cmpKey = key;
+  const st = $("h-cmp-status");
+  if (st) st.textContent = cmpNote || (recs.length ? `Compare (${recs.length} of ${CMP.MAX})` : "Compare tray empty");
+  const box = $("h-cmp"); box.textContent = "";
+  box.hidden = !recs.length && !cmpNote;
+  if (box.hidden) return;
+  const head = el("div", "cmp-head");
+  head.appendChild(el("b", "", `Compare (${recs.length} of ${CMP.MAX})`));
+  const clear = el("button", "linkish small", "Clear"); clear.type = "button";
+  clear.addEventListener("click", () => { state.cmp = []; cmpNote = ""; cmpTray(); document.querySelectorAll("[data-cmp]").forEach(cmpLabel); writeHash(); });
+  head.appendChild(clear);
+  box.appendChild(head);
+  if (cmpNote) box.appendChild(el("p", "small warn-text", cmpNote));
+  if (recs.length < 2) { box.appendChild(el("p", "small muted", "Add another launch with + in the list or \"Add to compare\" on its card to see them side by side.")); }
+  const t = el("table", "cmp-table"), tr = el("tr");
+  tr.appendChild(el("th", "", ""));
+  recs.forEach((r) => {
+    const h = el("th"); h.scope = "col";
+    const name = el("button", "linkish", r.label || r.payload || r.id); name.type = "button";
+    name.addEventListener("click", () => select(r.id, true));
+    const x = el("button", "linkish small", "Remove"); x.type = "button";
+    x.setAttribute("aria-label", `Remove ${r.label || r.payload || r.id} from compare`);
+    x.addEventListener("click", () => cmpToggle(r.id));
+    h.append(mark(r.actor), " ", name, el("br"), x);
+    tr.appendChild(h);
+  });
+  const thead = el("thead"); thead.appendChild(tr); t.appendChild(thead);
+  const tb = el("tbody");
+  CMP.rows(recs, CMP_FIELDS).forEach((row) => {
+    const rtr = el("tr", row.differ ? "differ" : "");
+    const rh = el("th", "", row.label); rh.scope = "row"; rtr.appendChild(rh);
+    row.cells.forEach((c) => rtr.appendChild(el("td", "", c)));
+    tb.appendChild(rtr);
+  });
+  t.appendChild(tb);
+  const wrap = el("div", "tbl-wrap"); wrap.appendChild(t);
+  box.appendChild(wrap);
+  if (recs.length > 1) box.appendChild(el("p", "small muted", "Rows where the launches differ are marked. Facts are as the list gives them: GCAT's for inclination and apogee, Launch's estimates for the flight path."));
+}
+
+/* ---------- the chart builder (chart.js): the launches in the filters, counted and split ---------- */
+const facetGet = (k) => FACETS.find((f) => f.k === k).get;
+const facetName = (k) => (FACETS.find((f) => f.k === k) || {}).name || ((v) => v);
+const CHART_BY = [
+  { k: "year", label: "Year", time: "year", get: (r) => (r._day || "").slice(0, 4) },
+  { k: "month", label: "Month", time: "month", get: (r) => r._month || "" },
+  { k: "cc", label: "Country", facet: true },
+  { k: "veh", label: "Vehicle", facet: true },
+  { k: "site", label: "Launch site", facet: true },
+  { k: "orb", label: "Orbit", facet: true },
+  { k: "kind", label: "Launch kind", facet: true },
+  { k: "mt", label: "Mission type", facet: true },
+  { k: "out", label: "Outcome", facet: true },
+  { k: "prog", label: "Programme", facet: true },
+  { k: "ovf", label: "Path crosses", facet: true },
+];
+const OUT_ORDER = ["Success", "Failure or partial", "Scheduled", NK];
+const CHART_SPLIT = [
+  { k: "", label: "Nothing" },
+  { k: "cc", label: "Country (US, China, Russia, others)", get: (r) => group(r.actor), order: ["us", "cn", "ru", "other"], name: (v) => ({ us: "US", cn: "China", ru: "Russia", other: "Others" })[v] || v, cls: (v) => "g-" + v },
+  { k: "kind", label: "Launch kind", get: (r) => r.kind || NK, order: KINDS },
+  { k: "out", label: "Outcome", get: (r) => facetGet("out")(r), order: OUT_ORDER },
+  { k: "orb", label: "Orbit", get: (r) => r.orbit || NK },
+];
+const DEFAULT_CHART = { by: "year", split: "cc" };
+function chartSetup() {
+  const by = $("h-chart-by"), sp = $("h-chart-split");
+  CHART_BY.forEach((b) => by.appendChild(new Option(b.label, b.k)));
+  CHART_SPLIT.forEach((b) => sp.appendChild(new Option(b.label, b.k)));
+  const box = $("h-chart");
+  box.open = !!state.chart;
+  box.addEventListener("toggle", () => {
+    if (box.open && !state.chart) state.chart = { ...DEFAULT_CHART };
+    if (!box.open) state.chart = null;
+    chartView(); writeHash();
+  });
+  const changed = () => { state.chart = { by: by.value, split: sp.value }; chartView(); writeHash(); };
+  by.addEventListener("change", changed); sp.addEventListener("change", changed);
+}
+function chartView() {
+  const box = $("h-chart-out");
+  if (!box) return;
+  $("h-chart").open = !!state.chart;
+  if (!state.chart) { box.textContent = ""; return; }
+  const by = CHART_BY.find((b) => b.k === state.chart.by) || CHART_BY[0], sp = CHART_SPLIT.find((b) => b.k === state.chart.split) || CHART_SPLIT[0];
+  $("h-chart-by").value = by.k; $("h-chart-split").value = sp.k;
+  const get = by.facet ? facetGet(by.k) : by.get, nameOf = by.facet ? facetName(by.k) : by.time === "month" ? monthName : (v) => v;
+  const agg = CH.aggregate(lastFiltered, { x: get, split: sp.get || null, time: by.time || null, top: 15, splitTop: 6, order: sp.order || null });
+  const label = (k) => (k === CH.OTHER ? `${agg.folded} others` : String(nameOf(k)));
+  const sName = (s) => (s === CH.OTHER ? "Others" : sp.name ? sp.name(s) : s || "Launches");
+  const sCls = (s, i) => (s === CH.OTHER ? "g-other" : sp.cls ? sp.cls(s) : !sp.get ? "cs-1" : "cs-" + (i + 1));
+  box.textContent = "";
+  if (!agg.cats.length) { box.appendChild(el("p", "small muted", "No launch in the filters has this field.")); return; }
+  const series = agg.series.map((s, i) => ({ s, cls: sCls(s, i) }));
+  const max = Math.max(1, ...agg.cats.map((c) => c.total)), tk = CH.ticks(max), top = tk[tk.length - 1];
+  const W = Math.max(320, box.clientWidth || 760);
+  const svg = svgEl("svg", { width: "100%", role: "img", class: "ch-svg",
+    "aria-label": `Launches in your filters by ${by.label.toLowerCase()}` + (sp.get ? `, split by ${sp.label.toLowerCase()}` : "") + ". The table below gives every number." });
+  const tip = (c) => `${label(c.key)}: ${c.total}` + (sp.get ? " (" + series.filter((x) => c.parts[x.s]).map((x) => `${sName(x.s)} ${c.parts[x.s]}`).join(", ") + ")" : "");
+  const keyPick = (g, c) => {
+    if (c.key === CH.OTHER || !c.total) return;
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button"); g.setAttribute("aria-label", tip(c) + ". Show only these.");
+    g.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(c); } });
+  };
+  const pick = (c) => {
+    if (c.key === CH.OTHER || !c.total) return;
+    if (by.time === "year") setDates(`${c.key}-01-01`, `${c.key}-12-31`);
+    else if (by.time === "month") { const [y, m] = c.key.split("-").map(Number); setDates(`${c.key}-01`, `${c.key}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`); }
+    else { state.f[by.k] = [c.key]; state.sel = ""; update(true); }
+  };
+  if (by.time) { // columns over time
+    const H = 200, padL = 34, padB = 20, plotH = H - padB - 8, bw = (W - padL - 4) / agg.cats.length;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+    tk.forEach((t) => {
+      const y = 8 + plotH - (t / top) * plotH;
+      svg.appendChild(svgEl("line", { x1: padL, x2: W - 4, y1: y, y2: y, class: "tl-grid" }));
+      const tx = svgEl("text", { x: padL - 4, y: y + 3, class: "tl-ax", "text-anchor": "end" }); tx.textContent = String(t); svg.appendChild(tx);
+    });
+    const every = Math.ceil(agg.cats.length / Math.max(1, Math.floor((W - padL) / (by.time === "month" ? 60 : 46))));
+    const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthLabel = (k) => `${MON[Number(k.slice(5, 7)) - 1]} ${k.slice(0, 4)}`;
+    agg.cats.forEach((c, i) => {
+      const x = padL + i * bw, g = svgEl("g", { class: "ch-m" + (c.total ? " pickable" : "") });
+      let y = 8 + plotH;
+      const segs = series.filter((x2) => c.parts[x2.s]);
+      segs.forEach((x2, j) => {
+        const h = (c.parts[x2.s] / top) * plotH, gap = j < segs.length - 1 && h >= 4 ? 2 : 0;
+        y -= h;
+        g.appendChild(svgEl("rect", { class: "ch-bar " + x2.cls, x: x + 1, y: y + gap, width: Math.max(1, bw - 2), height: h - gap, rx: j === segs.length - 1 ? Math.min(3, bw / 3, h / 2) : 0 }));
+      });
+      g.appendChild(svgEl("rect", { class: "tl-hit", x, y: 0, width: bw, height: H - padB }));
+      const t = svgEl("title"); t.textContent = tip(c); g.appendChild(t);
+      g.addEventListener("click", () => pick(c));
+      keyPick(g, c);
+      svg.appendChild(g);
+      if (i % every === 0) { const tx = svgEl("text", { x: x + bw / 2, y: H - 5, class: "tl-ax", "text-anchor": "middle" }); tx.textContent = by.time === "month" ? monthLabel(c.key) : c.key; svg.appendChild(tx); }
+    });
+  } else { // bars, largest first
+    const rowH = 22, labW = Math.min(200, Math.round(W * 0.34)), numW = 44, H = agg.cats.length * rowH + 22;
+    const plotW = W - labW - numW - 8;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+    tk.forEach((t) => {
+      const x = labW + (t / top) * plotW;
+      svg.appendChild(svgEl("line", { x1: x, x2: x, y1: 0, y2: H - 18, class: "tl-grid" }));
+      const tx = svgEl("text", { x, y: H - 5, class: "tl-ax", "text-anchor": "middle" }); tx.textContent = String(t); svg.appendChild(tx);
+    });
+    agg.cats.forEach((c, i) => {
+      const y = i * rowH + 3, g = svgEl("g", { class: "ch-m" + (c.key !== CH.OTHER ? " pickable" : "") });
+      const lt = svgEl("text", { x: labW - 6, y: y + 12, class: "ch-lab", "text-anchor": "end" });
+      const lab = label(c.key); lt.textContent = lab.length > 28 ? lab.slice(0, 27) + "…" : lab; g.appendChild(lt);
+      let x = labW;
+      const segs = series.filter((x2) => c.parts[x2.s]);
+      segs.forEach((x2, j) => {
+        const w = (c.parts[x2.s] / top) * plotW, gap = j < segs.length - 1 && w >= 4 ? 2 : 0;
+        g.appendChild(svgEl("rect", { class: "ch-bar " + x2.cls, x, y, width: w - gap, height: rowH - 6, rx: j === segs.length - 1 ? Math.min(3, w / 2) : 0 }));
+        x += w;
+      });
+      const nt = svgEl("text", { x: x + 5, y: y + 12, class: "ch-num" }); nt.textContent = String(c.total); g.appendChild(nt);
+      g.appendChild(svgEl("rect", { class: "tl-hit", x: 0, y: y - 2, width: W, height: rowH }));
+      const t = svgEl("title"); t.textContent = tip(c); g.appendChild(t);
+      g.addEventListener("click", () => pick(c));
+      keyPick(g, c);
+      svg.appendChild(g);
+    });
+  }
+  box.appendChild(svg);
+  if (sp.get) {
+    const lg = el("p", "legend small muted");
+    series.forEach((x2) => { const sp2 = el("span"); sp2.append(el("span", "sw " + x2.cls), sName(x2.s)); lg.appendChild(sp2); });
+    box.appendChild(lg);
+  }
+  const notes = [`${lastFiltered.length.toLocaleString("en-US")} launches in your filters`];
+  if (agg.skipped) notes.push(`${agg.skipped} without this field left out`);
+  if (agg.multi) notes.push("a launch with more than one value counts once in each");
+  if (agg.folded) notes.push(`the ${agg.folded} smallest are one "others" bar`);
+  notes.push(by.time ? "click a column to set the dates" : "click a bar to filter by it");
+  box.appendChild(el("p", "small muted", notes.join("; ") + "."));
+  const det = el("details", "small"); det.appendChild(el("summary", "", "Show the numbers"));
+  const head = [by.label, ...(sp.get ? series.map((x2) => sName(x2.s)) : []), "Total"];
+  const t = el("table"), thead = el("thead"), htr = el("tr");
+  head.forEach((h, i) => htr.appendChild(el("th", i ? "num" : "", h))); thead.appendChild(htr); t.appendChild(thead);
+  const tb = el("tbody");
+  agg.cats.forEach((c) => {
+    const tr = el("tr"); tr.appendChild(el("td", "", label(c.key)));
+    if (sp.get) series.forEach((x2) => tr.appendChild(el("td", "num", String(c.parts[x2.s] || 0))));
+    tr.appendChild(el("td", "num", String(c.total))); tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  const wrap = el("div", "tbl-wrap"); wrap.appendChild(t); det.appendChild(wrap);
+  box.appendChild(det);
+}
+
 /* ---------- downloads (export.js): the launches in the current filters ---------- */
 const TYPES = { csv: "text/csv;charset=utf-8", geojson: "application/geo+json", kml: "application/vnd.google-earth.kml+xml" };
 function download(kind) {
@@ -806,7 +1101,7 @@ function update(refit) {
   const total = IX.records.length;
   const up = rows.filter((r) => r.status === "upcoming").length;
   $("h-count").textContent = `${rows.length} of ${total} shown` + (up ? ` (${up} scheduled)` : "") + (rows.length > state.shown ? `; the list shows ${state.shown}` : "");
-  renderFacets(); rangesShow(); presets(); kindToggles(); chips(); timeline(); list(rows);
+  renderFacets(); rangesShow(); presets(); kindToggles(); chips(); timeline(); chartView(); cmpTray(); list(rows);
   if (map) map.show(rows, state.areas, refit || fitNext);
   fitNext = false;
   if (state.sel && !byId.get(state.sel)) state.sel = "";
@@ -814,8 +1109,23 @@ function update(refit) {
   writeHash();
 }
 
+// Redraw the timeline and the chart when their box changes width (a rotated tablet, a resized window): both are laid
+// out in pixels at the box's width.
+function watchWidth(id, draw) {
+  const box = $(id);
+  if (!box || !window.ResizeObserver) return;
+  let w = box.clientWidth, t = null;
+  new ResizeObserver(() => {
+    const now = box.clientWidth;
+    if (!now || Math.abs(now - w) < 2) return;
+    w = now; clearTimeout(t); t = setTimeout(draw, 120);
+  }).observe(box);
+}
+
 export async function initHistory(ix, hist) {
   IX = ix; HIST = hist;
+  watchWidth("h-timeline", () => timeline());
+  watchWidth("h-chart-out", () => chartView());
   if (Array.isArray(IX.kinds) && IX.kinds.length) KINDS.splice(0, KINDS.length, ...IX.kinds);
   IX.records.forEach((r) => byId.set(r.id, r));
   // A record later folded into another by a join (a GCAT launch a charted event joined, a second charted placemark of
@@ -833,6 +1143,7 @@ export async function initHistory(ix, hist) {
   $("h-to").addEventListener("change", () => setDates($("h-from").value, $("h-to").value));
   $("h-areas").addEventListener("change", () => { state.areas = $("h-areas").checked; update(false); });
   $("h-more").addEventListener("click", () => { state.shown += PAGE; list(lastFiltered); });
+  chartSetup();
   $("h-fit").addEventListener("click", () => map && map.show(lastFiltered, state.areas, true));
   $("h-copy").addEventListener("click", async () => {
     writeHash();
@@ -866,7 +1177,7 @@ export async function initHistory(ix, hist) {
     .catch((err) => { $("hmap").textContent = "The map could not load: " + err.message + ". The filters and the list still work."; });
   if (T && T.onChange) T.onChange(() => { rekey(); update(false); });
   return {
-    resize: () => map && map.resize(), refresh: () => update(false), savedChanged,
+    resize: () => map && map.resize(), refresh: () => { cmpKey = null; update(false); }, savedChanged,
     // The address changed by hand or by a link (not by this page): take the view it names.
     fromHash: () => {
       const want = location.hash, before = state.sel;

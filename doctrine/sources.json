@@ -14,7 +14,7 @@
     },
     {
       "id": "orbit-snapshot",
-      "name": "Orbit (The Intelligence Company): scheduled launches (Launch Library 2) and GCAT launches; its NGA warnings only until Cordon's lane has run; its launch ledger file (orbit releases/ledger), read to begin Launch's own and for the side-by-side check while both run (Ascent move, 19 Nov 2026)",
+      "name": "Orbit (The Intelligence Company): GCAT launches of the last 30 days, from its published snapshot; and its frozen launch ledger file (orbit releases/ledger), read once to begin Launch's own LL2 ledger. Scheduled launches come from Launch's own schedule lane, and NGA warnings from Cordon",
       "url": "https://orbit.theintelligence.company/data/snapshot.json",
       "licence": "Each item keeps its source's terms: GCAT CC BY 4.0; Launch Library 2 free access, no licence stated; NGA US Government work; Japan Coast Guard Government Standard Terms of Use 2.0",
       "use": "ingest",
@@ -136,18 +136,18 @@
     },
     {
       "id": "rocketlaunch-live",
-      "name": "Candidate, not read by any lane: RocketLaunch.Live JSON API, free tier (next 5 launches)",
+      "name": "RocketLaunch.Live JSON API, free tier: the next 5 launches (the rll lane, a second source for the upcoming store)",
       "url": "https://www.rocketlaunch.live/api",
       "licence": "No licence stated; the API page asks for the credit \"Data by RocketLaunch.Live\" near the data",
-      "use": "excluded",
-      "grade": "F6",
+      "use": "ingest",
+      "grade": "B3",
       "independence_group": "rocketlaunch-live",
       "commercial_ok": "unknown",
       "vetting": {
         "read": "20-21 Nov 2026",
         "terms": "API page read. /terms answers 404; no terms of use found.",
         "robots": "Allows /api and /json/launches/next/5 for all agents; names no AI agents.",
-        "lead_time": "Not measurable from the free tier, which holds no history.",
+        "lead_time": "Not measurable from the free tier, which holds no history. Measured from the upcoming store once it has history: each rll record's first_seen against its NET, and against Launch Library 2's first_seen for joined records.",
         "sample": "Next 5 read 21 Nov 2026: a CASC launch from Taiyuan at 03:50Z 21 Nov (record modified 18 Nov) was not among the 16 Launch Library 2 records Launch published from its 01:15Z read. USSF-266 is 23 Nov here and 24 Nov in Launch Library 2."
       }
     },
@@ -199,7 +199,8 @@
         "terms": "Not read: the site did not answer this client (HTTP 403).",
         "robots": "Not read: the site did not answer this client (HTTP 403).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "Internet Archive captures to 17 Oct 2026 (read through archive.org only, 20-21 Nov 2026): 38 pages read, no launch notice found. The scan was bounded, so this does not show that none was issued."
       }
     },
     {
@@ -216,7 +217,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -233,7 +235,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -250,7 +253,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -267,7 +271,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -284,7 +289,8 @@
         "terms": "Not read: the site did not answer this client (HTTP 447).",
         "robots": "Not read: the site did not answer this client (HTTP 447).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "No Internet Archive captures since 13 Sep 2026, so the Archive cannot show recent notices (read through archive.org only, 20-21 Nov 2026)."
       }
     },
     {
@@ -301,7 +307,8 @@
         "terms": "Not read: the site did not answer this client (timed out).",
         "robots": "Not read: the site did not answer this client (timed out).",
         "lead_time": "Not measured.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "Internet Archive captures to 5 Nov 2026 (read through archive.org only, 20-21 Nov 2026): 37 pages read, no launch notice found. The scan was bounded, so this does not show that none was issued."
       }
     },
     {
@@ -318,7 +325,8 @@
         "terms": "Footer and /rules read. Use requires a hyperlink; automated collection is not addressed.",
         "robots": "Allows / and /news/; refuses the site search path.",
         "lead_time": "Not measured: the search path is refused.",
-        "sample": "None taken."
+        "sample": "None taken.",
+        "archive": "Internet Archive captures to 18 Nov 2026 (read through archive.org only, 20-21 Nov 2026). The article scan timed out, so no notice was sampled."
       }
     },
     {
@@ -334,8 +342,9 @@
         "read": "20-21 Nov 2026",
         "terms": "Terms (/a_tos) read. Links are the most Launch could use without written permission.",
         "robots": "Allows / and /story/; refuses the site search path.",
-        "lead_time": "Not measured: the search path is refused.",
-        "sample": "None taken."
+        "lead_time": "About 23 hours, from one 2021 notice found in the Internet Archive. The live search path is refused, so nothing more recent was measured.",
+        "sample": "The 14 Feb 2021 fall-zone notice for Progress MS-16, read in the Internet Archive.",
+        "archive": "Internet Archive captures to 18 Nov 2026 (read through archive.org only, 20-21 Nov 2026). One usable fall-zone notice: published 05:40 UTC 14 Feb 2021, relaying the Altai Republic civil-defence office, with the launch time and reserve dates. Progress MS-16 launched 04:45 UTC 15 Feb 2021 (GCAT)."
       }
     },
     {
@@ -351,8 +360,9 @@
         "read": "20-21 Nov 2026",
         "terms": "Not read: the site did not answer this client (HTTP 403).",
         "robots": "Not read: the site did not answer this client (HTTP 403).",
-        "lead_time": "Not measured.",
-        "sample": "None taken."
+        "lead_time": "Under 2 days, from one 2026 press release (its hour of release was not read).",
+        "sample": "The 10 Jun 2026 press release on the rescheduled H3 F6 launch, read in the Internet Archive.",
+        "archive": "Internet Archive captures to 15 Nov 2026 (read through archive.org only, 20-21 Nov 2026). A press release of 10 Jun 2026 gave the rescheduled H3 F6 launch time; the launch was at 00:53 UTC 12 Jun 2026. JAXA's IP policy is not a reuse licence for the site, so the reuse terms are still unread."
       }
     },
     {

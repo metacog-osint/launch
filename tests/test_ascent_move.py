@@ -154,6 +154,40 @@ class Schedule(unittest.TestCase):
         self.assertIn("ll2", act[0]["links"])
         self.assertNotIn("by_source", act[0])
 
+    def test_public_record_keeps_the_latest_net_moves(self):
+        """25 Nov 2026: the Live tab's board says how often a NET moved and the latest move."""
+        moves = [{"at": f"2026-11-1{i}T00:00:00Z", "source": "ll2",
+                  "fields": {"net": [f"2026-11-2{i}T00:00:00Z", f"2026-11-2{i + 1}T00:00:00Z"]}} for i in range(5)]
+        other = {"at": "2026-11-19T00:00:00Z", "source": "ll2", "fields": {"status": ["TBD", "Go"]}}
+        out = schedule._public({"id": "x", "sources": ["ll2"], "changes": [moves[4], other, *moves[:4]],
+                                "by_source": {"ll2": {"listed": True, "fields": {"net": "2026-11-25T00:00:00Z"}}}})
+        self.assertEqual(out["net_changes"], 5)
+        self.assertEqual([m["at"] for m in out["net_moves"]], [m["at"] for m in moves[2:]])   # oldest first, last 3
+        self.assertEqual(out["net_moves"][-1], {"at": "2026-11-14T00:00:00Z", "from": "2026-11-24T00:00:00Z",
+                                                "to": "2026-11-25T00:00:00Z", "source": "ll2"})
+        self.assertEqual(schedule._public({"id": "y"})["net_moves"], [])
+
+    def test_joined_record_counts_one_slip_once(self):
+        """A launch LL2 and RocketLaunch.Live both list, joined, slips once: both reads log the change, the board
+        counts one move, from the source the record shows (LL2 while it lists it, else RocketLaunch.Live)."""
+        st = schedule.empty()
+        schedule.ingest(st, "ll2", [{"id": "L1", "net": "2026-12-01T10:00:00Z"}], "2026-11-27T00:00:00Z")
+        schedule.ingest(st, "rll", [{"id": "R1", "net": "2026-12-01T10:00:00Z"}], "2026-11-27T00:05:00Z")
+        ids = [r["id"] for r in st["records"]]
+        schedule.join(st, ids[0], ids[1], "2026-11-27T00:06:00Z", "test")
+        schedule.ingest(st, "ll2", [{"id": "L1", "net": "2026-12-02T10:00:00Z"}], "2026-11-27T06:00:00Z")
+        schedule.ingest(st, "rll", [{"id": "R1", "net": "2026-12-02T10:00:00Z"}], "2026-11-27T06:05:00Z")
+        rec = st["records"][0]
+        self.assertEqual(len([c for c in rec["changes"] if "net" in c["fields"]]), 2)   # one per source
+        out = schedule._public(rec)
+        self.assertEqual(out["net_changes"], 1)
+        self.assertEqual(out["net_moves"][0]["source"], "ll2")
+        # LL2 no longer lists it: RocketLaunch.Live's reading is shown, so its move is the one counted and quoted.
+        schedule.ingest(st, "ll2", [], "2026-11-27T12:00:00Z")
+        out = schedule._public(st["records"][0])
+        self.assertEqual(out["net_changes"], 1)
+        self.assertEqual(out["net_moves"][0]["source"], "rll")
+
 
 class News(unittest.TestCase):
     def test_links_only_and_by_record(self):
@@ -309,6 +343,32 @@ class Wiring(unittest.TestCase):
             store2 = cli.update_schedule(snap2, d, NOW, self.getter({}))
             self.assertEqual(store2["reads"]["ll2"], "2026-11-13T22:00:00Z")
 
+    def test_match_reads_launchs_own_schedule(self):
+        """Ascent step 4: live.match, the ledger and the site index read Launch's LL2-listed records, keyed by the LL2
+        uuid as Orbit's copy was; a record held only by a closure notice is left out."""
+        rows = [{k: v for k, v in r.items() if k != "mission_description"}
+                for r in schedule.ll2_parse((FIX / "ll2_upcoming.json").read_bytes())]
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = {"generated_at": "2026-11-13T22:00:00Z", "lanes": {"schedule": {"status": "ok"}},
+                    "schedule": {"read_at": "2026-11-13T22:00:00Z", "rows": rows}, "news": {}}
+            cli.update_schedule(snap, Path(tmp), NOW, self.getter({}))
+        snap["schedule"]["records"].append({"id": "closure:x", "sources": ["closure"], "refs": {"closure": "x"},
+                                            "net": "2026-11-14T00:00:00Z", "lat": 28.5, "lon": -80.6})
+        up = cli.ll2_upcoming(snap)
+        listed = {r["id"]: r for r in rows if schedule.within([r], NOW)}
+        self.assertEqual({u["id"] for u in up}, set(listed))
+        for u in up:
+            for k in ("name", "net", "lat", "lon", "status", "vehicle", "mission", "pad"):
+                self.assertEqual(u[k], listed[u["id"]][k], k)
+            self.assertEqual(u["ll2_url"], listed[u["id"]]["ll2_url"])
+
+    def test_compare_ends_when_orbit_has_no_schedule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = cli.update_compare({"generated_at": "t", "orbit": {"launches": []}}, {"records": []}, None, None,
+                                     Path(tmp), self.getter({}))
+            self.assertEqual(out["status"], "ended")
+            self.assertFalse(any(Path(tmp).iterdir()))
+
     def test_ledger_rows_since_gcat_become_provisional_records(self):
         led = {"launches": [dict(schedule.ll2_row(rec(1, "2026-11-01T00:00:00Z"))),
                             dict(schedule.ll2_row(rec(2, "2026-11-12T00:00:00Z"))),
@@ -327,6 +387,99 @@ class Wiring(unittest.TestCase):
             ll2 = [r for r in out["launches"] if r["id"].startswith("ll2:")]
             self.assertEqual([r["id"] for r in ll2], ["ll2:id-002"])    # flown only; id-003 is still "Go"
             self.assertTrue(ll2[0]["provisional"])
+
+
+
+class Feed(unittest.TestCase):
+    """Ascent step 3 (25 Nov 2026): the upcoming store's live view as `launch:upcoming:...` feed items."""
+
+    def snap(self):
+        store = schedule.empty()
+        schedule.ingest(store, "ll2", rows_of(rec(1, "2026-11-14T12:00:00Z", "Go")), "2026-11-13T22:00:00Z",
+                        link_key="ll2_url")
+        schedule.ingest(store, "closure", [{"id": "A6149/26 ZBPE", "name": "Closure with no listed launch near Taiyuan",
+                                            "net": "2026-11-15T04:59:00Z", "net_precision": "closure window",
+                                            "window_start": "2026-11-15T04:59:00Z",
+                                            "window_end": "2026-11-15T05:28:00Z", "location": "Taiyuan",
+                                            "lat": 38.849, "lon": 111.608}],
+                        "2026-11-13T22:00:00Z", evidence="closure with no listing")
+        store["records"][1]["by_source"]["closure"]["notices"] = ["A6149/26 ZBPE"]
+        return store, {"generated_at": "2026-11-13T22:05:00Z", "lanes": {},
+                       "schedule": {"read_at": "2026-11-13T22:00:00Z", "records": schedule.active(store, NOW)},
+                       "unlisted": [{"notices": [{"key": "A6149/26 ZBPE", "source": "faa-nms"}]}]}
+
+    def items(self, snap):
+        from launch import feed
+        return {f["properties"]["id"]: f for f in feed.build_feed(snap)["features"]}
+
+    def test_listed_and_closure_items_pass_contract(self):
+        from tic_doctrine import contract, registers
+        _, snap = self.snap()
+        items = self.items(snap)
+        self.assertEqual(sorted(items), ["launch:upcoming:closure:A6149/26-ZBPE", "launch:upcoming:ll2:id-001"])
+        regs = registers.ids(ROOT / "doctrine")
+        for f in items.values():
+            errs = [m for _, sev, m in contract.check(f, regs) if sev == "error"]
+            self.assertEqual(errs, [], f["properties"]["id"])
+            self.assertEqual(f["properties"]["subject_id"], f["properties"]["id"])
+            self.assertNotIn(" ", f["properties"]["id"])
+        ll2 = items["launch:upcoming:ll2:id-001"]["properties"]
+        self.assertEqual(ll2["sources"][0]["id"], "ll2-thespacedevs")
+        self.assertEqual(ll2["sources"][0]["url"], "https://ll.thespacedevs.com/2.3.0/launches/id-001/")
+        self.assertIn("(status Go; NET precision Second)", ll2["summary"])   # COP reads these words
+        self.assertEqual(ll2["event_start"], "2026-11-14T12:00:00Z")
+        self.assertNotIn("event_time_precision", ll2)
+        self.assertEqual(ll2["measures"]["evidence"], ["listed"])
+        cl = items["launch:upcoming:closure:A6149/26-ZBPE"]["properties"]
+        self.assertEqual(cl["sources"][0]["id"], "faa-nms")
+        self.assertEqual(cl["measures"]["evidence"], ["closure with no listing"])
+        self.assertEqual((cl["event_start"], cl["event_end"]), ("2026-11-15T04:59:00Z", "2026-11-15T05:28:00Z"))
+        self.assertIn("not that a launch is coming", cl["summary"])
+        self.assertEqual(cl["countries"], ["CN"])
+
+    def test_joined_record_keeps_the_closure_id(self):
+        store, snap = self.snap()
+        rid = store["records"][1]["id"]
+        schedule.ingest(store, "ll2", rows_of(rec(1, "2026-11-14T12:00:00Z", "Go"),
+                                              rec(2, "2026-11-15T05:08:00Z", "Go")), "2026-11-13T22:30:00Z",
+                        link_key="ll2_url")
+        schedule.join(store, rid, "upcoming:ll2:id-002", "2026-11-13T22:30:00Z", "test")
+        snap["schedule"]["records"] = schedule.active(store, NOW)
+        items = self.items(snap)
+        joined = items["launch:upcoming:closure:A6149/26-ZBPE"]["properties"]
+        self.assertNotIn("launch:upcoming:ll2:id-002", items)
+        self.assertTrue(joined["title"].startswith("Scheduled launch: Rocket | Mission 2"))   # LL2's fields show
+        self.assertEqual(joined["measures"]["aliases"], ["upcoming:ll2:id-002"])
+        self.assertEqual(joined["sources"][0]["id"], "ll2-thespacedevs")
+
+    def test_coarse_and_timeless_records(self):
+        _, snap = self.snap()
+        r = dict(snap["schedule"]["records"][0], net_precision="Day", id="upcoming:ll2:day")
+        snap["schedule"]["records"] = [r, dict(r, id="upcoming:ll2:none", net=None)]
+        items = self.items(snap)
+        self.assertEqual(list(items), ["launch:upcoming:ll2:day"])
+        p = items["launch:upcoming:ll2:day"]["properties"]
+        self.assertEqual((p["event_start"], p["event_time_precision"]), ("2026-11-14T00:00:00Z", "day"))
+
+
+class SiteReadsSchedule(unittest.TestCase):
+    """Orbit no longer publishes `upcoming`, so the page must count and draw scheduled launches from
+    Launch's own schedule, the same rows ll2_upcoming() matches. Reading snap.orbit.upcoming showed 0 scheduled
+    launches beside a list of coincidences with scheduled launches."""
+
+    APP = (ROOT / "site_src" / "app.js").read_text(encoding="utf-8")
+
+    def test_no_read_of_orbit_upcoming(self):
+        self.assertNotIn("(snap.orbit || {}).upcoming", self.APP)
+
+    def test_rows_from_schedule_with_ll2_ids(self):
+        self.assertIn("(snap.schedule || {}).records", self.APP)
+        self.assertIn("id: r.refs.ll2", self.APP)
+
+    def test_same_rows_as_the_matcher(self):
+        snap = {"schedule": {"records": [{"id": "a", "name": "A", "refs": {"ll2": "u1"}, "links": {"ll2": "x"}},
+                                         {"id": "b", "name": "B", "refs": {}}]}}
+        self.assertEqual([u["id"] for u in cli.ll2_upcoming(snap)], ["u1"])
 
 
 if __name__ == "__main__":
