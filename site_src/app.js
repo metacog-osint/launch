@@ -7,6 +7,8 @@ import * as TR from "./traj.js";
 import { initHistory } from "./history.js";
 import * as SV from "./saved.js";
 import * as LP from "./livepaths.js";
+import * as LY from "./layers.js";
+import * as BD from "./board.js";
 
 const T = window.TicTime;
 const $ = (id) => document.getElementById(id);
@@ -23,6 +25,8 @@ function el(tag, cls, text) {
   return e;
 }
 const fmt = (iso, o) => (!iso ? "" : T ? T.format(iso, o || {}) : iso.replace("T", " ").replace(":00Z", "Z"));
+// A NET worded by its precision (board.js netWords): a clock time only when the schedule gives one.
+const netText = (iso, precision) => BD.netWords(iso, precision, fmt);
 // A window "start to end": the end's date is left off only when it falls on the start's day in the viewer's zone, so
 // a window over midnight or over several days does not read as ending before it opens.
 const span = (a, b) => fmt(a) + " to " + fmt(b, fmt(a, { time: false }) === fmt(b, { time: false }) ? { date: false } : {});
@@ -67,10 +71,14 @@ const poly = (ring, props) => ({ type: "Feature", properties: props, geometry: {
 
 async function getJSON(p) { const r = await fetch(p, { cache: "no-cache" }); if (!r.ok) throw new Error(p + " " + r.status); return r.json(); }
 
-let snap, hist, pat, srcs, ix, map, H = null, Hstart = null, liveM = null, openCard = null;
+let snap, hist, pat, srcs, ix, map, H = null, Hstart = null, liveM = null, openCard = null, sched = [];
 const byKey = new Map();
 const upcomingRecs = () => ix.records.filter((r) => r.status === "upcoming");
-const scheduled = (r) => ((snap.orbit || {}).upcoming || []).find((u) => u.id === r.ll2) || null;
+// Scheduled launches Launch Library 2 lists, from Launch's own schedule (snap.schedule.records), in the shape Orbit's
+// `upcoming` lane had: `id` is the LL2 uuid. The same rows tools/launch.py ll2_upcoming() matches against the areas.
+// (Orbit no longer publishes `upcoming`, so snap.orbit.upcoming is now always empty.)
+const upcomingRows = () => ((snap.schedule || {}).records || []).filter((r) => (r.refs || {}).ll2).map((r) => ({ ...r, id: r.refs.ll2, ll2_url: (r.links || {}).ll2 }));
+const scheduled = (r) => upcomingRows().find((u) => u.id === r.ll2) || null;
 
 function tiles() {
   const box = $("tiles"); box.textContent = "";
@@ -79,7 +87,7 @@ function tiles() {
   const items = [
     ["Live closure areas (NGA warnings, NOTAMs, TFRs; Orbit counts warnings)", (snap.areas || []).filter((a) => !a.off_live).length],
     ["FAA space-operations TFRs", (snap.tfr || []).length],
-    ["Scheduled launches, 14 days", ((snap.orbit || {}).upcoming || []).length],
+    ["Scheduled launches, 14 days", upcomingRows().length],
     ["Coincidences: time / time and place / grouped", `${lv.time || 0} / ${lv["time and place"] || 0} / ${lv.grouped || 0}`],
     [`Launches since ${(ix.ledger_since || "2012").slice(0, 4)}`, ix.records.filter((r) => r.status === "launched" && (r.time || "") >= (ix.ledger_since || "2012")).length],
     ["Recurring drop zones", pat.recurring.length],
@@ -88,7 +96,7 @@ function tiles() {
   $("asof").textContent = "Live areas read " + fmt(snap.generated_at) + ".";
   // Today's reading (tic-shell): this run's counts. A closure announces intent, so a coincidence is only that.
   const num = (v) => el("b", "", String(v));
-  const areas = (snap.areas || []).filter((a) => !a.off_live).length, tfr = (snap.tfr || []).length, up = ((snap.orbit || {}).upcoming || []).length, both = lv["time and place"] || 0;
+  const areas = (snap.areas || []).filter((a) => !a.off_live).length, tfr = (snap.tfr || []).length, up = upcomingRows().length, both = lv["time and place"] || 0;
   $("reading").replaceChildren(el("span", "tic-reading-k", "Today\u2019s reading"),
     num(areas), ` live closure area${areas === 1 ? "" : "s"}, `, num(tfr), ` FAA space-operations TFR${tfr === 1 ? "" : "s"} and `,
     num(up), ` launch${up === 1 ? "" : "es"} scheduled in the next 14 days. `, num(both),
@@ -96,31 +104,61 @@ function tiles() {
 }
 
 // NOTAMs whose text says they are not a launch (nms.off_live: exercises, airdrops, missile firings...) are areas with
-// `off_live`. They match no launch, and the map and the area list leave them out until the viewer turns them on.
-let showOff = false;
+// `off_live`. They match no launch, and the map and the area list leave them out until the viewer turns them on
+// ("off" in the layer choice). The layer choice (layers.js) decides what else the map draws; the lists stay complete.
+let lay = LY.parse("");
+const showOff = () => lay.show.includes("off");
+const nowIso = () => new Date().toISOString();
+const STACK_KM = 5;
 function liveModel() {
-  const live = { type: "FeatureCollection", features: [] };
+  const now = nowIso(), fc = () => ({ type: "FeatureCollection", features: [] });
+  const live = fc(), paths = fc(), pads = fc(), recent = fc(), marks = [];
   const tied = LP.tiedAreas(upcomingRecs());
+  let areasAll = 0;
   (snap.areas || []).forEach((a, i) => {
     const key = "live:" + (a.key || a.id) + ":" + i;
     const on = tied.get(i) || [];
     byKey.set(key, { kind: "live", a, launches: on });
-    if (a.off_live && !showOff) return;
+    if (!a.off_live || showOff()) areasAll += 1;
+    if (!LY.areaShown(a, on, lay, now)) return;
     live.features.push(poly(a.ring, { key, tied: on.length ? 1 : 0, group: on.length ? group(on[0].actor) : a.source === "faa-tfr" ? "us" : "other" }));
   });
-  const paths = { type: "FeatureCollection", features: LP.livePathRecords(upcomingRecs()).map((r) => {
+  LP.livePathRecords(upcomingRecs()).forEach((r) => {
     const key = "path:" + r.id;
     byKey.set(key, { kind: "launch", r });
-    return { type: "Feature", properties: { key, group: group(r.actor) }, geometry: { type: "LineString", coordinates: N.estimatedLine(r.pad, r.path) } };
-  }) };
-  const pads = { type: "FeatureCollection", features: [] };
-  ((snap.orbit || {}).upcoming || []).forEach((u) => {
+    if (!lay.show.includes("paths") || !LY.launchShown(r.actor, r.time, lay, now, r.net_precision)) return;
+    paths.features.push({ type: "Feature", properties: { key, group: group(r.actor) }, geometry: { type: "LineString", coordinates: N.estimatedLine(r.pad, r.path) } });
+  });
+  const ups = upcomingRows();
+  let launchesShown = 0;
+  ups.forEach((u) => {
+    const r = upcomingRecs().find((x) => x.ll2 === u.id) || null, cc = (r && r.actor) || (u.provider_countries || [])[0];
+    const shown = LY.launchShown(cc, u.net, lay, now, u.net_precision);
+    if (shown) launchesShown += 1;
     if (u.lat === null || u.lat === undefined) return;
     const key = "pad:" + u.id;
-    byKey.set(key, { kind: "pad", u, r: upcomingRecs().find((x) => x.ll2 === u.id) || null });
-    pads.features.push({ type: "Feature", properties: { key, group: group((u.provider_countries || [])[0]) }, geometry: { type: "Point", coordinates: [u.lon, u.lat] } });
+    byKey.set(key, { kind: "pad", u, r });
+    if (!lay.show.includes("pads") || !shown) return;
+    marks.push({ key, kind: "pad", group: group(cc), at: [u.lon, u.lat] });
   });
-  return { live, paths, pads };
+  LP.pastWeek(ix.records, snap.generated_at).forEach((r) => {
+    if (!Array.isArray(r.pad)) return;
+    const key = "recent:" + r.id;
+    byKey.set(key, { kind: "recent", r });
+    if (!LY.recentShown(r, lay)) return;
+    marks.push({ key, kind: "recent", group: group(r.actor), at: r.pad });
+  });
+  // Markers within STACK_KM of each other (two launches from one pad, or a past-week launch from a scheduled pad)
+  // are drawn as one, so none hides another: a ring when one is scheduled, with a dot inside when one has launched,
+  // and the card lists each.
+  LY.stacks(marks, STACK_KM).forEach((s, n) => {
+    const pad = s.find((m) => m.kind === "pad"), first = pad || s[0];
+    let key = first.key;
+    if (s.length > 1) { key = "stack:" + n; byKey.set(key, { kind: "stack", keys: s.map((m) => m.key) }); }
+    const f = { type: "Feature", properties: { key, group: first.group, recent: s.some((m) => m.kind === "recent") ? 1 : 0 }, geometry: { type: "Point", coordinates: first.at } };
+    (pad ? pads : recent).features.push(f);
+  });
+  return { live, paths, pads, recent, counts: [live.features.length, areasAll, launchesShown, ups.length] };
 }
 
 const SRC_LABEL = { "faa-tfr": "FAA TFR", "faa-nms": "NOTAM (FAA NMS-API)", "cordon-navwarn": "NGA navigational warning (via Cordon)" };
@@ -175,10 +213,10 @@ function liveTables() {
     srcLabel(a), a.key || a.id, (a.off_live ? `Not a launch (${a.off_live}): ` : "") + (a.label || (a.regions || []).join(", ") || ""),
     ((a.windows || []).slice(0, 2).map((w) => span(w.start, w.end)).join("; ") + ((a.windows || []).length > 2 ? ` and ${(a.windows.length - 2)} more` : "") || "see the notice")
       + (a.expect ? "; " + expectText(a.expect) : "")] }));
-  const off = (snap.areas || []).filter((a) => a.off_live).length, shown = rows.filter((r) => showOff || !r.a.off_live);
+  const off = (snap.areas || []).filter((a) => a.off_live).length, shown = rows.filter((r) => showOff() || !r.a.off_live);
   $("off-count").textContent = `(${off})`;
   put($("area-table"), shown.length ? table(["Source", "Notice", "Where", "Windows"], shown, (r) => pickLive(r.key)) : muted("No live areas."));
-  if (off && !showOff) $("area-table").append(muted(`${off} non-launch NOTAM${off === 1 ? " is" : "s are"} hidden (exercises, airdrops, missile firings and the like): turn them on with "Show non-launch NOTAMs" on the map.`));
+  if (off && !showOff()) $("area-table").append(muted(`${off} non-launch NOTAM${off === 1 ? " is" : "s are"} hidden (exercises, airdrops, missile firings and the like): turn them on with "Non-launch NOTAMs" under the map's layers and filters.`));
   unlistedTable();
   pastWeek();
   folds("live");
@@ -214,7 +252,7 @@ function pastWeek() {
 function related() {
   const box = $("tic-related");
   if (!box || !window.TicRelated) return;
-  const up = (snap.orbit || {}).upcoming || [];
+  const up = upcomingRows();
   const matched = new Set((snap.matches || []).map((m) => m.launch));
   const score = new Map();
   up.forEach((u, i) => {
@@ -237,8 +275,24 @@ function pickLive(key) {
   if (x.kind === "launch" || (x.kind === "pad" && x.r)) { launchCard(x.r); return; }
   openCard = null;
   const box = $("map-info"); box.textContent = "";
+  if (x.kind === "recent") {
+    const r = x.r, a = el("a", "", "Open in History"); a.href = LP.historyHref(r);
+    box.append(el("b", "", r.label || r.payload || r.id), document.createTextNode(` · launched ${fmt(r.time)} · ${[r.pad_name, r.site].filter(Boolean).join(", ")} · `),
+      mark(r.actor), document.createTextNode(" · "), a);
+    return;
+  }
+  if (x.kind === "stack") {
+    box.append(el("b", "", `${x.keys.length} launches at this pad`));
+    x.keys.forEach((k) => {
+      const y = byKey.get(k); if (!y) return;
+      const b = el("button", "linkish", y.kind === "recent" ? (y.r.label || y.r.payload || y.r.id) : ((y.r && y.r.label) || y.u.name)); b.type = "button";
+      b.addEventListener("click", () => pickLive(k));
+      box.append(el("br"), document.createTextNode(y.kind === "recent" ? `Launched ${fmt(y.r.time)}: ` : `Scheduled, NET ${netText(y.u.net, y.u.net_precision)}: `), b);
+    });
+    return;
+  }
   if (x.kind === "pad") {
-    box.append(el("b", "", x.u.name), document.createTextNode(` · NET ${fmt(x.u.net)} · ${x.u.pad || ""}, ${x.u.location || ""} · `), mark((x.u.provider_countries || [])[0]));
+    box.append(el("b", "", x.u.name), document.createTextNode(` · NET ${netText(x.u.net, x.u.net_precision)} · ${x.u.pad || ""}, ${x.u.location || ""} · `), mark((x.u.provider_countries || [])[0]));
     return;
   }
   const a = x.a;
@@ -262,7 +316,7 @@ function launchCard(r, fit = true) {
   card.appendChild(head);
   fact("Vehicle", r.ll2_vehicle || r.vehicle);
   fact("Payload", r.payload);
-  fact("NET", fmt(r.time) + (r.net_precision && !["Second", "Minute"].includes(r.net_precision) ? ` (to the ${r.net_precision.toLowerCase()})` : "") + (r.ll2_status ? ` · ${r.ll2_status}` : ""));
+  fact("NET", netText(r.time, r.net_precision) + (r.ll2_status ? ` · ${r.ll2_status}` : ""));
   if (u.window_start && u.window_end) fact("Window", span(u.window_start, u.window_end));
   fact("Pad", [r.pad_name, r.site].filter(Boolean).join(", "));
   const cl = (r.live || {}).closures || [];
@@ -293,6 +347,54 @@ function launchCard(r, fit = true) {
   }
 }
 
+/* The upcoming-launch board (board.js): the map's country and how-far-ahead choices apply. */
+function board() {
+  const now = nowIso(), all = BD.boardRows(ix.records, sched), rows = all.filter((x) => LY.launchShown(x.actor, x.net, lay, now, x.precision));
+  const moved = (x) => {
+    const s = el("span", "", BD.moveText(x));
+    if (x.lastMove) s.append(el("br"), el("span", "muted small", `Seen ${fmt(x.lastMove.at)}: from ${fmt(x.lastMove.from)} to ${fmt(x.lastMove.to)}`));
+    return s;
+  };
+  put($("board-table"), rows.length ? table(["NET", "Launch", "Country", "Site", "Status", "NET moved", "Live closures"],
+    rows.map((x) => ({ x, cells: [netText(x.net, x.precision), x.r.label, mark(x.actor), x.site, x.status, moved(x), BD.closureText(x)] })),
+    (row) => { launchCard(row.x.r); const c = $("map-card"); if (c.scrollIntoView) c.scrollIntoView({ block: "start" }); })
+    : muted(all.length ? "No scheduled launch matches the map's country and how-far-ahead choices." : "No launch is scheduled in the next 14 days."));
+  if (rows.length && rows.length < all.length) $("board-table").append(muted(`${all.length - rows.length} more hidden by the map's country and how-far-ahead choices.`));
+}
+
+/* Layers and filters (layers.js): the controls show `lay`; a change redraws the map and the board and rewrites the
+   Live tab's address. A bare #live (the tab link) keeps the current choice. */
+function layersUi() {
+  const box = $("layers");
+  box.querySelectorAll("[data-layer]").forEach((i) => { i.checked = lay.show.includes(i.dataset.layer); });
+  box.querySelectorAll("[data-src]").forEach((i) => { i.checked = lay.src.includes(i.dataset.src); });
+  box.querySelectorAll("[data-cc]").forEach((i) => { i.checked = lay.cc.includes(i.dataset.cc); });
+  $("layers-within").value = String(lay.within);
+  if (LY.query(lay)) box.open = true;
+}
+function layersRead() {
+  const box = $("layers"), on = (attr) => [...box.querySelectorAll(`[data-${attr}]`)].filter((i) => i.checked).map((i) => i.dataset[attr]);
+  return { show: on("layer"), src: on("src"), cc: on("cc"), within: Number($("layers-within").value) || 0 };
+}
+function writeAddress() {
+  if (document.body.dataset.tab !== "live") return;
+  const q = LY.query(lay), want = "#live" + (q ? "?" + q : "");
+  if (location.hash === want || (!q && !location.hash)) return;
+  try { history.replaceState(null, "", want); } catch { /* address not kept; the view still changes */ }
+}
+const zonesFc = () => (lay.show.includes("zones") ? { type: "FeatureCollection", features: pat.recurring.map((z, i) => poly(z.ring, { key: "zone:" + i })) } : null);
+let zonesDrawn = false;
+function redraw() {
+  liveM = liveModel();
+  ["live", "pads", "recent"].forEach((k) => map.set(k, liveM[k]));
+  map.set("paths", document.body.dataset.tab === "live" ? liveM.paths : null);
+  const z = lay.show.includes("zones");
+  if (z || zonesDrawn) map.set("zones", zonesFc());
+  zonesDrawn = z;
+  $("layers-sum").textContent = "· " + LY.summary(...liveM.counts);
+  liveTables(); board();
+}
+
 /* ---------- patterns ---------- */
 function patterns() {
   put($("corridor-table"), table(["Pad", { label: "Events", num: true }, "Azimuth bands: events (implied inclination)"],
@@ -304,6 +406,7 @@ function patterns() {
     map.set("zones", { type: "FeatureCollection", features: [poly(r.z.ring, { key: "zone" })] });
     map.fit({ type: "FeatureCollection", features: [poly(r.z.ring, {})] });
     $("show-zones").checked = false;
+    lay = { ...lay, show: lay.show.filter((x) => x !== "zones") }; zonesDrawn = false;
   }));
   const years = [...new Set(pat.firs.flatMap((f) => Object.keys(f.by_year)))].sort();
   put($("fir-table"), table(["FIR", "State", ...years.map((y) => ({ label: y, num: true })), { label: "Total", num: true }],
@@ -313,9 +416,6 @@ function patterns() {
   put($("hour-table"), table(["Country", "00–05", "06–11", "12–17", "18–23"], Object.entries(pat.hours).map(([a, h]) => ({ cells: [
     a === "other" ? "Other" : mark(a), ...[0, 6, 12, 18].map((s) => h.slice(s, s + 6).reduce((x, y) => x + y, 0))] }))));
   folds("patterns");
-  $("show-zones").addEventListener("change", (ev) => {
-    map.set("zones", ev.target.checked ? { type: "FeatureCollection", features: pat.recurring.map((z, i) => poly(z.ring, { key: "zone:" + i })) } : null);
-  });
 }
 
 /* ---------- paste ---------- */
@@ -519,6 +619,11 @@ async function showTab() {
     const a = $("tab-" + t); a.setAttribute("aria-selected", t === tab ? "true" : "false");
     if (t === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
+  if (tab === "live") {
+    const q = location.hash.includes("?") ? location.hash.slice(location.hash.indexOf("?") + 1) : null;
+    if (q !== null && q !== LY.query(lay)) { lay = LY.parse(q); if (map && liveM) { layersUi(); redraw(); } }
+    writeAddress();
+  }
   if (MAP_TABS[tab]) {
     const card = $("map-card"), panel = $(tab);
     if (tab === "live") { if (card.parentElement !== panel) panel.querySelector(".hero").after(card); }
@@ -533,9 +638,14 @@ async function showTab() {
 }
 
 async function main() {
-  [snap, hist, pat, srcs, ix] = await Promise.all(["data/snapshot.json", "data/history.json", "data/patterns.json", "data/sources.json", "data/launches.json"].map(getJSON));
+  // data/upcoming.json is the schedule's own record, for the board's NET moves. Without it the board still lists
+  // every launch.
+  [snap, hist, pat, srcs, ix, sched] = await Promise.all([...["data/snapshot.json", "data/history.json", "data/patterns.json", "data/sources.json", "data/launches.json"].map(getJSON),
+    getJSON("data/upcoming.json").then((d) => d.records || []).catch(() => [])]);
+  const hq = location.hash.match(/^#live\?(.*)$/);
+  if (hq) lay = LY.parse(hq[1]);
   if (T && T.mountSettings) T.mountSettings($("time-settings"));
-  tiles(); liveTables(); sourcesBox(); related();
+  tiles(); liveTables(); board(); sourcesBox(); related();
   // Address changes (tab links, a pasted or hand-edited History address) are taken from the start: waiting for the
   // maps to load left every tab link dead until then, and for good where a map never loads.
   window.addEventListener("hashchange", () => {
@@ -545,19 +655,18 @@ async function main() {
   const shown = showTab();
   const model = liveM = liveModel();
   try {
-    map = await createMap($("map"), model, { onPick: (k) => { if (k.startsWith("live:") || k.startsWith("pad:") || k.startsWith("path:")) pickLive(k); } });
+    map = await createMap($("map"), model, { onPick: (k) => { if (/^(live|pad|path|recent|stack):/.test(k)) pickLive(k); } });
   } catch (err) { // no map (no WebGL 2, or the map failed): every tab still works, and every area is in the tables
     $("map").textContent = "The map could not load: " + err.message + ". Every area and launch is listed on this page.";
     map = { set() {}, fit() {}, pickPoint() {}, resize() {} };
   }
   if (document.body.dataset.tab !== "live") map.set("paths", null);
   patterns(); paste(); trajSetup(); savedSetup();
-  $("show-off").addEventListener("change", (ev) => {
-    showOff = ev.target.checked;
-    liveM = liveModel(); map.set("live", liveM.live); liveTables();
-  });
+  layersUi(); redraw();
+  $("layers").addEventListener("change", () => { lay = layersRead(); redraw(); writeAddress(); });
+  $("layers-reset").addEventListener("click", () => { lay = LY.parse(""); layersUi(); redraw(); writeAddress(); });
   map.resize();
   await shown;
-  if (T && T.onChange) T.onChange(() => { tiles(); liveTables(); sourcesBox(); if (openCard) launchCard(openCard, false); });
+  if (T && T.onChange) T.onChange(() => { tiles(); liveTables(); board(); sourcesBox(); if (openCard) launchCard(openCard, false); });
 }
 main().catch((err) => { document.querySelector("main").prepend(el("p", "notice", "Launch could not load its data: " + err.message)); });
