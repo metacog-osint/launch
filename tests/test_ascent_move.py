@@ -292,6 +292,35 @@ class Wiring(unittest.TestCase):
             self.assertIsNone(led3)
             self.assertEqual(st3["status"], "failed")
 
+    def test_held_ledger_does_not_read_orbits(self):
+        """Orbit's ledger is frozen: once Launch holds its own, a run makes no request for Orbit's copy."""
+        orbit = {"schema": "orbit-ledger/1", "start": ll2ledger.START, "updated_at": "t0", "caught_up": True,
+                 "launches": [ll2ledger._clean(schedule.ll2_row(rec(1, day(1))))], "changes": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            routes = {ll2ledger.ORBIT_LEDGER: json.dumps(orbit).encode(),
+                      ll2ledger.PREVIOUS: page(rec(1, day(1)), rec(2, day(2)))}
+            asked = []
+            base = self.getter(routes)
+
+            def get(url, timeout=120):
+                asked.append(url)
+                return base(url, timeout)
+            cli.update_ll2_ledger(d, get)                              # first run: seeded from Orbit's copy
+            self.assertIn(ll2ledger.ORBIT_LEDGER, asked)
+            asked.clear()
+            led, odoc, st = cli.update_ll2_ledger(d, get)
+            self.assertEqual(st["status"], "ok")
+            self.assertIsNone(odoc)
+            self.assertNotIn(ll2ledger.ORBIT_LEDGER, asked)
+
+    def test_orbit_read_keeps_gcat_launches_only(self):
+        body = json.dumps({"generated_at": "g", "upcoming": [{"id": "x"}], "lanes": {"upcoming": {"fetched_at": "f"}},
+                           "launches": [{"launch_tag": "2026-266", "payloads": [{"name": "A", "jcat": "S1", "x": 1}]}]})
+        o = cli.live.orbit_read(body.encode())
+        self.assertEqual(sorted(o), ["generated_at", "launches"])
+        self.assertEqual(o["launches"][0]["payloads"], [{"name": "A", "jcat": "S1"}])
+
     def test_schedule_store_and_snapshot_view(self):
         rows = [{k: v for k, v in r.items() if k != "mission_description"}
                 for r in schedule.ll2_parse((FIX / "ll2_upcoming.json").read_bytes())]
@@ -430,3 +459,23 @@ class Feed(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SiteReadsSchedule(unittest.TestCase):
+    """Orbit no longer publishes `upcoming` (Ascent step 4), so the page must count and draw scheduled launches from
+    Launch's own schedule, the same rows ll2_upcoming() matches. Reading snap.orbit.upcoming showed 0 scheduled
+    launches beside a list of coincidences with scheduled launches (suite audit, 26 Nov 2026)."""
+
+    APP = (ROOT / "site_src" / "app.js").read_text(encoding="utf-8")
+
+    def test_no_read_of_orbit_upcoming(self):
+        self.assertNotIn("(snap.orbit || {}).upcoming", self.APP)
+
+    def test_rows_from_schedule_with_ll2_ids(self):
+        self.assertIn("(snap.schedule || {}).records", self.APP)
+        self.assertIn("id: r.refs.ll2", self.APP)
+
+    def test_same_rows_as_the_matcher(self):
+        snap = {"schedule": {"records": [{"id": "a", "name": "A", "refs": {"ll2": "u1"}, "links": {"ll2": "x"}},
+                                         {"id": "b", "name": "B", "refs": {}}]}}
+        self.assertEqual([u["id"] for u in cli.ll2_upcoming(snap)], ["u1"])

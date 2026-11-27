@@ -56,6 +56,13 @@ function table(head, rows, onRow) {
 }
 const put = (box, node) => { box.textContent = ""; box.appendChild(node); };
 const muted = (t) => el("p", "muted small", t);
+// Orbit (orbit.theintelligence.company) holds what launches put in orbit: its launch rows cover GCAT's last 7 days;
+// its object search finds every piece of a launch by its COSPAR launch id (GCAT's tag), any year.
+const ORBIT = {
+  site: "https://orbit.theintelligence.company/",
+  launchRow: (tag) => ORBIT.site + "launches.html#launch-" + encodeURIComponent(String(tag).replace(/ /g, "-")),
+  objects: (tag) => ORBIT.site + "?q=" + encodeURIComponent(tag) + "#obj-search",
+};
 // Long tables fold with the hub's tic-fold.js at every width: the first 10 rows on a phone and 15 wider (each table
 // lists the soonest or largest first), then "Show all"; a find box over 25 or more. It re-applies when a table is
 // redrawn. The History tab's list has its own paging and is left.
@@ -70,7 +77,11 @@ async function getJSON(p) { const r = await fetch(p, { cache: "no-cache" }); if 
 let snap, hist, pat, srcs, ix, map, H = null, Hstart = null, liveM = null, openCard = null;
 const byKey = new Map();
 const upcomingRecs = () => ix.records.filter((r) => r.status === "upcoming");
-const scheduled = (r) => ((snap.orbit || {}).upcoming || []).find((u) => u.id === r.ll2) || null;
+// Scheduled launches Launch Library 2 lists, from Launch's own schedule (snap.schedule.records), in the shape Orbit's
+// `upcoming` lane had: `id` is the LL2 uuid. The same rows tools/launch.py ll2_upcoming() matches against the areas.
+// Orbit publishes no schedule; Launch reads Launch Library 2 itself.
+const upcomingRows = () => ((snap.schedule || {}).records || []).filter((r) => (r.refs || {}).ll2).map((r) => ({ ...r, id: r.refs.ll2, ll2_url: (r.links || {}).ll2 }));
+const scheduled = (r) => upcomingRows().find((u) => u.id === r.ll2) || null;
 
 function tiles() {
   const box = $("tiles"); box.textContent = "";
@@ -79,7 +90,7 @@ function tiles() {
   const items = [
     ["Live closure areas (NGA warnings, NOTAMs, TFRs; Orbit counts warnings)", (snap.areas || []).filter((a) => !a.off_live).length],
     ["FAA space-operations TFRs", (snap.tfr || []).length],
-    ["Scheduled launches, 14 days", ((snap.orbit || {}).upcoming || []).length],
+    ["Scheduled launches, 14 days", upcomingRows().length],
     ["Coincidences: time / time and place / grouped", `${lv.time || 0} / ${lv["time and place"] || 0} / ${lv.grouped || 0}`],
     [`Launches since ${(ix.ledger_since || "2012").slice(0, 4)}`, ix.records.filter((r) => r.status === "launched" && (r.time || "") >= (ix.ledger_since || "2012")).length],
     ["Recurring drop zones", pat.recurring.length],
@@ -88,7 +99,7 @@ function tiles() {
   $("asof").textContent = "Live areas read " + fmt(snap.generated_at) + ".";
   // Today's reading (tic-shell): this run's counts. A closure announces intent, so a coincidence is only that.
   const num = (v) => el("b", "", String(v));
-  const areas = (snap.areas || []).filter((a) => !a.off_live).length, tfr = (snap.tfr || []).length, up = ((snap.orbit || {}).upcoming || []).length, both = lv["time and place"] || 0;
+  const areas = (snap.areas || []).filter((a) => !a.off_live).length, tfr = (snap.tfr || []).length, up = upcomingRows().length, both = lv["time and place"] || 0;
   $("reading").replaceChildren(el("span", "tic-reading-k", "Today\u2019s reading"),
     num(areas), ` live closure area${areas === 1 ? "" : "s"}, `, num(tfr), ` FAA space-operations TFR${tfr === 1 ? "" : "s"} and `,
     num(up), ` launch${up === 1 ? "" : "es"} scheduled in the next 14 days. `, num(both),
@@ -114,7 +125,7 @@ function liveModel() {
     return { type: "Feature", properties: { key, group: group(r.actor) }, geometry: { type: "LineString", coordinates: N.estimatedLine(r.pad, r.path) } };
   }) };
   const pads = { type: "FeatureCollection", features: [] };
-  ((snap.orbit || {}).upcoming || []).forEach((u) => {
+  upcomingRows().forEach((u) => {
     if (u.lat === null || u.lat === undefined) return;
     const key = "pad:" + u.id;
     byKey.set(key, { kind: "pad", u, r: upcomingRecs().find((x) => x.ll2 === u.id) || null });
@@ -204,8 +215,16 @@ function pastWeek() {
     if (r.provisional) { s.append(" "); s.append(el("span", "badge", "provisional")); }
     return s;
   };
-  put($("past-table"), rows.length ? table(["Launched", "Launch", "Site", "Country", "Orbit", "Outcome"],
-    rows.map((r) => ({ cells: [fmt(r.time), name(r), r.site || "", mark(r.actor), r.orbit || "", result(r)] })))
+  // Payloads as GCAT lists them; what each reached, and its path, is Orbit's (its launch row, by GCAT tag).
+  const payloads = (r) => {
+    const p = r.payloads || {}, box = el("span", "");
+    if (!p.count) { box.textContent = r.gcat ? "Not yet cataloged" : ""; return box; }
+    box.textContent = p.names.slice(0, 3).join(", ") + (p.count > 3 ? ` and ${p.count - 3} more` : "") + " ";
+    if (r.gcat) { const a = el("a", "", "On Orbit"); a.href = ORBIT.launchRow(r.gcat); a.rel = "noopener"; box.append(a); }
+    return box;
+  };
+  put($("past-table"), rows.length ? table(["Launched", "Launch", "Site", "Country", "Orbit", "Payloads", "Outcome"],
+    rows.map((r) => ({ cells: [fmt(r.time), name(r), r.site || "", mark(r.actor), r.orbit || "", payloads(r), result(r)] })))
     : muted("No launch is recorded in the past seven days."));
 }
 
@@ -214,7 +233,7 @@ function pastWeek() {
 function related() {
   const box = $("tic-related");
   if (!box || !window.TicRelated) return;
-  const up = (snap.orbit || {}).upcoming || [];
+  const up = upcomingRows();
   const matched = new Set((snap.matches || []).map((m) => m.launch));
   const score = new Map();
   up.forEach((u, i) => {

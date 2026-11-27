@@ -177,21 +177,16 @@ def tfr_detail(body: bytes) -> dict:
 # ---------- Orbit ----------
 
 def orbit_read(body: bytes) -> dict:
+    """Orbit's GCAT launches (Orbit keeps 30 days): enough of each for matching and for the history ledger. Orbit
+    publishes no schedule; scheduled launches are Launch's own (launch/schedule.py)."""
     s = json.loads(body)
-    up = [{k: u.get(k) for k in ("id", "name", "net", "net_precision", "window_start", "window_end", "status",
-                                 "provider", "provider_countries", "vehicle", "mission", "mission_type", "orbit", "pad",
-                                 "location", "lat", "lon", "pad_country", "ll2_url", "last_updated")}
-          for u in s.get("upcoming") or []]
-    # GCAT launches (Orbit keeps 30 days): enough of each for matching and for the history ledger.
     launches = [{k: l.get(k) for k in ("launch_tag", "date", "time", "time_uncertain", "vehicle", "variant", "site_code",
                                        "site", "pad", "flight", "mission", "agency", "launchers", "category", "kind",
                                        "outcome", "payloads_cataloged")}
                 | {"payloads": [{k: p.get(k) for k in ("name", "state", "owner", "op_orbit", "inc", "jcat") if k in p}
                                 for p in l.get("payloads") or []]}
                 for l in s.get("launches") or []]
-    # When Orbit read LL2 (its upcoming lane), for the side-by-side check with Launch's own read (launch/compare.py).
-    read = ((s.get("lanes") or {}).get("upcoming") or {}).get("fetched_at")
-    return {"generated_at": s.get("generated_at"), "upcoming": up, "upcoming_read_at": read, "launches": launches}
+    return {"generated_at": s.get("generated_at"), "launches": launches}
 
 
 # ---------- Cordon ----------
