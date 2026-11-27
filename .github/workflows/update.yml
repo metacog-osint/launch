@@ -72,8 +72,10 @@ jobs:
       # The private archive's lane `state` holds the state of every run whose collect succeeded (the last step). The
       # archive's newest copy can be older than release `ledger` (a run whose archive step failed after it uploaded
       # the release), so it fills only what neither the cache nor the release can give:
-      #   - the cache's own paths (snapshot.json, ledger.json, gnss/) where data/ has none, which is a cache miss.
-      #     collect unions the ledger with the release and published copies, the newer record winning;
+      #   - the cache's snapshot.json and ledger.json where data/ has none, which is a cache miss. collect unions the
+      #     ledger with the release and published copies, the newer record winning. The cache's gnss/ is never
+      #     filled: gnss.restore rebuilds it from the published site, and stops the run when there is no local copy
+      #     and the site is unreadable, which an older archived copy would switch off;
       #   - a store release `ledger` holds (upcoming store, LL2 ledger, NMS closure ledger, comparison) only when the
       #     release was listed and lacks it. When the release cannot be listed, none is filled, so collect's guard
       #     (no local copy and an unreadable release stops the run) still holds and an older copy never goes over a
@@ -89,7 +91,7 @@ jobs:
           CACHED: ${{ steps.state.outputs.cache-matched-key }}
         run: |
           fill=""
-          for f in snapshot.json ledger.json gnss; do
+          for f in snapshot.json ledger.json; do
             [ -e "data/$f" ] || fill="$fill $f"
           done
           if have=$(gh release view ledger --json assets --jq '.assets[].name'); then

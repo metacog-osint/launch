@@ -452,11 +452,14 @@ class TestStateFromTheArchive(unittest.TestCase):
         self.assertEqual(arg(call, "--dest"), ["$RUNNER_TEMP/archive-state"])        # not data/ itself
         self.assertNotIn("exit 1", text)
         self.assertNotIn("::error::", text)
-        # What it may fill: the Actions cache's own paths, and the stores collect reads back from release `ledger`
-        # (data/ledger.json, filed there as launch-ledger.json, is a cache path).
+        # What it may fill: the Actions cache's own paths except gnss/, and the stores collect reads back from release
+        # `ledger` (data/ledger.json, filed there as launch-ledger.json, is a cache path). gnss/ never: with a local
+        # copy, gnss.restore no longer stops a run whose site is unreadable, and publishes the older copy instead.
         cached, released = re.findall(r"for f in ([^;]+); do", text)
         cache_paths = re.findall(r"(?m)^\s{12}data/(\S+)\s*$", STEPS["Keep this run's state for the next run"])
-        self.assertEqual(cached.split(), cache_paths)
+        self.assertIn("gnss", cache_paths)
+        self.assertNotIn("gnss", " ".join(cached.split() + released.split()))
+        self.assertEqual(cached.split(), [p for p in cache_paths if p != "gnss"])
         self.assertEqual(set(released.split()), {cli.STORE["upcoming"], cli.STORE["ll2"], cli.STORE["compare"],
                                                  cli.RELEASE_COPY["closures"]})
         self.assertNotIn("2>/dev/null || true", text)          # a failed listing is not read as "the release is empty"
@@ -483,17 +486,20 @@ class TestStateFromTheArchive(unittest.TestCase):
             runner_temp = td / "runner-temp"
             argv = [t.replace("$RUNNER_TEMP", str(runner_temp)) for t in call]
             self.assertEqual(run_archive(argv, fresh, td / "store"), 0)
-            names = sorted({rel.split("/")[0] for rel in tree(run_root / "data")} - {"raw", "release-copy"})
+            # Every name the step can give (gnss/ is never one; TestFillStepShell checks the step's choice).
+            names = sorted({rel.split("/")[0] for rel in tree(run_root / "data")} - {"raw", "release-copy", "gnss"})
             r = subprocess.run([sys.executable, "-", str(runner_temp / "archive-state"), "data", *names],
                                input=fill_script(), cwd=fresh, capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stderr)
             got = tree(fresh / "data")
             want = {rel: sha for rel, sha in tree(run_root / "data").items()
-                    if not rel.startswith(("raw/", "release-copy/"))}
+                    if not rel.startswith(("raw/", "release-copy/", "gnss/"))}
             self.assertEqual(got.pop("snapshot.json"), hashlib.sha256(b'{"from": "the Actions cache"}\n').hexdigest())
             self.assertEqual(got, {k: v for k, v in want.items() if k != "snapshot.json"})
-            for p in ("ledger.json", "nms-closures.json", "upcoming-store.json", "ll2-ledger.json", "gnss/store.json"):
+            for p in ("ledger.json", "nms-closures.json", "upcoming-store.json", "ll2-ledger.json"):
                 self.assertIn(p, got)
+            self.assertIn("gnss/store.json", tree(runner_temp / "archive-state"))   # restored, and still not copied
+            self.assertFalse(any(p.startswith("gnss/") for p in got))
             self.assertIn(f"{len(got)} files from the private archive", r.stdout)
 
 
@@ -511,7 +517,9 @@ shutil.copytree(os.environ["FAKE_ARCHIVE_SNAPSHOT"], argv[argv.index("--dest") +
 '''
 RELEASE_ALL = ("ascent-compare.json", "launch-ledger.json", "ll2-ledger.json", "nms-closures.json",
                "upcoming-store.json")
-CACHE_FILES = ["gnss/days/2026-11-20.json", "gnss/store.json", "ledger.json", "snapshot.json"]
+CACHE_FILES = ["gnss/days/2026-11-20.json", "gnss/index.json", "gnss/store.json", "ledger.json", "snapshot.json"]
+# What a cache miss fills: the cache's paths except gnss/, which gnss.restore rebuilds from the published site.
+MISS_FILLS = ["ledger.json", "snapshot.json"]
 
 
 def fill_run(run_dir: Path, work: Path, archived: Path, release: list[str] | None, token: str = "archive-token",
@@ -577,9 +585,21 @@ class TestFillStepShell(unittest.TestCase):
 
     def test_cache_miss_fills_only_the_cache_paths_while_the_release_holds_its_stores(self):
         filled, read, _, _ = self.fill(list(RELEASE_ALL))
-        self.assertEqual(filled, CACHE_FILES)            # not the Ascent stores, the NMS ledger or anything else
+        self.assertEqual(filled, MISS_FILLS)       # not gnss/, the Ascent stores, the NMS ledger or anything else
         self.assertIn("restore --program launch --lane state", read)
         self.assertIn("token=archive-token", read)
+
+    def test_cache_miss_never_fills_the_gnss_store(self):
+        # With a local index.json and store.json, gnss.restore reads an unreadable site as "keep the local copy" and
+        # publish writes the index and day files from it: an older archived copy would replace the site's newer set.
+        # Without one, the same run stops (Unreachable). Whatever the release holds, the fill leaves gnss/ alone.
+        for release in (list(RELEASE_ALL), None, []):
+            with self.subTest(release=release):
+                shutil.rmtree(self.run_dir, ignore_errors=True)
+                filled, read, _, _ = self.fill(release)
+                self.assertIn("restore --program launch --lane state", read)    # the archive was read
+                self.assertFalse((self.run_dir / "data" / "gnss").exists(), filled)
+                self.assertFalse(any(p.startswith("gnss/") for p in filled), filled)
 
     def test_release_unreadable_fills_none_of_its_stores(self):
         # A failed listing is not "the release lacks them": collect's guard must still see no local copy.
@@ -590,7 +610,7 @@ class TestFillStepShell(unittest.TestCase):
 
     def test_release_unreadable_and_cache_miss_fills_only_the_cache_paths(self):
         filled, _, _, _ = self.fill(None)
-        self.assertEqual(filled, CACHE_FILES)
+        self.assertEqual(filled, MISS_FILLS)
 
     def test_a_store_the_release_lacks_is_filled(self):
         self.cache_hit()
@@ -601,7 +621,7 @@ class TestFillStepShell(unittest.TestCase):
         (self.run_dir / "data").mkdir(parents=True)
         (self.run_dir / "data" / "snapshot.json").write_text('{"from": "the Actions cache"}\n', encoding="utf-8")
         filled, _, _, _ = self.fill(list(RELEASE_ALL))
-        self.assertEqual(filled, [p for p in CACHE_FILES if p != "snapshot.json"])
+        self.assertEqual(filled, [p for p in MISS_FILLS if p != "snapshot.json"])
         self.assertIn("the Actions cache", (self.run_dir / "data" / "snapshot.json").read_text(encoding="utf-8"))
 
     def test_no_token_or_a_failed_restore_never_fails_the_step(self):
@@ -713,6 +733,21 @@ class TestArchiveOlderThanRelease(unittest.TestCase):
                ["records"]}
         archived = json.loads((self.archived / "upcoming-store.json").read_text(encoding="utf-8"))
         self.assertLessEqual({r["id"] for r in archived["records"]}, got)
+
+    def test_cache_miss_and_site_unreadable_stops_before_the_gnss_files_are_written(self):
+        # The archive holds an older gnss/ (store, index, day files). Were it filled, gnss.restore would read the
+        # site's 502 as "keep the local copy" and publish would write the index and day files from the archive alone.
+        self.assertTrue((self.archived / "gnss" / "index.json").exists())
+        root, net = self.run_case("gnss-site-502", list(RELEASE_ALL), True)
+        self.assertFalse((root / "data" / "gnss").exists(), "gnss/ filled from the older archive")
+
+        def site_down(url: str, timeout: int = 0) -> bytes:
+            if url.startswith(gnss.PUBLISHED):
+                raise urllib.error.HTTPError(url, 502, "Bad Gateway", {}, None)
+            return net(url, timeout)
+        with self.assertRaises(gnss.Unreachable):
+            cli.collect(root, getter=site_down)
+        self.assertFalse((root / "data" / "gnss" / "index.json").exists())
 
 
 # ---------- the deploy step's output gates the site lane ----------
