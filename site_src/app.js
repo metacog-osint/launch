@@ -258,9 +258,10 @@ function pastWeek() {
   // Payloads as GCAT lists them; what each reached, and its path, is Orbit's (its launch row, by GCAT tag).
   const payloads = (r) => {
     const p = r.payloads || {}, box = el("span", "");
-    if (!p.count) { box.textContent = r.gcat ? "Not yet cataloged" : ""; return box; }
+    if (!LP.inOrbit(r)) return box;
+    if (!p.count) { box.textContent = "Not yet cataloged"; return box; }
     box.textContent = p.names.slice(0, 3).join(", ") + (p.count > 3 ? ` and ${p.count - 3} more` : "") + " ";
-    if (r.gcat) { const a = el("a", "", "On Orbit"); a.href = ORBIT.launchRow(r.gcat); a.rel = "noopener"; box.append(a); }
+    { const a = el("a", "", "On Orbit"); a.href = ORBIT.launchRow(r.gcat); a.rel = "noopener"; box.append(a); }
     return box;
   };
   put($("past-table"), rows.length ? table(["Launched", "Launch", "Site", "Country", "Orbit", "Payloads", "Outcome"],

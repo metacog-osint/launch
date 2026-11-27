@@ -59,7 +59,9 @@ history, and says which scheduled launches coincide with them. Observations only
    coordinates or status: a record takes the coordinates of a Launch Library 2 launch at the same place, else none,
    and only Launch Library 2's records go to matching. Every copy says "Data by RocketLaunch.Live".
    **What a launch put in orbit** is Orbit's: Past 7 days and each orbital record in History link to Orbit by GCAT's
-   tag (the launch's row on Orbit's launches page, and Orbit's object search for every piece of the launch).
+   tag (the launch's row on Orbit's launches page, and Orbit's object search, which lists the first 20 pieces with a
+   count). Only launches of the kind Orbital get the payloads cell and the links; a missile test or suborbital flight
+   puts nothing in orbit.
 6. **Not for navigation.**
 
 ## Feed contract revision 2.1 (23 Nov 2026)
