@@ -11,6 +11,8 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
+import gh_api
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -32,13 +34,16 @@ def server_error(url):
 
 
 class LedgerReleaseGuard(unittest.TestCase):
-    def run_ledger(self, release, site, cached=None, dated=not_found):
+    def run_ledger(self, release, site, cached=None, dated=not_found, listed=()):
         """release / site / dated: a ledger dict to serve, or a function url -> exception to raise. `dated` may also
-        be {day: ledger}, the dated copies by day (others 404)."""
+        be {day: ledger}, the dated copies by day (others 404). listed: the asset names the GitHub API lists for
+        every release (default none, so a 404 is no copy yet)."""
         self.urls = []
 
         def get(url, timeout=0):
             self.urls.append(url)
+            if (api := gh_api.answer(url, listed)) is not None:
+                return api
             if "/download/ledger-" in url:
                 src = dated
                 if isinstance(src, dict) and "launches" not in src:
@@ -119,6 +124,64 @@ class LedgerReleaseGuard(unittest.TestCase):
         st, led = self.run_ledger(not_found, not_found)
         self.assertEqual((st["published"], st["release"], st["dated"]), (False, False, None))
         self.assertEqual([r["id"] for r in led["launches"]], ["gcat:2026-001"])
+
+    def test_private_repo_404_with_the_asset_listed_stops(self):
+        # A private repository's download URLs answer 404 to a read without a token; the listing (read with the
+        # Actions token) shows the copies are there. That is unreadable, not a first run.
+        listed = ["launch-ledger.json"] + [f"launch-ledger-2026-11-{d:02d}.json" for d in range(21, 28)]
+        with self.assertRaisesRegex(RuntimeError, "release copy is unreadable"):
+            self.run_ledger(not_found, not_found, cached={"launches": [rec(1)]}, listed=listed)
+
+
+class ReleaseGet(unittest.TestCase):
+    """release_get: a download 404 is no copy only when the GitHub API confirms the asset is absent."""
+
+    def setUp(self):
+        cli._LISTED.clear()
+
+    def read(self, api):
+        def get(url, timeout=0):
+            if url.startswith(gh_api.API):
+                out = api(url)
+                if isinstance(out, Exception):
+                    raise out
+                return out
+            raise not_found(url)
+        with tempfile.TemporaryDirectory() as tmp:
+            cli.release_get("ledger", "upcoming-store.json", Path(tmp), get)
+
+    def test_listed_without_the_asset_is_no_copy(self):
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.read(lambda url: gh_api.answer(url, ["ll2-ledger.json"]))
+        self.assertEqual(cm.exception.code, 404)
+
+    def test_repository_seen_without_the_release_is_no_copy(self):
+        def api(url):
+            return not_found(url) if "/releases/tags/" in url else gh_api.answer(url)
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.read(api)
+        self.assertEqual(cm.exception.code, 404)
+
+    def test_listed_with_the_asset_is_unreadable(self):
+        with self.assertRaisesRegex(cli.ReleaseUnreadable, "lists upcoming-store.json"):
+            self.read(lambda url: gh_api.answer(url, ["upcoming-store.json"]))
+
+    def test_repository_not_seen_is_unreadable(self):
+        with self.assertRaisesRegex(cli.ReleaseUnreadable, "cannot be seen"):
+            self.read(not_found)
+
+    def test_listing_fails_is_unreadable(self):
+        with self.assertRaisesRegex(cli.ReleaseUnreadable, "could not be listed"):
+            self.read(server_error)
+
+    def test_unreadable_store_stops_load_store(self):
+        def get(url, timeout=0):
+            if (api := gh_api.answer(url, ["upcoming-store.json"])) is not None:
+                return api
+            raise not_found(url)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(RuntimeError, "not writing a smaller store"):
+                cli.load_store("upcoming-store.json", Path(tmp), get)
 
 
 if __name__ == "__main__":
