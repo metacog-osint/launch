@@ -243,6 +243,16 @@
           <span><span class="sw g-ru"></span>Russia</span><span><span class="sw g-other"></span>Others</span>
         </p>
         <div class="h-timeline" id="h-timeline"></div>
+        <details class="h-chart" id="h-chart">
+          <summary>Chart these launches</summary>
+          <p class="small h-chart-ctl">
+            <label>Count by <select id="h-chart-by"></select></label>
+            <label>Split by <select id="h-chart-split"></select></label>
+          </p>
+          <div id="h-chart-out"></div>
+        </details>
+        <section class="h-cmp" id="h-cmp" aria-label="Compare launches" hidden></section>
+        <p class="visually-hidden" id="h-cmp-status" aria-live="polite"></p>
         <div class="tbl-wrap h-listwrap" id="h-list"></div>
         <p><button type="button" id="h-more" class="chip-btn" hidden></button></p>
         <p class="small muted">How a flight path is estimated: from the bearing to the launch's closure areas; else
