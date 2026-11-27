@@ -45,6 +45,9 @@ PUBLIC_RULES = (
     ("an email address", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")),
     ("a local path", re.compile(r"(?i)(?<![A-Za-z])[A-Z]:[\\/]+(?:Users|Projects)\b|(?<![\w.])/[a-z]/(?:Users|Projects)\b")),
 )
+# The copyright line the licence files carry (NOTICE, README.md) names its holder; only that line is set aside.
+COPYRIGHT_FILES = ("NOTICE", "README.md")
+COPYRIGHT_LINE = re.compile(r"Copyright (?:©|\(C\)) \d{4} [^,\n]{2,60}, The Intelligence Company\.")
 _WORD = re.compile(r"[^\W\d_]+")
 _LETTER = re.compile(r"[^\W\d_]")
 _CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")
@@ -127,6 +130,8 @@ def scan(paths: list[str], root: Path = ROOT, private: dict | None = None) -> tu
             text = p.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        if rel in COPYRIGHT_FILES:
+            text = COPYRIGHT_LINE.sub("", text)
         for rule, n in hits(text, private).items():
             (shared if rel.startswith(SHARED) else fail).append((rel, rule, n))
     return fail, shared

@@ -39,6 +39,19 @@ class Rules(unittest.TestCase):
         self.assertEqual(found, {"private term 1": 1, "a listed person": 1})
         self.assertIsNone(privacy.private_terms(Path("no/such/terms.json")))
 
+    def test_only_the_copyright_line_is_set_aside_in_licence_files(self):
+        word_sha = frozenset({privacy.sha("zebrafish")})
+        line = "Copyright © 2026 Zebrafish Quux, The Intelligence Company."
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "NOTICE").write_text(line + "\n", encoding="utf-8")
+            (root / "README.md").write_text(line + " Zebrafish wrote this.\n", encoding="utf-8")
+            (root / "docs.md").write_text(line + "\n", encoding="utf-8")
+            real = privacy.hits
+            with mock.patch.object(privacy, "hits", lambda t, pr=None: real(t, pr, word_sha=word_sha)):
+                fail, _ = privacy.scan(["NOTICE", "README.md", "docs.md"], root)
+        self.assertEqual(fail, [("README.md", "a listed name", 1), ("docs.md", "a listed name", 1)])
+
     def test_shared_copies_are_reported_apart(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
