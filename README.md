@@ -26,6 +26,13 @@ python tools/serve.py                  # site/ on http://127.0.0.1:8771 with the
 `.github/workflows/update.yml` runs the tests, collect, build and check every hour and on every push to `main`,
 then deploys `site/` to Cloudflare Pages.
 
+## Checking a downloaded copy
+
+Each release (`ledger` and `ledger-YYYY-qN`) carries `SHA256SUMS` and `launch-manifest.json`, listing every file in
+it with its size and SHA-256. Download `SHA256SUMS` beside the files, then run
+`sha256sum -c SHA256SUMS --ignore-missing` (Linux), `shasum -a 256 -c SHA256SUMS --ignore-missing` (macOS), or compare
+`Get-FileHash <file> -Algorithm SHA256` (PowerShell).
+
 ## Licence
 
 Copyright © 2026 Thomas Brummer, The Intelligence Company. Launch's code is licensed under the GNU Affero General
