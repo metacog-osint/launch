@@ -9,6 +9,8 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+
+import gh_api
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -52,6 +54,8 @@ def ll2(i, net, vehicle="Falcon 9 Block 5", location="Vandenberg SFB, CA, USA", 
 
 
 def no_release(url, timeout=120):
+    if (api := gh_api.answer(url)) is not None:   # the release is listed without the asset: a first run
+        return api
     raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
 
 

@@ -10,6 +10,8 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+
+import gh_api
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -291,6 +293,8 @@ class Wiring(unittest.TestCase):
                     if isinstance(body, Exception):
                         raise body
                     return body
+            if (api := gh_api.answer(url)) is not None:   # release listed without the asset: no copy yet
+                return api
             raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
         return get
 

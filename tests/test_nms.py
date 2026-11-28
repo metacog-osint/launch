@@ -3,6 +3,8 @@ import json
 import sys
 import unittest
 import urllib.error
+
+import gh_api
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -245,6 +247,8 @@ class Ledger(unittest.TestCase):
 
     def test_failed_lane_keeps_the_carried_copy_at_its_read_time(self):
         def none(url, timeout=0):
+            if (api := gh_api.answer(url)) is not None:   # release listed without the asset: no copy yet
+                return api
             raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
         st, led = self.lane(none, lane={"status": "failed", "from_previous": True,
                                         "fetched_at": "2026-11-18T23:30:00Z"})
@@ -254,6 +258,8 @@ class Ledger(unittest.TestCase):
 
     def test_first_run_404(self):
         def none(url, timeout=0):
+            if (api := gh_api.answer(url)) is not None:   # release listed without the asset: no copy yet
+                return api
             raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
         st, led = self.lane(none)
         self.assertEqual(led["n"], 1)

@@ -34,7 +34,8 @@ name: update
 # fails only that lane, which keeps its last good copy until the next run. Their stores
 # (the multi-source schedule, the LL2 ledger and the side-by-side check with Orbit) are kept for good on this
 # repository's public release `ledger`, uploaded after collect; collect reads them back from there (a 404 is a
-# first run; anything else with no local copy stops the run). That is why this job may write contents.
+# first run only when the GitHub API, read with the job's token, lists the release without that asset; anything else
+# with no local copy stops the run). That is why this job may write contents.
 #
 # Private archive (the last step): every run's source replies, run state, history/ and deployed site/ also go to the
 # PRIVATE repo metacog-osint/tic-archive (tools/tic_archive.py), where nothing is replaced or deleted. When the
@@ -138,6 +139,8 @@ jobs:
       - name: Live collection (a failed lane keeps its last good copy and says so on the page)
         id: collect
         run: python tools/launch.py collect
+        env:
+          GH_TOKEN: ${{ github.token }}   # confirms a release asset's 404 against the release listing
       - name: Keep the schedule, the LL2 ledger and the comparison for good (release `ledger`)
         id: stores
         env:

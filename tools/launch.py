@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -46,6 +48,72 @@ STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "
 # launch-ledger.json beside ll2-ledger.json; dated copies go to release `ledger-YYYY-qN` (kept for good).
 RELEASE_COPY = {"ledger": "launch-ledger.json", "closures": "nms-closures.json"}
 DATED_DAYS = 7   # how far back update_ledger looks for the newest dated copy (one is uploaded a day)
+# A release asset's download URL answers 404 both when the asset is absent and when the repository cannot be seen (a
+# private repository read without a token). A 404 counts as "no copy yet" only when the GitHub API, read with the
+# token in GH_TOKEN or GITHUB_TOKEN, lists the release without that asset, or shows the repository without that
+# release. Anything else is ReleaseUnreadable, which the store and ledger guards treat as unreadable.
+RELEASES = ll2ledger.RELEASE.rstrip("/").rsplit("/", 1)[0] + "/"   # .../releases/download/
+REPO = "/".join(RELEASES.split("/")[3:5])                          # owner/name
+API = "https://api.github.com/repos/" + REPO
+
+
+class ReleaseUnreadable(Exception):
+    """A release asset answered 404 and its absence could not be confirmed: not a first run."""
+
+
+def api_get(url: str, timeout: int = 60) -> bytes:
+    """GET a GitHub API URL, with the token in GH_TOKEN or GITHUB_TOKEN when one is set."""
+    headers = {"User-Agent": fetch.UA, "Accept": "application/vnd.github+json"}
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as resp:
+        return resp.read()
+
+
+_LISTED: dict = {}
+
+
+def _listing(tag: str, lister) -> tuple[set | None, str | None]:
+    """(asset names of release `tag`, or None when the repository is seen and has no such release; why it could not
+    be told, or None). Read once per tag and lister."""
+    key = (lister, tag)
+    if key not in _LISTED:
+        try:
+            doc = json.loads(lister(f"{API}/releases/tags/{tag}", 60))
+            _LISTED[key] = ({a.get("name") for a in doc.get("assets") or []}, None)
+        except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "code", None) != 404:
+                _LISTED[key] = (None, f"release {tag} could not be listed ({type(exc).__name__}: {exc})")
+            else:
+                try:
+                    json.loads(lister(API, 60))["full_name"]
+                    _LISTED[key] = (None, None)   # the repository is seen and has no such release yet
+                except Exception as exc2:  # noqa: BLE001
+                    _LISTED[key] = (None, f"release {tag} is not listed and the repository {REPO} cannot be seen "
+                                          f"({type(exc2).__name__}: {exc2})")
+    return _LISTED[key]
+
+
+def release_get(tag: str, name: str, data_dir: Path, getter=None, source_id: str = "launch-release") -> bytes:
+    """The bytes of asset `name` of release `tag`. A 404 is raised as is only when the asset is confirmed absent;
+    otherwise as ReleaseUnreadable. Tests pass `getter`, which then answers the API reads too."""
+    try:
+        body, _ = fetch.fetch(source_id, f"{RELEASES}{tag}/{name}", data_dir / "raw", "json", getter=getter, gz=True)
+        return body
+    except Exception as exc:  # noqa: BLE001
+        if getattr(exc, "code", None) != 404:
+            raise
+        assets, why = _listing(tag, getter or api_get)
+        if why is None and assets is not None and name in assets:
+            why = f"release {tag} lists {name}"
+        if why is not None:
+            raise ReleaseUnreadable(f"{tag}/{name} answered 404 but {why}") from exc
+        raise
+
+
+def _ledger_tag() -> str:
+    return ll2ledger.RELEASE.rstrip("/").rsplit("/", 1)[1]
 SITE_DATA = "https://launch.theintelligence.company/data/"
 # Payload reference rates and their scoring ledger: git-ignored, never published, never pruned (payloads.py).
 PAYLOADS_DIR = ROOT / "history" / "payloads_source"
@@ -239,8 +307,7 @@ def load_store(name: str, data_dir: Path, getter=None, must: bool = True) -> tup
     smaller store is never written over the release's."""
     local = _read_json(data_dir / name)
     try:
-        body, _ = fetch.fetch("launch-release", ll2ledger.RELEASE + name, data_dir / "raw", "json", getter=getter,
-                              gz=True)
+        body = release_get(_ledger_tag(), name, data_dir, getter)
         return local, json.loads(body)
     except Exception as exc:  # noqa: BLE001
         if must and local is None and getattr(exc, "code", None) != 404:
@@ -250,10 +317,10 @@ def load_store(name: str, data_dir: Path, getter=None, must: bool = True) -> tup
 
 
 def release_copy(name: str, data_dir: Path, getter=None) -> tuple[dict | None, Exception | None]:
-    """(the release copy of `name`, or None; the error when it could not be read). A 404 is no copy yet."""
+    """(the release copy of `name`, or None; the error when it could not be read). A 404 is no copy yet (see
+    release_get: an unconfirmed 404 comes back as ReleaseUnreadable)."""
     try:
-        body, _ = fetch.fetch("launch-release", ll2ledger.RELEASE + name, data_dir / "raw", "json", getter=getter,
-                              gz=True)
+        body = release_get(_ledger_tag(), name, data_dir, getter)
         doc = gnss.published_json(body)
         return doc, None
     except Exception as exc:  # noqa: BLE001
@@ -262,18 +329,17 @@ def release_copy(name: str, data_dir: Path, getter=None) -> tuple[dict | None, E
 
 def dated_copy(stem: str, now_iso: str, data_dir: Path, getter=None):
     """(the newest readable dated copy `<stem>-YYYY-MM-DD.json` of the last DATED_DAYS days in release
-    `ledger-YYYY-qN`, or None; its day; the first error that was not a 404, or None)."""
+    `ledger-YYYY-qN`, or None; its day; the first error that was not a confirmed absence, or None)."""
     try:
         day0 = datetime.fromisoformat(str(now_iso).replace("Z", "+00:00")).date()
     except ValueError:
         day0 = datetime.now(timezone.utc).date()
-    base = ll2ledger.RELEASE.rstrip("/").rsplit("/", 1)[0] + "/"   # .../releases/download/
     err = None
     for i in range(DATED_DAYS):
         d = day0 - timedelta(days=i)
-        url = f"{base}ledger-{d.year}-q{(d.month - 1) // 3 + 1}/{stem}-{d.isoformat()}.json"
         try:
-            body, _ = fetch.fetch("launch-release-dated", url, data_dir / "raw", "json", getter=getter, gz=True)
+            body = release_get(f"ledger-{d.year}-q{(d.month - 1) // 3 + 1}", f"{stem}-{d.isoformat()}.json",
+                               data_dir, getter, "launch-release-dated")
             return gnss.published_json(body), d.isoformat(), None
         except Exception as exc:  # noqa: BLE001
             if err is None and getattr(exc, "code", None) != 404:

@@ -27,6 +27,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+import gh_api
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "doctrine" / "kit" / "python"))
@@ -177,6 +179,8 @@ def network(url: str, timeout: int = 0) -> bytes:
                            "caught_up": True, "updated_at": "2024-01-03T00:00:00Z"}).encode()
     if url.startswith(ll2ledger.PREVIOUS):
         return page(rec(2, "2024-01-02T00:00:00Z"), rec(3, "2024-01-03T00:00:00Z"))
+    if (api := gh_api.answer(url)) is not None:   # every release listed empty: a 404 is no copy yet
+        return api
     raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
 
 
@@ -670,9 +674,10 @@ class TestArchiveOlderThanRelease(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.td, ignore_errors=True)
 
-    def run_case(self, name: str, listed, release_up: bool, lost: tuple[str, ...] = ()):
+    def run_case(self, name: str, listed, release_up: bool, lost: tuple[str, ...] = (), private: bool = False):
         """A new run (no Actions cache) after the fill step. listed: what the release listing gives (None: it
-        fails). release_up: collect's reads of release `ledger` answer, or fail with a 502. lost: assets gone."""
+        fails). release_up: collect's reads of release `ledger` answer, or fail with a 502. lost: assets gone.
+        private: the repository is private, so every download URL answers 404 while the API lists the assets."""
         root = self.td / name
         for top in ("doctrine", "site_src", "history"):
             shutil.copytree(self.base / top, root / top)
@@ -680,6 +685,10 @@ class TestArchiveOlderThanRelease(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
         def net(url: str, timeout: int = 0) -> bytes:
+            if (api := gh_api.answer(url, [a for a in self.release if a not in lost])) is not None:
+                return api
+            if private and "/releases/download/" in url:
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
             if url.startswith(ll2ledger.RELEASE):
                 if not release_up:
                     raise urllib.error.HTTPError(url, 502, "Bad Gateway", {}, None)
@@ -700,6 +709,11 @@ class TestArchiveOlderThanRelease(unittest.TestCase):
 
     def test_release_listed_then_unreadable_stops_the_run(self):
         self.assert_stops_without_writing_a_store(*self.run_case("listed-then-502", list(RELEASE_ALL), False))
+
+    def test_private_repo_every_download_404_stops_the_run(self):
+        # The fill step lists every store (the Actions token sees a private repository) and fills none; collect's
+        # download reads all answer 404. Counting those as a first run would start the stores afresh.
+        self.assert_stops_without_writing_a_store(*self.run_case("private", list(RELEASE_ALL), True, private=True))
 
     def test_release_listing_fails_stops_the_run(self):
         self.assert_stops_without_writing_a_store(*self.run_case("listing-502", None, False))
