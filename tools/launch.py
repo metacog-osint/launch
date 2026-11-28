@@ -7,6 +7,8 @@
     python tools/launch.py build           # site/ from history/ and data/snapshot.json
     python tools/launch.py check           # registers + feed lint + public gate + privacy check
     python tools/launch.py payloads        # reference rates for unknown payloads -> history/payloads_source/ (private)
+                                           # (payloads and nfc|joey|wayback fetch then put their private-archive
+                                           #  lane, payloads or copies, with the local gh login; --no-archive skips)
 
 collect never makes data up. A failed lane keeps its last good copy (from_previous) or stays empty, and the
 snapshot's "lanes" block says which.
@@ -47,6 +49,33 @@ DATED_DAYS = 7   # how far back update_ledger looks for the newest dated copy (o
 SITE_DATA = "https://launch.theintelligence.company/data/"
 # Payload reference rates and their scoring ledger: git-ignored, never published, never pruned (payloads.py).
 PAYLOADS_DIR = ROOT / "history" / "payloads_source"
+# Folders that exist only on the machine that runs these commands go to the private archive (tools/tic_archive.py,
+# metacog-osint/tic-archive) as soon as a command writes them: lane -> (sources, include globs). Only changed files
+# upload, and a snapshot identical to the lane's previous one is skipped.
+ARCHIVE_PROGRAM = "launch"
+
+
+def archive_lanes() -> dict:
+    hist = ROOT / "history"
+    return {
+        "copies": ([f"history={hist}"], ["history/nfc_source/*", "history/joey_source/*",
+                                         "history/wayback_source/*", "history/*-LICENSE.txt"]),
+        "payloads": ([str(PAYLOADS_DIR)], []),
+    }
+
+
+def archive_lane(lane: str) -> int:
+    """Best effort, after the local write: put the lane's folders into the private archive with the local gh login.
+    Returns 0, or 1 after printing an error; the local files are already written either way."""
+    sys.path.append(str(Path(__file__).resolve().parent))   # after ROOT: this file must not shadow the package
+    import tic_archive as ta
+    src, include = archive_lanes()[lane]
+    try:
+        ta.Archive(ta.GhStore(), ARCHIVE_PROGRAM, lane).put(src, include)
+        return 0
+    except Exception as e:   # ArchiveError, OSError, a failed gh call: the run's own output stays written
+        ta.error(f"archive put {ARCHIVE_PROGRAM}/{lane} failed after the local write: {e}")
+        return 1
 
 
 def dump(obj, compact: bool = False) -> str:
@@ -856,6 +885,7 @@ def main(argv=None) -> int:
     pl = sub.add_parser("payloads", help="reference rates for upcoming launches with an unknown payload, from the "
                                          "published data -> history/payloads_source/ (git-ignored, private)")
     pl.add_argument("--data", help="read launches.json and snapshot.json from this folder instead of the site")
+    pl.add_argument("--no-archive", action="store_true", help="skip the private-archive put of the payloads lane")
     sub.add_parser("timing", help="closure opening to launch, by site, from the built site/data/launches.json "
                                   "-> history/timing.json")
     sub.add_parser("incbias", help="implied-inclination calibration samples, from the built site/data/launches.json "
@@ -863,26 +893,29 @@ def main(argv=None) -> int:
     n = sub.add_parser("nfc", help="NotamForChina: fetch its files at the pinned commit, or build history/nfc.json")
     n.add_argument("step", choices=["fetch", "build", "links"],
                    help="links: its list of forum thread links -> history/nsf_links.json")
+    n.add_argument("--no-archive", action="store_true", help="skip the private-archive put after fetch or links")
     j = sub.add_parser("joey", help="Joey0609/notams: fetch its month files at the pinned commit, or build history/joey.json")
     j.add_argument("step", choices=["fetch", "build"])
+    j.add_argument("--no-archive", action="store_true", help="skip the private-archive put after fetch")
     w = sub.add_parser("wayback", help="Internet Archive copies of FAA space-operations TFRs and NGA warnings")
     w.add_argument("step", choices=["fetch", "build"])
     w.add_argument("--since", help="fetch TFR detail pages listed from this date (YYYY-MM-DD) only; newest first")
+    w.add_argument("--no-archive", action="store_true", help="skip the private-archive put after fetch")
     a = ap.parse_args(argv)
     if a.cmd == "payloads":
-        res = run_payloads(Path(a.data) if a.data else None)
+        res = run_payloads(Path(a.data) if a.data else None, out=PAYLOADS_DIR)
         for r in res["results"]:
             print(f"{(r['net'] or '')[:16]}  {r['vehicle']} from {r['site']}  ({r['label']})")
             for s in r["steps"]:
                 top = "; ".join(f"{x['class']} {x['k']}/{s['n']} ({x['lo']:.0%}-{x['hi']:.0%})" for x in s["series"][:4])
                 print(f"    {s['step']}: n={s['n']}{'' if s['used'] else ' (too few, not used)'}  {top}")
         print("Payloads:", {k: v for k, v in res.items() if k != "results"}, "->", PAYLOADS_DIR)
-        return 0
+        return 0 if a.no_archive else archive_lane("payloads")
     if a.cmd == "wayback":
         src = ROOT / "history" / "wayback_source"
         if a.step == "fetch":
             print("Wayback fetch:", wayback.fetch(src, log=lambda m: print(m, flush=True), since=a.since))
-            return 0
+            return 0 if a.no_archive else archive_lane("copies")
         doc = wayback.build(src)
         print("Wayback build:", wayback.summary(doc))
         (ROOT / "history" / "wayback.json").write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
@@ -904,7 +937,7 @@ def main(argv=None) -> int:
         src = ROOT / "history" / "joey_source"
         if a.step == "fetch":
             print("Joey0609/notams fetch:", joey.fetch(src))
-            return 0
+            return 0 if a.no_archive else archive_lane("copies")
         doc = joey.build(src)
         print("Joey0609/notams build:", joey.summary(doc))
         (ROOT / "history" / "joey.json").write_text(dump(doc, compact=True), encoding="utf-8", newline="\n")
@@ -919,10 +952,10 @@ def main(argv=None) -> int:
             doc = nsf.build(src)
             print("NotamForChina forum links:", nsf.summary(doc))
             (ROOT / "history" / "nsf_links.json").write_text(dump(doc), encoding="utf-8", newline="\n")
-            return 0
+            return 0 if a.no_archive else archive_lane("copies")
         if a.step == "fetch":
             print("NotamForChina fetch:", nfc.fetch(src))
-            return 0
+            return 0 if a.no_archive else archive_lane("copies")
         doc = nfc.build(src)
         led = json.loads((ROOT / "history" / "ledger.json").read_text(encoding="utf-8"))
         led = led if isinstance(led, list) else led.get("launches", [])
