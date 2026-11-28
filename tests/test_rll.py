@@ -11,7 +11,7 @@ import unittest
 import urllib.error
 
 import gh_api
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -174,7 +174,9 @@ class Wiring(unittest.TestCase):
 
         def get(url, timeout=120):
             seen.append(url)
-            return reply(launch(1, "2026-11-28T00:00Z"))
+            # The lane keeps launches ahead of the real clock, so the fixture is dated from it.
+            soon = datetime.now(timezone.utc) + timedelta(days=1)
+            return reply(launch(1, soon.strftime("%Y-%m-%dT%H:%MZ")))
         with tempfile.TemporaryDirectory() as tmp:
             out, recs = cli._lane_rll(Path(tmp), {}, get)
         self.assertEqual(seen, [rll.API])
