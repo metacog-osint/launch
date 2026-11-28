@@ -45,9 +45,12 @@ STORE = {"upcoming": "upcoming-store.json", "ll2": ll2ledger.ASSET, "compare": "
 # The launch ledger and the NMS closure ledger are on the release too (ideas#222, 24 Nov 2026): before that they
 # lived only on the deployed site and in the Actions cache. The release copy is a third source in their union, so
 # a site that answers 404 or an emptied cache restores from it, not from empty. data/ledger.json is uploaded as
-# launch-ledger.json beside ll2-ledger.json; dated copies go to release `ledger-YYYY-qN` (kept for good).
+# launch-ledger.json beside ll2-ledger.json. Until 27 Nov 2026 a dated copy a day also went to the public release
+# `ledger-YYYY-qN`; those assets stay and are still read. Every run's ledger now goes only to the private archive's
+# lane `state` (the workflow's last step), which update_ledger reads when no release or dated copy can be read.
 RELEASE_COPY = {"ledger": "launch-ledger.json", "closures": "nms-closures.json"}
-DATED_DAYS = 7   # how far back update_ledger looks for the newest dated copy (one is uploaded a day)
+DATED_DAYS = 7   # how far back update_ledger looks for the newest dated copy in release `ledger-YYYY-qN`
+ARCHIVE_STATE_LANE = "state"   # the private archive's lane that holds data/ as each successful run left it
 # A release asset's download URL answers 404 both when the asset is absent and when the repository cannot be seen (a
 # private repository read without a token). A 404 counts as "no copy yet" only when the GitHub API, read with the
 # token in GH_TOKEN or GITHUB_TOKEN, lists the release without that asset, or shows the repository without that
@@ -242,11 +245,13 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
     ledger's launches since GCAT's newest launch go in as provisional records (catalog.flown_from_ll2), which a GCAT
     launch joins once GCAT lists it. The newest dated copy of the last DATED_DAYS days (release `ledger-YYYY-qN`) is
     read too: a failed `gh release upload --clobber` leaves the release copy missing (a 404), and the dated copy still
-    holds what it held. The workflow uploads what is written here over the release's copy and that day's dated copy,
-    so when the release copy is unreadable (anything but a 404, which is no copy yet) and no dated copy can be read,
-    the run stops before writing, as the NMS closure ledger and the Ascent stores do: the local copy may be older than
-    the release (a restored or stale cache), and so may the published copy (a run can upload the release copy and then
-    fail to deploy). The run also stops if the merged ledger lacks a launch id any copy it read holds."""
+    holds what it held. When neither the release copy nor a dated copy can be read, the newest `ledger.json` in the
+    private archive's lane `state` is read instead (archived_copy). The workflow uploads what is written here over the
+    release's copy, so when the release copy is unreadable (anything but a 404, which is no copy yet) and neither a
+    dated nor an archived copy can be read, the run stops before writing, as the NMS closure ledger and the Ascent
+    stores do: the local copy may be older than the release (a restored or stale cache), and so may the published copy
+    (a run can upload the release copy and then fail to deploy). The run also stops if the merged ledger lacks a
+    launch id any copy it read holds."""
     def read(p: Path):
         try:
             return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
@@ -262,11 +267,16 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
         status = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:200], "failed_at": snap["generated_at"]}
     released, rel_exc = release_copy(RELEASE_COPY["ledger"], data_dir, getter)   # the durable copy
     dated, dated_day, dated_exc = dated_copy("launch-ledger", snap["generated_at"], data_dir, getter)
-    if released is None and dated is None and rel_exc is not None and getattr(rel_exc, "code", None) != 404:
+    archived, archived_at, arch_exc = None, None, None
+    if released is None and dated is None:
+        archived, archived_at, arch_exc = archived_copy("ledger.json")
+    if (released is None and dated is None and archived is None and rel_exc is not None
+            and getattr(rel_exc, "code", None) != 404):
         why = f"; the dated copies: {_err(dated_exc)}" if dated_exc else ""
+        why += f"; the private archive: {_err(arch_exc)}" if arch_exc else ""
         raise RuntimeError(f"launch ledger: the release copy is unreadable ({type(rel_exc).__name__}: {rel_exc}) and "
-                           f"no dated copy of the last {DATED_DAYS} days can be read{why}; not writing a ledger that "
-                           "could be smaller than the release's") from rel_exc
+                           f"no dated copy of the last {DATED_DAYS} days and no archived copy can be read{why}; not "
+                           "writing a ledger that could be smaller than the release's") from rel_exc
     orb = snap.get("orbit") or {}
     now = snap["generated_at"]
     gcat_now = catalog.from_orbit(orb.get("launches") or [], now)
@@ -277,9 +287,10 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
              + catalog.flown_from_ll2(since_gcat, now),
              "closures": catalog.closures_from_matches(snap.get("matches") or [], areas, now),
              "sites": _sites_from_orbit(orb.get("launches") or [])}
-    read_ids = {r["id"] for lg in (base, prev, published, released, dated) if lg for r in lg.get("launches") or []}
+    read_ids = {r["id"] for lg in (base, prev, published, released, dated, archived) if lg
+                for r in lg.get("launches") or []}
     before = len(read_ids)
-    led = catalog.merge(base, published, released, dated, prev, fresh)
+    led = catalog.merge(base, published, released, dated, archived, prev, fresh)
     led["generated_at"] = now
     lost = read_ids - {r["id"] for r in led["launches"]}
     if lost:
@@ -289,6 +300,7 @@ def update_ledger(snap: dict, areas: list[dict], data_dir: Path, root: Path, get
     status.update({"records": len(led["launches"]), "added": len(led["launches"]) - before,
                    "base": len((base or {}).get("launches") or []), "cache": prev is not None,
                    "published": published is not None, "release": released is not None, "dated": dated_day,
+                   "archive": archived_at,
                    "gcat_last": gcat_last or None,
                    "ll2_since_gcat": len(since_gcat)})
     return status
@@ -345,6 +357,52 @@ def dated_copy(stem: str, now_iso: str, data_dir: Path, getter=None):
             if err is None and getattr(exc, "code", None) != 404:
                 err = exc
     return None, None, err
+
+
+def _archive_store():
+    """The private archive's store, read with the token in ARCHIVE_TOKEN (never GH_TOKEN, which collect keeps for
+    the release listings of this repository), or None when that token is not set."""
+    token = os.environ.get("ARCHIVE_TOKEN")
+    if not token:
+        return None
+    import subprocess
+    sys.path.append(str(Path(__file__).resolve().parent))   # after ROOT: this file must not shadow the package
+    import tic_archive as ta
+    env = {**os.environ, "GH_TOKEN": token}
+
+    def run(args: list[str]) -> str:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+        if r.returncode != 0:
+            raise ta.ArchiveError(f"gh {args[0]} {args[1] if len(args) > 1 else ''} failed: {r.stderr.strip()[:400]}")
+        return r.stdout
+    return ta.GhStore(runner=run)
+
+
+def archived_copy(path: str, store=None):
+    """(file `path` of data/ in the newest snapshot of the private archive's lane `state`, or None; that snapshot's
+    stamp; the error when it could not be read, or None). Only that one file is downloaded and its sha256 checked."""
+    import hashlib
+    import tarfile
+    import tempfile
+    sys.path.append(str(Path(__file__).resolve().parent))
+    import tic_archive as ta
+    try:
+        store = store if store is not None else _archive_store()
+        if store is None:
+            return None, None, None
+        with tempfile.TemporaryDirectory(prefix="launch-archive-") as td:
+            work = Path(td)
+            doc = ta.Archive(store, ARCHIVE_PROGRAM, ARCHIVE_STATE_LANE).latest(work)
+            f = next((f for f in (doc or {}).get("files") or [] if f.get("path") == path), None)
+            if f is None:
+                return None, None, None
+            with tarfile.open(store.download(f["release"], f["asset"], work), "r:gz") as tar:
+                data = tar.extractfile(f["member"]).read()
+            if hashlib.sha256(data).hexdigest() != f["sha256"]:
+                raise ta.ArchiveError(f"sha256 mismatch for {path} in {f['asset']}")
+            return json.loads(data), doc.get("stamp"), None
+    except Exception as exc:  # noqa: BLE001
+        return None, None, exc
 
 
 def _write(p: Path, doc) -> None:

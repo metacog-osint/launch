@@ -310,7 +310,7 @@ class TestWorkflowLanes(unittest.TestCase):
                          cached)
         for p in cached:
             self.assertTrue(p.startswith("data/") and not p.startswith(("data/raw", "data/release-copy")), p)
-        # Release `ledger` is replaced each run (--clobber), and so is a day's dated copy: data/ holds every one.
+        # Release `ledger` is replaced each run (--clobber), and no dated copy is made any more: data/ holds every one.
         stores = step("Keep the schedule, the LL2 ledger and the comparison")
         self.assertIn("for f in upcoming-store.json ll2-ledger.json ascent-compare.json; do", stores)
         self.assertIn('files="$files data/$f"', stores)

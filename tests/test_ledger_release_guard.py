@@ -1,7 +1,8 @@
 """tools/launch.py update_ledger: a run that can read neither the release copy of the launch ledger (anything but a
 404) nor a dated copy of the last days stops before writing, so the workflow never uploads a possibly smaller ledger
 over the release's copy and that day's dated copy. The newest dated copy is read as one more source, so a release copy
-lost to a failed upload (a 404) loses nothing."""
+lost to a failed upload (a 404) loses nothing. With neither a release nor a dated copy, the newest archived copy (the
+private archive's lane `state`) stands in for them, and the run stops only when that cannot be read either."""
 import importlib.util
 import json
 import sys
@@ -15,6 +16,8 @@ import gh_api
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.append(str(ROOT / "tools"))
+import tic_archive as ta  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("launch_cli_ledger_guard", ROOT / "tools" / "launch.py")
 cli = importlib.util.module_from_spec(_spec)
@@ -34,11 +37,13 @@ def server_error(url):
 
 
 class LedgerReleaseGuard(unittest.TestCase):
-    def run_ledger(self, release, site, cached=None, dated=not_found, listed=()):
+    def run_ledger(self, release, site, cached=None, dated=not_found, listed=(), archive=None):
         """release / site / dated: a ledger dict to serve, or a function url -> exception to raise. `dated` may also
         be {day: ledger}, the dated copies by day (others 404). listed: the asset names the GitHub API lists for
-        every release (default none, so a 404 is no copy yet)."""
+        every release (default none, so a 404 is no copy yet). archive: None (no archive token), a ledger dict to put
+        in a local archive's lane `state` as data/ledger.json, or an exception the archive store raises."""
         self.urls = []
+        self.archive_reads = 0
 
         def get(url, timeout=0):
             self.urls.append(url)
@@ -61,8 +66,24 @@ class LedgerReleaseGuard(unittest.TestCase):
             data.mkdir()
             if cached is not None:
                 (data / "ledger.json").write_text(json.dumps(cached), encoding="utf-8")
+            store = None
+            if isinstance(archive, dict):
+                src = root / "archived-data"
+                src.mkdir()
+                (src / "ledger.json").write_text(json.dumps(archive), encoding="utf-8")
+                (src / "snapshot.json").write_text("{}", encoding="utf-8")
+                store = ta.DirStore(root / "archive")
+                ta.Archive(store, "launch", "state").put(src)
+            elif archive is not None:
+                store = mock.Mock()
+                store.tags.side_effect = archive
+
+            def archive_store():
+                self.archive_reads += 1
+                return store
             snap = {"generated_at": "2026-11-27T06:11:00Z", "orbit": {}, "matches": []}
-            st = cli.update_ledger(snap, [], data, root, get)
+            with mock.patch.object(cli, "_archive_store", archive_store):
+                st = cli.update_ledger(snap, [], data, root, get)
             return st, json.loads((data / "ledger.json").read_text(encoding="utf-8"))
 
     def test_release_and_dated_unreadable_stops_even_with_a_local_copy(self):
@@ -109,6 +130,31 @@ class LedgerReleaseGuard(unittest.TestCase):
         dated = [u for u in self.urls if "/download/ledger-" in u]
         self.assertTrue(dated[0].endswith("/ledger-2026-q4/launch-ledger-2026-11-27.json"), dated[0])
         self.assertTrue(dated[1].endswith("/ledger-2026-q4/launch-ledger-2026-11-26.json"), dated[1])
+
+    def test_release_dated_and_archive_unreadable_stops(self):
+        # The archive token is set but the archive cannot be read: nothing is left to stand in for the release.
+        with self.assertRaisesRegex(RuntimeError, "no archived copy can be read.*the private archive: ArchiveError"):
+            self.run_ledger(server_error, server_error, cached={"launches": [rec(1)]}, dated=server_error,
+                            archive=ta.ArchiveError("gh api failed"))
+        # No archive token at all: the same stop as before the archive existed.
+        with self.assertRaisesRegex(RuntimeError, "release copy is unreadable"):
+            self.run_ledger(server_error, server_error, cached={"launches": [rec(1)]}, dated=server_error)
+
+    def test_release_and_dated_unreadable_restores_from_the_archive(self):
+        """The release copy is unreadable and no dated copy is left (they are no longer made): the newest archived
+        copy is read, its launches are kept, and the run goes on."""
+        st, led = self.run_ledger(server_error, server_error, cached={"launches": [rec(1)]}, dated=server_error,
+                                  archive={"launches": [rec(1), rec(6), rec(7)]})
+        self.assertEqual((st["release"], st["dated"]), (False, None))
+        self.assertRegex(st["archive"], r"^\d{8}T\d{6}Z$")
+        self.assertEqual({r["id"] for r in led["launches"]}, {"gcat:2026-001", "gcat:2026-006", "gcat:2026-007"})
+
+    def test_archive_is_not_read_when_the_release_or_a_dated_copy_is(self):
+        st, _ = self.run_ledger({"launches": [rec(1)]}, server_error, archive=RuntimeError("must not be read"))
+        self.assertEqual((st["release"], st["archive"], self.archive_reads), (True, None, 0))
+        st, _ = self.run_ledger(server_error, server_error, dated={"2026-11-26": {"launches": [rec(1)]}},
+                                archive=RuntimeError("must not be read"))
+        self.assertEqual((st["dated"], st["archive"], self.archive_reads), ("2026-11-26", None, 0))
 
     def test_a_merge_that_drops_an_id_stops(self):
         with mock.patch.object(cli.catalog, "merge", lambda *lgs: {"launches": [rec(1)]}):
